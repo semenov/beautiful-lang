@@ -22,4 +22,3 @@ pub fn decode<T>() throws -> T
 //     _ => eprint("usage: tool add|list [options]")
 //   }
 pub fn decode_from<T>(args: List<String>) throws -> T
-
