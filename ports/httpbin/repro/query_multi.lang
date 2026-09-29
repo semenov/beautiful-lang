@@ -1,0 +1,11 @@
+// Repeated query parameters: only the last value survives, and the raw query
+// is not available to rebuild it.
+//   curl -s 'localhost:18104/?a=1&a=2'   -> {"a":"2"}  (wanted a way to get ["1","2"])
+import http
+import json
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/", req => http.text(200, "${json.encode(req.query_params)}\n"))
+  try http.serve(router, port: 18104)
+}

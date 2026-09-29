@@ -1,0 +1,14 @@
+// 204 with a body: the body is (rightly) not sent, but content-length still
+// says 15. And 418 has no reason phrase ("HTTP/1.1 418 "); neither do 206, 412,
+// 415, 416, 501. A response without a content type gets text/plain added;
+// content-type "" is sent as an empty header.
+//   curl -si localhost:18103/204 ; curl -si localhost:18103/418 ; curl -si localhost:18103/304
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/204", req => http.text(204, "should be empty"))
+  router.get("/418", req => http.text(418, "I'm a teapot!"))
+  router.get("/304", req => http.Response(status: 304, body: Bytes()))
+  try http.serve(router, port: 18103)
+}

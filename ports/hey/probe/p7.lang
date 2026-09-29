@@ -1,0 +1,12 @@
+import time
+
+fn main() throws {
+  let start = time.now()
+  for i in 0..<10 {
+    try time.sleep(time.millis(100))
+    print("${i}: ${start.elapsed().millis()} ms")
+  }
+  let t = time.now()
+  try time.sleep(time.Duration(nanos: 1000000))
+  print("1ms sleep took ${t.elapsed().nanos} ns")
+}

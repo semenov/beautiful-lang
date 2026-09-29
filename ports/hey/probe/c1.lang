@@ -1,0 +1,13 @@
+import cli
+
+type Options {
+  n: Int = 200
+  h: List<Text> = []
+  disable_keepalive: Bool = false
+  args: List<Text> = []
+}
+
+fn main() throws {
+  let o = try cli.decode<Options>()
+  print("${o.n} ${o.h} ${o.disable_keepalive} ${o.args}")
+}

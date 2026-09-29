@@ -1,0 +1,15 @@
+import http
+import time
+
+fn main() throws {
+  let t = time.now()
+  with res = try http.open(http.ClientRequest(url: "http://127.0.0.1:8099/", method: "HEAD", timeout: 3)) {
+    print("HEAD status ${res.status()} after ${t.elapsed().seconds()} len ${res.header("content-length") ?? "-"}")
+  }
+  print("closed after ${t.elapsed().seconds()}")
+  with res = try http.open(http.ClientRequest(url: "http://127.0.0.1:8099/redirect")) {
+    print("open redirect: ${res.status()} location ${res.header("location") ?? "-"}")
+  }
+  let r = try http.send(http.ClientRequest(url: "http://127.0.0.1:8099/redirect", method: "POST", body: "x".bytes()))
+  print("send redirect POST: ${r.status} ${try r.text()}")
+}

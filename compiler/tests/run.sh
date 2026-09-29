@@ -36,6 +36,18 @@ for f in *.sh; do
   fi
 done
 cd ../run || exit 1
+# the ports (ports/) still compile, and their tests pass
+for d in ../../../ports/*/; do
+  for f in "$d"main.lang "$d"hey.lang; do
+    [ -f "$f" ] || continue
+    if ! (cd "$d" && $LANG_BIN check "$(basename "$f")" >/tmp/lang-port-err 2>&1); then
+      echo "FAIL port $f: doesn't compile"; head -5 /tmp/lang-port-err; fail=1
+    fi
+  done
+  if [ -f "$d"tests.lang ] && ! (cd "$d" && $LANG_BIN test tests.lang >/tmp/lang-port-err 2>&1); then
+    echo "FAIL port ${d}tests.lang"; grep -A3 FAIL /tmp/lang-port-err | head -8; fail=1
+  fi
+done
 # the language's own code is laid out the standard way
 if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then
   echo "FAIL lang fmt --check:"; cat /tmp/lang-fmt-err; fail=1

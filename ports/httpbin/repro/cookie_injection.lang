@@ -1,0 +1,12 @@
+// Cookie values are written as they are: a value from user input can add
+// attributes (here Domain and a second cookie's worth of text).
+//   curl -si localhost:18106/   -> set-cookie: a=x; Domain=evil.example; Path=/; SameSite=Lax; HttpOnly
+// Also: same_site "" writes "SameSite=" instead of leaving it out, and there is no
+// Domain or Expires field.
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/", req => http.text(200, "ok").with_cookie(http.Cookie(name: "a", value: "x; Domain=evil.example")))
+  try http.serve(router, port: 18106)
+}

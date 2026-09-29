@@ -1,0 +1,240 @@
+// A limited implementation of HTTP Digest Authentication (RFC 2617), ported
+// from go-httpbin's httpbin/digest package. Only the "auth" QOP is handled.
+//
+// The standard library has no MD5, so it is implemented here.
+
+import crypto
+import math
+import time
+
+pub enum Algorithm {
+  Md5
+  Sha256
+}
+
+pub fn algorithm_name(a: Algorithm) -> String {
+  return match a {
+    Md5 => "MD5"
+    Sha256 => "SHA-256"
+  }
+}
+
+type Authorization {
+  algorithm: Algorithm
+  cnonce: String
+  nc: String
+  nonce: String
+  opaque: String
+  qop: String
+  realm: String
+  response: String
+  uri: String
+  username: String
+}
+
+// Whether the Authorization header value is a correct digest answer for
+// the given user and password, for a request with `method` and `uri`.
+pub fn check(header: String, method: String, uri: String, username: String, password: String) -> Bool {
+  if parse_authorization(header) is some(auth) {
+    if auth.username != username {
+      return false
+    }
+    let expected = response(auth, password: password, method: method, uri: uri)
+    return crypto.equal(auth.response.bytes(), expected.bytes())
+  }
+  return false
+}
+
+// A WWW-Authenticate header value for the realm and algorithm.
+pub fn challenge(realm: String, algorithm: Algorithm) -> String {
+  let entropy = crypto.random_bytes(32)
+  let opaque_val = entropy.slice(from: 0, to: 16)
+  let nonce_val = "${time.now().nanos}:${entropy.slice(from: 16, to: 31).hex()}"
+  let opaque = hash(opaque_val, algorithm: Md5)
+  let nonce = hash(nonce_val.bytes(), algorithm: Md5)
+  let name = algorithm_name(algorithm)
+  return "Digest qop=auth, realm=\"${sanitize_realm(realm)}\", algorithm=${name}, nonce=${nonce}, opaque=${opaque}"
+}
+
+fn sanitize_realm(realm: String) -> String {
+  return realm.replace("\"", new: "").replace(",", new: "")
+}
+
+fn parse_authorization(value: String) -> Authorization? {
+  if value == "" {
+    return none
+  }
+  let space = value.index_of(" ") ?? -1
+  if space < 0 or value.slice(from: 0, to: space) != "Digest" {
+    return none
+  }
+  let auth = parse_dict_header(value.slice(from: space + 1, to: value.length))
+  let algo = if (auth["algorithm"] ?? "").lower() == "sha-256" { Sha256 } else { Md5 }
+  return Authorization(
+    algorithm: algo,
+    cnonce: auth["cnonce"] ?? "",
+    nc: auth["nc"] ?? "",
+    nonce: auth["nonce"] ?? "",
+    opaque: auth["opaque"] ?? "",
+    qop: auth["qop"] ?? "",
+    realm: auth["realm"] ?? "",
+    response: auth["response"] ?? "",
+    uri: auth["uri"] ?? "",
+    username: auth["username"] ?? "",
+  )
+}
+
+// A simplistic parser of key=value pairs (as simplistic as the original).
+pub fn parse_dict_header(value: String) -> Map<String, String> {
+  var res: Map<String, String> = {}
+  for pair in value.split(",") {
+    let p = pair.trim()
+    let eq = p.index_of("=") ?? -1
+    let key = if eq < 0 { p.trim() } else { p.slice(from: 0, to: eq).trim() }
+    if key.is_empty() {
+      continue
+    }
+    var val = ""
+    if eq >= 0 {
+      val = p.slice(from: eq + 1, to: p.length).trim()
+      if val.length >= 2 and val.starts_with("\"") and val.ends_with("\"") {
+        val = val.slice(from: 1, to: val.length - 1)
+      }
+    }
+    res[key] = val
+  }
+  return res
+}
+
+fn hash(data: Bytes, algorithm: Algorithm) -> String {
+  return match algorithm {
+    Sha256 => crypto.sha256(data).hex()
+    Md5 => md5(data).hex()
+  }
+}
+
+fn response(auth: Authorization, password: String, method: String, uri: String) -> String {
+  let ha1 = hash("${auth.username}:${auth.realm}:${password}".bytes(), algorithm: auth.algorithm)
+  let ha2 = hash("${method}:${uri}".bytes(), algorithm: auth.algorithm)
+  let r = if auth.qop == "auth" or auth.qop == "auth-int" {
+    "${ha1}:${auth.nonce}:${auth.nc}:${auth.cnonce}:${auth.qop}:${ha2}"
+  } else {
+    "${ha1}:${auth.nonce}:${ha2}"
+  }
+  return hash(r.bytes(), algorithm: auth.algorithm)
+}
+
+// ---- MD5 (RFC 1321) ----
+
+fn mask32() -> Int {
+  return 4294967295
+}
+
+fn rotl32(x: Int, n: Int) -> Int {
+  return x.shift_left(n).bit_or(x.shift_right(32 - n)).bit_and(mask32())
+}
+
+fn md5_shifts() -> List<Int> {
+  return [
+    7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  ]
+}
+
+// K[i] = floor(|sin(i + 1)| * 2^32), computed rather than written out
+// (there are no hex literals).
+fn md5_constants() -> List<Int> {
+  var k: List<Int> = []
+  for i in 0..<64 {
+    k.append((math.sin((i + 1).to_float()).abs() * 4294967296.0).floor())
+  }
+  return k
+}
+
+pub fn md5(data: Bytes) -> Bytes {
+  let s = md5_shifts()
+  let k = md5_constants()
+  var msg = data
+  msg.append(128)
+  while msg.length % 64 != 56 {
+    msg.append(0)
+  }
+  // length in bits, little-endian
+  let bit_len = data.length * 8
+  for i in 0..<8 {
+    msg.append(bit_len.shift_right(8 * i).bit_and(255))
+  }
+  var a0 = 1732584193
+  var b0 = 4023233417
+  var c0 = 2562383102
+  var d0 = 271733878
+  let bytes = msg.to_list()
+  var chunk = 0
+  while chunk < bytes.length {
+    var m: List<Int> = []
+    for j in 0..<16 {
+      let o = chunk + j * 4
+      m.append(bytes[o].bit_or(bytes[o + 1].shift_left(8)).bit_or(bytes[o + 2].shift_left(16)).bit_or(bytes[o + 3].shift_left(24)))
+    }
+    var a = a0
+    var b = b0
+    var c = c0
+    var d = d0
+    for i in 0..<64 {
+      var f = 0
+      var g = 0
+      if i < 16 {
+        f = b.bit_and(c).bit_or(b.bit_xor(mask32()).bit_and(d))
+        g = i
+      } else if i < 32 {
+        f = d.bit_and(b).bit_or(d.bit_xor(mask32()).bit_and(c))
+        g = (5 * i + 1) % 16
+      } else if i < 48 {
+        f = b.bit_xor(c).bit_xor(d)
+        g = (3 * i + 5) % 16
+      } else {
+        f = c.bit_xor(b.bit_or(d.bit_xor(mask32())))
+        g = (7 * i) % 16
+      }
+      f = (f + a + k[i] + m[g]).bit_and(mask32())
+      a = d
+      d = c
+      c = b
+      b = (b + rotl32(f, n: s[i])).bit_and(mask32())
+    }
+    a0 = (a0 + a).bit_and(mask32())
+    b0 = (b0 + b).bit_and(mask32())
+    c0 = (c0 + c).bit_and(mask32())
+    d0 = (d0 + d).bit_and(mask32())
+    chunk += 64
+  }
+  var out = Bytes()
+  for word in [a0, b0, c0, d0] {
+    for i in 0..<4 {
+      out.append(word.shift_right(8 * i).bit_and(255))
+    }
+  }
+  return out
+}
+
+test "md5 of known inputs" {
+  expect md5(Bytes()).hex() == "d41d8cd98f00b204e9800998ecf8427e"
+  expect md5("The quick brown fox jumps over the lazy dog".bytes()).hex() == "9e107d9d372bb6826bd81d3542a419d6"
+  expect md5("a".repeat(100).bytes()).hex() == "36a92cc94a9e0fa21f625f8bfb007adf"
+}
+
+test "digest check, example from Wikipedia (RFC 2617)" {
+  let header = "Digest username=\"Mufasa\", realm=\"testrealm@host.com\", nonce=\"dcd98b7102dd2f0e8b11d0f600bfb0c093\", uri=\"/dir/index.html\", qop=auth, nc=00000001, cnonce=\"0a4f113b\", response=\"6629fae49393a05397450978507c4ef1\", opaque=\"5ccc069c403ebaf9f0171e9517f40e41\""
+  expect check(header, method: "GET", uri: "/dir/index.html", username: "Mufasa", password: "Circle Of Life")
+  expect not check(header, method: "GET", uri: "/dir/index.html", username: "Mufasa", password: "wrong")
+  expect not check("Basic abc", method: "GET", uri: "/", username: "Mufasa", password: "x")
+}
+
+test "parse dict header" {
+  let d = parse_dict_header("a=1, b=\"two\", c")
+  expect d["a"] == "1"
+  expect d["b"] == "two"
+  expect d["c"] == ""
+}

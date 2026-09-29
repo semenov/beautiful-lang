@@ -1,0 +1,51 @@
+// go-httpbin in lang: `lang run main.lang -- --port 8080`.
+
+import cli
+import env
+import http
+import httpbin
+import time
+
+type Options {
+  // port to listen on (PORT in the environment also works)
+  port: Int = 8080
+  // maximum size of request or response bodies, in bytes
+  max_body_size: Int = 1048576
+  // maximum time a request may take, e.g. 10s
+  max_duration: String = "10s"
+  // path prefix to serve under, e.g. /httpbin
+  prefix: String = ""
+  // headers to leave out of echoed requests, comma-separated, * wildcards
+  exclude_headers: String = ""
+  // hosts that /redirect-to may redirect to, comma-separated
+  allowed_redirect_domains: String = ""
+  // hostname reported by /hostname
+  hostname: String = "go-httpbin"
+  // directory of the static assets
+  static_dir: String = "static"
+  unsafe_allow_dangerous_responses: Bool = false
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>()
+  var port = opts.port
+  if port == 8080 {
+    if env.get("PORT") is some(p) {
+      port = try p.to_int()
+    }
+  }
+  let domains = opts.allowed_redirect_domains.split(",").map(d => d.trim()).filter(d => not d.is_empty())
+  let config = httpbin.Config(
+    max_body_size: opts.max_body_size,
+    max_duration: try time.parse_duration(opts.max_duration),
+    hostname: opts.hostname,
+    prefix: opts.prefix,
+    exclude_headers: opts.exclude_headers,
+    allowed_redirect_domains: domains,
+    unsafe_allow_dangerous_responses: opts.unsafe_allow_dangerous_responses,
+    static_dir: opts.static_dir,
+    log_requests: true,
+  )
+  let app = try httpbin.new_app(config)
+  try http.serve(httpbin.make_router(app), port: port)
+}

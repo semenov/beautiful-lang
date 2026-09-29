@@ -1,0 +1,25 @@
+import http
+import time
+
+fn slow(i: Int) throws -> Int {
+  let r = try http.get("http://127.0.0.1:8099/slow=1")
+  return r.status
+}
+
+fn main() throws {
+  let t = time.now()
+  var tasks: List<Task<Int>> = []
+  for i in 0..<10 {
+    tasks.append(spawn slow(i))
+  }
+  for tk in tasks {
+    let _ = try tk.wait()
+  }
+  print("10 parallel slow: ${t.elapsed().seconds()}")
+  let t2 = time.now()
+  let r = try http.send(http.ClientRequest(url: "http://127.0.0.1:8099/slow=3", timeout: 1)) catch err {
+    print("timeout after ${t2.elapsed().seconds()}: ${err.message()}")
+    return
+  }
+  print("no timeout: ${r.status} after ${t2.elapsed().seconds()}")
+}

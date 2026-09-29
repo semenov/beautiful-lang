@@ -1,0 +1,11 @@
+import time
+
+fn main() throws {
+  for ms in [1, 10, 50, 100] {
+    let t = time.now()
+    for i in 0..<5 {
+      try time.sleep(time.millis(ms))
+    }
+    print("sleep ${ms}ms x5: avg ${(t.elapsed().seconds() * 1000.0 / 5.0).format(2)} ms")
+  }
+}

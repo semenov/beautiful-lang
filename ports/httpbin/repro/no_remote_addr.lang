@@ -1,0 +1,10 @@
+// There is no way to get the client's address in a handler: http.Request has
+// no remote address / peer field (io.Stream.peer exists, but the request's
+// connection isn't exposed). go-httpbin's /ip needs r.RemoteAddr.
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/ip", req => http.text(200, "?\n"))   // req.remote_addr doesn't exist
+  try http.serve(router, port: 18105)
+}

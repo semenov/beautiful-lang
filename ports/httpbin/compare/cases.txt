@@ -1,0 +1,146 @@
+get|/get?a=1&b=2
+get multi args|'/get?a=1&a=2'
+get multi header|/get -H 'X-Foo: 1' -H 'X-Foo: 2'
+post json|/post -H 'Content-Type: application/json' -d '{"a":[1,2.5,"x",null,true],"b":{"c":"<&>"}}'
+post form|/post -d 'a=1&a=2&b=x+y%21'
+post multipart|/post -F 'a=1' -F 'a=2' -F 'f=@/tmp/port-httpbin/lang.toml'
+post text|/post -H 'Content-Type: text/plain' -d 'hello'
+post binary|/post -H 'Content-Type: application/octet-stream' --data-binary 'abc'
+post no ct|/post -H 'Content-Type:' --data-binary 'abc'
+post chunked|/post -H 'Transfer-Encoding: chunked' -H 'Content-Type: text/plain' -d 'abc'
+post bad json|/post -H 'Content-Type: application/json' -d '{bad'
+put|/put -X PUT -d 'x=1'
+patch|/patch -X PATCH -d 'x=1'
+delete|/delete -X DELETE
+get on post|/post
+post on get|/get -X POST
+anything|/anything/foo/bar?x=1 -X PATCH -d 'q'
+anything head|/anything -I
+anything root|/anything
+headers|/headers -H 'X-Custom: yes'
+ip|/ip -H 'X-Forwarded-For: 9.9.9.9, 8.8.8.8'
+ip text|'/ip?format=text' -H 'X-Forwarded-For: 9.9.9.9'
+user-agent|/user-agent -A 'agent/1'
+status 200|/status/200
+status 418|/status/418
+status 204|/status/204
+status 302|/status/302
+status 401|/status/401
+status 406|/status/406
+status 300|/status/300
+status bad|/status/abc
+status 600|/status/600
+status weighted one|'/status/200:0,404:1'
+status weighted bad|'/status/200:x,404'
+redirect 3|/redirect/3
+redirect abs|'/redirect/3?absolute=true'
+redirect 0|/redirect/0
+redirect bad|/redirect/x
+relative-redirect|/relative-redirect/2
+absolute-redirect|/absolute-redirect/2
+absolute-redirect 1|/absolute-redirect/1
+redirect-to|'/redirect-to?url=http://example.com/'
+redirect-to status|'/redirect-to?url=/get&status_code=307'
+redirect-to bad status|'/redirect-to?url=/get&status_code=200'
+redirect-to relative forbidden|'/redirect-to?url=get'
+redirect-to missing|/redirect-to
+cookies|/cookies -H 'Cookie: a=1; b=two'
+cookies none|/cookies
+cookies set|'/cookies/set?k=v'
+cookies set attrs|'/cookies/set?k=v&attr%5BSecure%5D=true&attr%5BSameSite%5D=strict'
+cookies delete|'/cookies/delete?k='
+basic-auth ok|/basic-auth/user/pass -u user:pass
+basic-auth bad|/basic-auth/user/pass -u user:nope
+basic-auth none|/basic-auth/user/pass
+hidden-basic-auth bad|/hidden-basic-auth/user/pass
+hidden-basic-auth ok|/hidden-basic-auth/user/pass -u user:pass
+bearer ok|/bearer -H 'Authorization: Bearer abc'
+bearer none|/bearer
+digest bad qop|/digest-auth/foo/user/pass
+digest bad algo|/digest-auth/auth/user/pass/SHA-1
+digest md5 ok|/digest-auth/auth/user/pass --digest -u user:pass
+digest sha256 no auth status|/digest-auth/auth/user/pass/SHA-256 -o /dev/null -w '%{http_code}'
+delay 0|/delay/0
+delay bad|/delay/abc
+delay too long|/delay/11
+delay 0.2|/delay/0.2 -o /dev/null -w '%{http_code}'
+drip nopause|'/drip?duration=0&delay=0&numbytes=5'
+drip bad|'/drip?numbytes=0'
+drip too much|'/drip?duration=6&delay=6'
+drip code|'/drip?duration=0.2&delay=0&numbytes=3&code=201'
+stream 3|/stream/3
+stream 0|/stream/0
+stream bad|/stream/x
+bytes 0|/bytes/0
+bytes neg|/bytes/-1
+bytes big|/bytes/2000000
+bytes 16 status|/bytes/16 -o /dev/null -w '%{http_code} %{size_download} %{content_type}'
+stream-bytes 100|/stream-bytes/100 -o /dev/null -w '%{http_code} %{size_download} %{content_type}'
+range 10|/range/10
+range part|/range/26 -H 'Range: bytes=2-5'
+range suffix|/range/26 -H 'Range: bytes=-3'
+range unsat|/range/26 -H 'Range: bytes=30-40'
+range bad|/range/0
+gzip|/gzip --compressed
+deflate|/deflate --compressed
+cache|/cache -o /dev/null -w '%{http_code}'
+cache 304|/cache -H 'If-None-Match: x'
+cache n|/cache/60
+cache n bad|/cache/x
+etag|/etag/abc
+etag inm|/etag/abc -H 'If-None-Match: "abc"'
+etag im fail|/etag/abc -H 'If-Match: "zzz"'
+response-headers|'/response-headers?X-A=1&X-B=2'
+response-headers html|'/response-headers?Content-Type=text/html&x=%3Cb%3E'
+base64|/base64/aGVsbG8=
+base64 encode|/base64/encode/hello%3F
+base64 decode url|/base64/decode/PDw_Pz8-Pg==
+base64 bad|/base64/decode/!!!
+base64 op|/base64/zip/abc
+base64 html|'/base64/PGI+aGk8L2I+?content-type=text/html'
+uuid status|/uuid -o /dev/null -w '%{http_code} %{content_type}'
+html|/html
+json|/json
+xml|/xml
+robots|/robots.txt
+deny|/deny
+utf8|/encoding/utf8
+forms|/forms/post
+index|/
+links|/links/5
+links page|/links/5/2
+links bad|/links/300
+image|/image
+image png|/image/png
+image svg|/image/svg
+image webp accept|/image -H 'Accept: image/webp'
+image bad accept|/image -H 'Accept: text/plain'
+image missing|/image/gif
+hostname|/hostname
+brotli|/brotli
+not found|/nope
+trailing slash|/get/
+options|/get -X OPTIONS -H 'Origin: http://x' -H 'Access-Control-Request-Headers: X-A'
+cors origin|/get -H 'Origin: http://x'
+head|/head -I
+unstable|'/unstable?failure_rate=0'
+unstable fail|'/unstable?failure_rate=1'
+unstable bad|'/unstable?failure_rate=2'
+sse short|'/sse?count=2&duration=10ms' -o /dev/null -w '%{http_code} %{content_type}'
+sse bad count|'/sse?count=0'
+jsonl|'/jsonl?count=2'
+dump|/dump/request -H 'X-A: b'
+upload|/upload -d 'abcdef'
+trailers|'/trailers?X-Foo=bar' -o /dev/null -w '%{http_code}'
+trailers forbidden|'/trailers?Content-Type=x'
+websocket bad|'/websocket/echo?max_fragment_size=0'
+websocket noupgrade|/websocket/echo
+post json unsorted|/post -H 'Content-Type: application/json' -d '{"b":1,"a":{"z":1,"y":[{"d":1,"c":2}]},"n":1e3,"f":0.1,"big":12345678901234567890}'
+post form get method|/anything -X GET -H 'Content-Type: application/x-www-form-urlencoded' -d 'a=1'
+query encoding|'/get?q=a+b&x=%2F%3F&e=%C3%A9'
+path encoding|'/anything/a%20b/c%2Fd'
+path plus|'/anything/a+b'
+bytes seeded|'/bytes/8?seed=1'
+response-headers multi|'/response-headers?a=1&a=2'
+status 100|/status/100 --max-time 2
+delete body|/delete -X DELETE -d 'a=1'

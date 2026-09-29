@@ -1,0 +1,308 @@
+SAME  get
+DIFF  get multi args
+      9d8
+      <       "1",
+      26c25
+      <   "url": "http://localhost:PORT/get?a=1&a=2"
+      ---
+      >   "url": "http://localhost:PORT/get?a=2"
+DIFF  get multi header
+      19,20c19
+      <       "1",
+      <       "2"
+      ---
+      >       "1, 2"
+SAME  post json
+SAME  post form
+DIFF  post multipart
+      16c16
+      <       "multipart/form-data; boundary=------------------------JW7yDUAmERUjjywssRgCqA"
+      ---
+      >       "multipart/form-data; boundary=------------------------Nqnl41xZflKA7mYfJe56CY"
+      28c28
+      <   "data": "--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"f\"; filename=\"lang.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------JW7yDUAmERUjjywssRgCqA--\r\n",
+      ---
+      >   "data": "--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"f\"; filename=\"lang.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------Nqnl41xZflKA7mYfJe56CY--\r\n",
+SAME  post text
+SAME  post binary
+SAME  post no ct
+DIFF  post chunked
+      28c28
+      <   "data": "abc",
+      ---
+      >   "data": "",
+DIFF  post bad json
+      9c9
+      <   "detail": "error parsing request body: invalid character 'b' looking for beginning of object key string"
+      ---
+      >   "detail": "error parsing request body: json: expected a key in quotes at line 1, column 2"
+SAME  put
+SAME  patch
+SAME  delete
+SAME  get on post
+SAME  post on get
+SAME  anything
+SAME  anything head
+SAME  anything root
+SAME  headers
+SAME  ip
+SAME  ip text
+SAME  user-agent
+SAME  status 200
+DIFF  status 418
+      1c1
+      < 418 I'm a teapot
+      ---
+      > 418
+SAME  status 204
+SAME  status 302
+SAME  status 401
+DIFF  status 406
+      1c1
+      < 406 Not Acceptable
+      ---
+      > 406
+DIFF  status 300
+      1c1
+      < 300 Multiple Choices
+      ---
+      > 300
+SAME  status bad
+SAME  status 600
+SAME  status weighted one
+SAME  status weighted bad
+DIFF  redirect 3
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  redirect abs
+      3a4
+      > content-type: text/plain; charset=utf-8
+SAME  redirect 0
+SAME  redirect bad
+DIFF  relative-redirect
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  absolute-redirect
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  absolute-redirect 1
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  redirect-to
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  redirect-to status
+      1c1
+      < 307 Temporary Redirect
+      ---
+      > 307
+      3a4
+      > content-type: text/plain; charset=utf-8
+SAME  redirect-to bad status
+SAME  redirect-to relative forbidden
+SAME  redirect-to missing
+SAME  cookies
+SAME  cookies none
+DIFF  cookies set
+      3a4
+      > content-type: text/plain; charset=utf-8
+      5c6
+      < set-cookie: k=v; Path=/; HttpOnly
+      ---
+      > set-cookie: k=v; Path=/; SameSite=Lax; HttpOnly
+DIFF  cookies set attrs
+      3a4
+      > content-type: text/plain; charset=utf-8
+      5c6
+      < set-cookie: k=v; Path=/; HttpOnly; Secure; SameSite=Strict
+      ---
+      > set-cookie: k=v; Path=/; SameSite=Strict; HttpOnly; Secure
+DIFF  cookies delete
+      3a4
+      > content-type: text/plain; charset=utf-8
+      5c6
+      < set-cookie: k=; Path=/; Expires=Mon, 29 Sep 2025 07:54:11 GMT; Max-Age=0; HttpOnly
+      ---
+      > set-cookie: k=; Path=/; SameSite=Lax; Max-Age=0; HttpOnly
+SAME  basic-auth ok
+SAME  basic-auth bad
+SAME  basic-auth none
+SAME  hidden-basic-auth bad
+SAME  hidden-basic-auth ok
+SAME  bearer ok
+SAME  bearer none
+SAME  digest bad qop
+SAME  digest bad algo
+DIFF  digest md5 ok
+      5c5
+      < www-authenticate: Digest qop=auth, realm="go-httpbin", algorithm=MD5, nonce=2477e10397254a46725a45a3d54c1775, opaque=ccd82c18db2be0f3d93a4477c46cb14a
+      ---
+      > www-authenticate: Digest qop=auth, realm="go-httpbin", algorithm=MD5, nonce=2747b424d21e8dedc225fcfa185b0fa2, opaque=45c3e5bedd03b0673f518a1e937c5f17
+      8,12c8,12
+      < Access-Control-Allow-Credentials: true
+      < Access-Control-Allow-Origin: *
+      < Content-Type: application/json; charset=utf-8
+      < Date: Tue, 29 Sep 2026 07:54:12 GMT
+      < Content-Length: 68
+      ---
+      > content-type: application/json; charset=utf-8
+SAME  digest sha256 no auth status
+SAME  delay 0
+SAME  delay bad
+SAME  delay too long
+SAME  delay 0.2
+SAME  drip nopause
+SAME  drip bad
+SAME  drip too much
+SAME  drip code
+SAME  stream 3
+SAME  stream 0
+SAME  stream bad
+DIFF  bytes 0
+      3a4
+      > content-type: text/plain; charset=utf-8
+SAME  bytes neg
+SAME  bytes big
+SAME  bytes 16 status
+SAME  stream-bytes 100
+SAME  range 10
+DIFF  range part
+      1c1
+      < 206 Partial Content
+      ---
+      > 206
+DIFF  range suffix
+      1c1
+      < 206 Partial Content
+      ---
+      > 206
+DIFF  range unsat
+      1c1
+      < 416 Requested Range Not Satisfiable
+      ---
+      > 416
+SAME  range bad
+SAME  gzip
+SAME  deflate
+SAME  cache
+DIFF  cache 304
+      3a4
+      > content-type: text/plain; charset=utf-8
+SAME  cache n
+SAME  cache n bad
+SAME  etag
+DIFF  etag inm
+      3a4
+      > content-type: text/plain; charset=utf-8
+DIFF  etag im fail
+      1c1
+      < 412 Precondition Failed
+      ---
+      > 412
+SAME  response-headers
+SAME  response-headers html
+SAME  base64
+SAME  base64 encode
+SAME  base64 decode url
+SAME  base64 bad
+SAME  base64 op
+SAME  base64 html
+SAME  uuid status
+SAME  html
+SAME  json
+SAME  xml
+SAME  robots
+SAME  deny
+SAME  utf8
+SAME  forms
+SAME  index
+DIFF  links
+      3a4
+      > content-type: text/plain; charset=utf-8
+SAME  links page
+SAME  links bad
+DIFF  image
+      1c1
+      < 415 Unsupported Media Type
+      ---
+      > 415
+SAME  image png
+SAME  image svg
+SAME  image webp accept
+DIFF  image bad accept
+      1c1
+      < 415 Unsupported Media Type
+      ---
+      > 415
+SAME  image missing
+SAME  hostname
+DIFF  brotli
+      1c1
+      < 501 Not Implemented
+      ---
+      > 501
+SAME  not found
+SAME  trailing slash
+DIFF  options
+      6a7
+      > content-type: text/plain; charset=utf-8
+SAME  cors origin
+SAME  head
+SAME  unstable
+SAME  unstable fail
+SAME  unstable bad
+SAME  sse short
+SAME  sse bad count
+SAME  jsonl
+SAME  dump
+SAME  upload
+SAME  trailers
+SAME  trailers forbidden
+SAME  websocket bad
+SAME  websocket noupgrade
+DIFF  post json unsorted
+      42c42
+      <     "big": 12345678901234567000,
+      ---
+      >     "big": 1.2345678901234567e+19,
+SAME  post form get method
+DIFF  query encoding
+      31c31
+      <   "url": "http://localhost:PORT/get?q=a+b&x=%2F%3F&e=%C3%A9"
+      ---
+      >   "url": "http://localhost:PORT/get?q=a%20b&x=%2F%3F&e=%C3%A9"
+DIFF  path encoding
+      21c21
+      <   "url": "http://localhost:PORT/anything/a%20b/c%2Fd",
+      ---
+      >   "url": "http://localhost:PORT/anything/a%20b/c/d",
+DIFF  path plus
+      21c21
+      <   "url": "http://localhost:PORT/anything/a+b",
+      ---
+      >   "url": "http://localhost:PORT/anything/a%20b",
+DIFF  bytes seeded
+      6c6
+      < <binary 8 bytes sha1 4f3074c0e2f11d8ce23698c8f990f7be18d3df1f>
+      ---
+      > <binary 8 bytes sha1 48601b3dbbdcc76b9808712bdb127e04124c1007>
+DIFF  response-headers multi
+      2d1
+      < a: 1
+      13d11
+      <     "1",
+DIFF  status 100
+      1c1
+      < 100 Continue
+      ---
+      > 100
+      5,12d4
+      < 
+      < HTTP/1.1 200 OK
+      < Access-Control-Allow-Credentials: true
+      < Access-Control-Allow-Origin: *
+      < Content-Type: text/plain; charset=utf-8
+      < Date: Tue, 29 Sep 2026 07:54:24 GMT
+      < Content-Length: 0
+SAME  delete body
+same: 108, different: 38

@@ -1,0 +1,707 @@
+// Helpers shared by the handlers: request inspection, parsing of user input,
+// and small pieces of the Go standard library that lang doesn't have
+// (canonical header keys, status texts, HTML escaping, seeded random numbers).
+
+import encoding
+import http
+import json
+import regex
+import time
+import url
+
+// ---- content types ----
+
+pub fn binary_content_type() -> String {
+  return "application/octet-stream"
+}
+
+pub fn html_content_type() -> String {
+  return "text/html; charset=utf-8"
+}
+
+pub fn json_content_type() -> String {
+  return "application/json; charset=utf-8"
+}
+
+pub fn jsonl_content_type() -> String {
+  return "application/x-ndjson; charset=utf-8"
+}
+
+pub fn sse_content_type() -> String {
+  return "text/event-stream; charset=utf-8"
+}
+
+pub fn text_content_type() -> String {
+  return "text/plain; charset=utf-8"
+}
+
+// ---- responses ----
+
+// JSON as go-httpbin writes it: two-space indent, no HTML escaping, and a
+// final newline.
+pub fn write_json<T>(status: Int, value: T) -> http.Response {
+  return write_response(status, content_type: json_content_type(), body: "${json.encode_pretty(value)}\n".bytes())
+}
+
+pub fn write_response(status: Int, content_type: String, body: Bytes) -> http.Response {
+  return http.Response(status: status, body: body, headers: {"content-type": content_type})
+}
+
+pub fn write_html(status: Int, body: Bytes) -> http.Response {
+  return write_response(status, content_type: html_content_type(), body: body)
+}
+
+// A response with no body and no content type (Go's bare WriteHeader).
+pub fn empty(status: Int) -> http.Response {
+  return http.Response(status: status, body: Bytes())
+}
+
+type ErrorResponse {
+  status_code: Int
+  error: String
+}
+
+type ErrorDetailResponse {
+  status_code: Int
+  error: String
+  detail: String
+}
+
+pub fn write_error(status: Int, detail: String) -> http.Response {
+  // `omitempty` doesn't exist: two record types instead
+  if detail == "" {
+    return write_json(status, ErrorResponse(status_code: status, error: status_text(status)))
+  }
+  return write_json(status, ErrorDetailResponse(status_code: status, error: status_text(status), detail: detail))
+}
+
+// Go's http.StatusText.
+pub fn status_text(code: Int) -> String {
+  return match code {
+    100 => "Continue"
+    101 => "Switching Protocols"
+    102 => "Processing"
+    103 => "Early Hints"
+    200 => "OK"
+    201 => "Created"
+    202 => "Accepted"
+    203 => "Non-Authoritative Information"
+    204 => "No Content"
+    205 => "Reset Content"
+    206 => "Partial Content"
+    207 => "Multi-Status"
+    208 => "Already Reported"
+    226 => "IM Used"
+    300 => "Multiple Choices"
+    301 => "Moved Permanently"
+    302 => "Found"
+    303 => "See Other"
+    304 => "Not Modified"
+    305 => "Use Proxy"
+    307 => "Temporary Redirect"
+    308 => "Permanent Redirect"
+    400 => "Bad Request"
+    401 => "Unauthorized"
+    402 => "Payment Required"
+    403 => "Forbidden"
+    404 => "Not Found"
+    405 => "Method Not Allowed"
+    406 => "Not Acceptable"
+    407 => "Proxy Authentication Required"
+    408 => "Request Timeout"
+    409 => "Conflict"
+    410 => "Gone"
+    411 => "Length Required"
+    412 => "Precondition Failed"
+    413 => "Request Entity Too Large"
+    414 => "Request URI Too Long"
+    415 => "Unsupported Media Type"
+    416 => "Requested Range Not Satisfiable"
+    417 => "Expectation Failed"
+    418 => "I'm a teapot"
+    421 => "Misdirected Request"
+    422 => "Unprocessable Entity"
+    423 => "Locked"
+    424 => "Failed Dependency"
+    425 => "Too Early"
+    426 => "Upgrade Required"
+    428 => "Precondition Required"
+    429 => "Too Many Requests"
+    431 => "Request Header Fields Too Large"
+    451 => "Unavailable For Legal Reasons"
+    500 => "Internal Server Error"
+    501 => "Not Implemented"
+    502 => "Bad Gateway"
+    503 => "Service Unavailable"
+    504 => "Gateway Timeout"
+    505 => "HTTP Version Not Supported"
+    506 => "Variant Also Negotiates"
+    507 => "Insufficient Storage"
+    508 => "Loop Detected"
+    510 => "Not Extended"
+    511 => "Network Authentication Required"
+    _ => ""
+  }
+}
+
+// ---- request inspection ----
+
+// "x-forwarded-for" -> "X-Forwarded-For" (Go's http.CanonicalHeaderKey).
+pub fn canonical_header_key(key: String) -> String {
+  var out = ""
+  var upper = true
+  for c in key.chars() {
+    out = if upper { "${out}${c.upper()}" } else { "${out}${c.lower()}" }
+    upper = c == "-"
+  }
+  return out
+}
+
+// A header filter from a comma-separated list of names with * wildcards
+// (the -exclude-headers option). None when the list is empty.
+pub fn exclude_headers_regex(exclude: String) throws -> regex.Regex? {
+  var parts: List<String> = []
+  for raw in exclude.split(",") {
+    let s = raw.trim()
+    if s.is_empty() {
+      continue
+    }
+    parts.append(wildcard_to_regexp(s))
+  }
+  if parts.is_empty() {
+    return none
+  }
+  return try regex.compile("(?i)(${parts.join("|")})")
+}
+
+fn wildcard_to_regexp(pattern: String) -> String {
+  let components = pattern.split("*")
+  if components.length == 1 {
+    return "^${quote_meta(pattern)}$"
+  }
+  return "^${components.map(c => quote_meta(c)).join(".*")}$"
+}
+
+fn quote_meta(s: String) -> String {
+  var out = ""
+  for c in s.chars() {
+    if "\\.+*?()|[]{}^$".contains(c) {
+      out = "${out}\\${c}"
+    } else {
+      out = "${out}${c}"
+    }
+  }
+  return out
+}
+
+// The request's headers as go-httpbin echoes them: canonical names, sorted,
+// each with a list of values. The server joins repeated headers with ", ",
+// so a repeated header comes back as one value.
+pub fn request_headers(req: http.Request, exclude: regex.Regex?) -> Map<String, List<String>> {
+  var names: List<String> = []
+  var canon: Map<String, String> = {}
+  for entry in req.headers {
+    let key = canonical_header_key(entry.key)
+    if exclude is some(re) {
+      if re.matches(key) {
+        continue
+      }
+    }
+    names.append(key)
+    canon[key] = entry.value
+  }
+  var out: Map<String, List<String>> = {}
+  for name in names.sorted() {
+    out[name] = [canon[name] ?? ""]
+  }
+  return out
+}
+
+// The query as go-httpbin echoes it: sorted, each name with a list of
+// values. The server keeps only the last value of a repeated name.
+pub fn request_args(req: http.Request) -> Map<String, List<String>> {
+  var out: Map<String, List<String>> = {}
+  for key in req.query_params.keys().sorted() {
+    out[key] = [req.query_params[key] ?? ""]
+  }
+  return out
+}
+
+pub fn first_arg(args: Map<String, List<String>>, name: String) -> String {
+  if args[name] is some(vs) {
+    return vs.first() ?? ""
+  }
+  return ""
+}
+
+// Parses "a=1&b=2&a=3" (a form body) keeping repeated names, sorted by name.
+pub fn parse_query(text: String) -> Map<String, List<String>> {
+  var out: Map<String, List<String>> = {}
+  for pair in text.split("&") {
+    if pair.is_empty() {
+      continue
+    }
+    let eq = pair.index_of("=") ?? -1
+    let raw_key = if eq < 0 { pair } else { pair.slice(from: 0, to: eq) }
+    let raw_val = if eq < 0 { "" } else { pair.slice(from: eq + 1, to: pair.length) }
+    let key = unescape_query(raw_key)
+    let value = unescape_query(raw_val)
+    var vs = out[key] ?? []
+    vs.append(value)
+    out[key] = vs
+  }
+  return sorted_map(out)
+}
+
+fn unescape_query(s: String) -> String {
+  let plus = s.replace("+", new: " ")
+  return try url.decode(plus) catch err {
+    plus
+  }
+}
+
+pub fn sorted_map<V>(m: Map<String, V>) -> Map<String, V> {
+  var out: Map<String, V> = {}
+  for key in m.keys().sorted() {
+    if m[key] is some(v) {
+      out[key] = v
+    }
+  }
+  return out
+}
+
+// A reasonable value for the client's address, from the headers proxies
+// set. The request doesn't carry the connection's address, so without
+// such a header it is unknown.
+pub fn client_ip(req: http.Request) -> String {
+  for name in ["fly-client-ip", "cf-connecting-ip", "fastly-client-ip", "true-client-ip"] {
+    if req.header(name) is some(ip) {
+      if not ip.is_empty() {
+        return ip
+      }
+    }
+  }
+  if req.header("x-forwarded-for") is some(ff) {
+    if not ff.is_empty() {
+      return (ff.split(",").first() ?? "").trim()
+    }
+  }
+  return req.header("x-real-ip") ?? ""
+}
+
+pub fn request_scheme(req: http.Request) -> String {
+  var scheme = req.header("x-forwarded-proto") ?? ""
+  if scheme == "" {
+    scheme = req.header("x-forwarded-protocol") ?? ""
+  }
+  if scheme == "" and (req.header("x-forwarded-ssl") ?? "") == "on" {
+    scheme = "https"
+  }
+  if scheme == "" {
+    scheme = "http"
+  }
+  return scheme
+}
+
+pub fn request_host(req: http.Request) -> String {
+  return req.header("host") ?? ""
+}
+
+// The path as it would appear in a URL (the server gives it decoded).
+pub fn escape_path(p: String) -> String {
+  var out = ""
+  for c in p.chars() {
+    if c.is_letter() and c.byte_length() == 1 or c.is_digit() or "/-._~!$&'()*+,;=:@".contains(c) {
+      out = "${out}${c}"
+    } else {
+      out = "${out}${url.encode(c)}"
+    }
+  }
+  return out
+}
+
+// The query as text again. The raw query isn't available, so it is built
+// from the parsed parameters (Go echoes the raw query as it was sent).
+pub fn query_string(req: http.Request) -> String {
+  if req.query_params.is_empty() {
+    return ""
+  }
+  return url.query_text(req.query_params)
+}
+
+// The full URL of the request, as the client probably wrote it.
+pub fn request_url(req: http.Request) -> String {
+  let q = query_string(req)
+  let query = if q.is_empty() { "" } else { "?${q}" }
+  return "${request_scheme(req)}://${request_host(req)}${escape_path(req.path)}${query}"
+}
+
+// The path and query (Go's RequestURI).
+pub fn request_uri(req: http.Request) -> String {
+  let q = query_string(req)
+  let query = if q.is_empty() { "" } else { "?${q}" }
+  return "${escape_path(req.path)}${query}"
+}
+
+pub fn is_https(req: http.Request) -> Bool {
+  return request_scheme(req) == "https"
+}
+
+// The user and password of a Basic Authorization header.
+pub type BasicAuth {
+  user: String
+  password: String
+  ok: Bool
+}
+
+pub fn basic_auth(req: http.Request) -> BasicAuth {
+  let none_given = BasicAuth(user: "", password: "", ok: false)
+  let header = req.header("authorization") ?? ""
+  if not header.lower().starts_with("basic ") {
+    return none_given
+  }
+  let decoded = try decode_base64(header.slice(from: 6, to: header.length)).text() catch err {
+    return none_given
+  }
+  let colon = decoded.index_of(":") ?? -1
+  if colon < 0 {
+    return none_given
+  }
+  return BasicAuth(user: decoded.slice(from: 0, to: colon), password: decoded.slice(from: colon + 1, to: decoded.length), ok: true)
+}
+
+// ---- cookies ----
+
+// The cookies of the Cookie header, in order.
+pub fn request_cookies(req: http.Request) -> Map<String, String> {
+  var out: Map<String, String> = {}
+  let header = req.header("cookie") ?? ""
+  for part in header.split(";") {
+    let p = part.trim()
+    if p.is_empty() {
+      continue
+    }
+    let eq = p.index_of("=") ?? -1
+    if eq <= 0 {
+      continue
+    }
+    var value = p.slice(from: eq + 1, to: p.length)
+    if value.length >= 2 and value.starts_with("\"") and value.ends_with("\"") {
+      value = value.slice(from: 1, to: value.length - 1)
+    }
+    out[p.slice(from: 0, to: eq)] = value
+  }
+  return out
+}
+
+pub fn is_cookie_attr_param(k: String) -> Bool {
+  return k.starts_with("attr[") and k.ends_with("]")
+}
+
+pub fn parse_bool_param(s: String) -> Bool {
+  return s == "1" or s.lower() == "true"
+}
+
+// The cookies to set from the query, with attributes from attr[Name] params.
+// lang's Cookie has no Domain, and SameSite can't be left out.
+pub fn parse_cookies(req: http.Request) -> List<http.Cookie> {
+  var template = http.Cookie(name: "", value: "", http_only: true, path: "/", secure: is_https(req))
+  for entry in req.query_params {
+    let k = entry.key
+    if not is_cookie_attr_param(k) {
+      continue
+    }
+    let v = entry.value
+    match k.slice(from: 5, to: k.length - 1).lower() {
+      "httponly" => {
+        template.http_only = parse_bool_param(v)
+      }
+      "path" => {
+        template.path = v
+      }
+      "samesite" => {
+        match v.lower() {
+          "strict" => {
+            template.same_site = "Strict"
+          }
+          "lax" => {
+            template.same_site = "Lax"
+          }
+          "none" => {
+            template.same_site = "None"
+          }
+          _ => {}
+        }
+      }
+      "secure" => {
+        template.secure = parse_bool_param(v)
+      }
+      _ => {}
+    }
+  }
+  var cookies: List<http.Cookie> = []
+  for entry in req.query_params {
+    if is_cookie_attr_param(entry.key) {
+      continue
+    }
+    var c = template
+    c.name = entry.key
+    c.value = sanitize_cookie_value(entry.value)
+    cookies.append(c)
+  }
+  return cookies
+}
+
+// Go drops bytes that aren't allowed in a cookie value (and quotes values
+// with spaces or commas). lang's Cookie writes the value as it is, so
+// "a;Domain=evil" would inject attributes: filter here.
+pub fn sanitize_cookie_value(v: String) -> String {
+  var out = ""
+  for c in v.chars() {
+    if c == ";" or c == "\"" or c == "\\" or c.byte_length() > 1 or c == "\n" or c == "\r" {
+      continue
+    }
+    out = "${out}${c}"
+  }
+  if out.contains(" ") or out.contains(",") {
+    return "\"${out}\""
+  }
+  return out
+}
+
+// ---- parsing user input ----
+
+pub type BadInput implements Error {
+  text: String
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+fn atoi_error(input: String) -> String {
+  return "strconv.Atoi: parsing ${go_quote(input)}: invalid syntax"
+}
+
+pub fn go_quote(s: String) -> String {
+  return "\"${s.replace("\\", new: "\\\\").replace("\"", new: "\\\"")}\""
+}
+
+// Go's strconv.Atoi: optional sign, digits only.
+pub fn atoi(input: String) throws -> Int {
+  let digits = if input.starts_with("+") or input.starts_with("-") { input.slice(from: 1, to: input.length) } else { input }
+  if not digits.is_digit() {
+    throw BadInput(text: atoi_error(input))
+  }
+  return try input.to_int() catch err {
+    throw BadInput(text: "strconv.Atoi: parsing ${go_quote(input)}: value out of range")
+  }
+}
+
+pub fn parse_status_code(input: String) throws -> Int {
+  return try parse_bounded_status_code(input, min: 100, max: 599)
+}
+
+pub fn parse_bounded_status_code(input: String, min: Int, max: Int) throws -> Int {
+  let code = try atoi(input) catch err {
+    throw BadInput(text: "invalid status code: ${go_quote(input)}: ${err.message()}")
+  }
+  if code < min or code > max {
+    throw BadInput(text: "invalid status code: ${code} not in range [${min}, ${max}]")
+  }
+  return code
+}
+
+// A Go-style duration ("1.5s", "250ms") or seconds as a number ("1.5").
+pub fn parse_duration(input: String) throws -> time.Duration {
+  let d = try time.parse_duration(input) catch err {
+    let n = try input.to_float() catch err2 {
+      throw BadInput(text: "strconv.ParseFloat: parsing ${go_quote(input)}: invalid syntax")
+    }
+    time.millis((n * 1000.0).floor())
+  }
+  return d
+}
+
+pub fn parse_bounded_duration(input: String, min: time.Duration, max: time.Duration) throws -> time.Duration {
+  let d = try parse_duration(input)
+  if d.is_longer_than(max) {
+    throw BadInput(text: "duration ${go_duration(d)} longer than ${go_duration(max)}")
+  }
+  if min.is_longer_than(d) {
+    throw BadInput(text: "duration ${go_duration(d)} shorter than ${go_duration(min)}")
+  }
+  return d
+}
+
+// Go's Duration.String for the common cases: "1.5s", "250ms", "1m0s".
+pub fn go_duration(d: time.Duration) -> String {
+  let n = d.nanos
+  if n == 0 {
+    return "0s"
+  }
+  if n < 1000 {
+    return "${n}ns"
+  }
+  if n < 1000000 {
+    return "${trim_float(n.to_float() / 1000.0)}µs"
+  }
+  if n < 1000000000 {
+    return "${trim_float(n.to_float() / 1000000.0)}ms"
+  }
+  let total_s = n.to_float() / 1000000000.0
+  if total_s < 60.0 {
+    return "${trim_float(total_s)}s"
+  }
+  let minutes = n.div(60000000000)
+  let rest = (n - minutes * 60000000000).to_float() / 1000000000.0
+  if minutes < 60 {
+    return "${minutes}m${trim_float(rest)}s"
+  }
+  return "${minutes.div(60)}h${minutes % 60}m${trim_float(rest)}s"
+}
+
+fn trim_float(f: Float) -> String {
+  if f == f.floor().to_float() {
+    return "${f.floor()}"
+  }
+  return f.to_string()
+}
+
+pub fn compute_pause_per_write(duration: time.Duration, count: Int) -> time.Duration {
+  if count > 1 {
+    let n = count - 1
+    return time.nanos((duration.nanos + n - 1).div(n))
+  }
+  return duration
+}
+
+// ---- weighted random choice ----
+
+pub type WeightedChoice {
+  choice: Int
+  weight: Float
+}
+
+pub fn parse_weighted_choices(raw: String) throws -> List<WeightedChoice> {
+  var choices: List<WeightedChoice> = []
+  if raw == "" {
+    return choices
+  }
+  for pair in raw.split(",") {
+    var weight = 1.0
+    let colon = pair.index_of(":") ?? -1
+    let raw_choice = if colon < 0 { pair } else { pair.slice(from: 0, to: colon) }
+    if colon >= 0 {
+      let raw_weight = pair.slice(from: colon + 1, to: pair.length)
+      weight = try raw_weight.to_float() catch err {
+        throw BadInput(text: "invalid weight value: ${go_quote(raw_weight)}")
+      }
+    }
+    let choice = try atoi(raw_choice) catch err {
+      throw BadInput(text: "invalid choice value: ${go_quote(raw_choice)}")
+    }
+    choices.append(WeightedChoice(choice: choice, weight: weight))
+  }
+  return choices
+}
+
+// `r` is a number in [0, 1).
+pub fn weighted_random_choice(choices: List<WeightedChoice>, r: Float) -> Int {
+  let total = choices.fold(0.0, step: (acc, c) => acc + c.weight)
+  let target = r * total
+  var current = 0.0
+  for c in choices {
+    current += c.weight
+    if target < current {
+      return c.choice
+    }
+  }
+  panic("failed to select a weighted random choice")
+}
+
+// ---- seeded random numbers ----
+
+// A small seeded generator (xorshift64*-like, with shifts and xors only:
+// multiplication would stop the program on overflow). Go's math/rand
+// sequence can't be reproduced, so seeded output differs from go-httpbin.
+pub type Rng {
+  state: Int
+  pub mutating fn next(self) -> Int {
+    var x = self.state
+    x = x.bit_xor(x.shift_left(13))
+    x = x.bit_xor(x.shift_right(7))
+    x = x.bit_xor(x.shift_left(17))
+    self.state = x
+    return x
+  }
+  // A number from 0 to n - 1.
+  pub mutating fn below(n: Int) -> Int {
+    let x = self.next().shift_right(1)
+    return x % n
+  }
+  pub mutating fn fraction() -> Float {
+    return self.next().shift_right(11).to_float() / 9007199254740992.0
+  }
+}
+
+pub fn new_rng(seed: Int) -> Rng {
+  // splitmix-style scrambling of the seed, again without multiplication
+  var s = seed.bit_xor(7640891576956012809)
+  if s == 0 {
+    s = 88172645463325252
+  }
+  var r = Rng(state: s)
+  for i in 0..<8 {
+    let _ = r.next()
+  }
+  return r
+}
+
+pub fn parse_seed(raw: String) throws -> Rng {
+  if raw == "" {
+    return new_rng(time.now().nanos)
+  }
+  let seed = try raw.to_int() catch err {
+    throw BadInput(text: "strconv.ParseInt: parsing ${go_quote(raw)}: invalid syntax")
+  }
+  return new_rng(seed)
+}
+
+// ---- misc ----
+
+pub type ServerTiming {
+  name: String
+  dur: time.Duration
+  desc: String
+}
+
+pub fn encode_server_timings(timings: List<ServerTiming>) -> String {
+  return timings.map(t => "${t.name};dur=${(t.dur.nanos.to_float() / 1000000.0).format(2)};desc=\"${t.desc}\"").join(", ")
+}
+
+// Content types that are safe to send without HTML-escaping user input.
+pub fn is_dangerous_content_type(ct: String) -> Bool {
+  let media = (ct.split(";").first() ?? "").trim().lower()
+  if media.is_empty() or not media.contains("/") {
+    return true
+  }
+  return not (media == "text/plain" or media == "application/json" or media == "application/octet-string")
+}
+
+// Go's html.EscapeString.
+pub fn html_escape(s: String) -> String {
+  return s.replace("&", new: "&amp;").replace("'", new: "&#39;").replace("<", new: "&lt;").replace(">", new: "&gt;").replace("\"", new: "&#34;")
+}
+
+// Base64 with the URL-safe alphabet and padding (Go's base64.URLEncoding).
+pub fn base64_url_padded(data: Bytes) -> String {
+  return data.base64().replace("+", new: "-").replace("/", new: "_")
+}
+
+// Strict base64: the standard or URL-safe alphabet, with padding.
+pub fn decode_base64(text: String) throws -> Bytes {
+  if text.length % 4 != 0 {
+    throw BadInput(text: "illegal base64 data at input byte ${text.length - text.length % 4}")
+  }
+  return try encoding.from_base64(text)
+}

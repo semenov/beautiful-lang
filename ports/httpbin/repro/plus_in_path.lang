@@ -1,0 +1,12 @@
+// `+` in a URL path is a literal plus (only in query strings does it mean a
+// space), but the server decodes it as a space: this route never matches.
+//   curl -s localhost:18100/c+d     -> 404 "not found" (expected "plus route")
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/c+d", req => http.text(200, "plus route"))
+  router.get("/echo/:p", req => http.text(200, "param=[${req.param("p") ?? ""}]\n"))
+  // curl -s localhost:18100/echo/a+b   -> "param=[a b]" (expected "a+b")
+  try http.serve(router, port: 18100)
+}

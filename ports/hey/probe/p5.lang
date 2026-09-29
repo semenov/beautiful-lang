@@ -1,0 +1,60 @@
+import io
+import time
+import regex
+import http
+
+fn produce(ch: Channel<Int>, from: Int) throws -> Int {
+  for i in 0..<3 {
+    try ch.send(from + i)
+  }
+  return 3
+}
+
+fn consume(ch: Channel<Int>) throws -> List<Int> {
+  var got: List<Int> = []
+  while try ch.receive() is some(v) {
+    got.append(v)
+  }
+  return got
+}
+
+fn main() throws {
+  with e = io.stderr() {
+    try e.write_text("to stderr\n")
+  }
+  with e2 = io.stderr() {
+    try e2.write_text("stderr again\n")
+  }
+  let d = time.Duration(nanos: 1500000)
+  try time.sleep(d)
+  let zero = 0.0
+  let nan = zero / zero
+  print("nan: ${nan.format(4)} ${nan}")
+  let xs = [3.5, 1.25, 2.0]
+  print("sorted ${xs.sorted()}")
+  let re = try regex.compile("^([\\w-]+):\\s*(.+)")
+  if re.find("X-Foo-Bar:   baz qux") is some(m) {
+    print("groups ${m.groups}")
+  }
+  let re2 = try regex.compile("^(.+):([^\\s].+)")
+  if re2.find("user:pa:ss") is some(m) {
+    print("auth ${m.groups}")
+  }
+  let r = try http.send(http.ClientRequest(url: "http://127.0.0.1:8099/echo", headers: {"accept-encoding": "identity"}))
+  print(try r.text())
+  let ch = Channel<Int>(capacity: 10)
+  let c = spawn consume(ch)
+  let p1 = spawn produce(ch, from: 0)
+  let p2 = spawn produce(ch, from: 100)
+  let _ = try p1.wait()
+  let _ = try p2.wait()
+  ch.close()
+  print("consumed ${try c.wait()}")
+  print("big range start")
+  var k = 0
+  for i in 0..<2147483647 {
+    k += 1
+    if k == 3 { break }
+  }
+  print("ok ${k}")
+}

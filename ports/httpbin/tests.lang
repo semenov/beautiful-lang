@@ -1,0 +1,700 @@
+// A port of a part of go-httpbin's handlers_test.go: the router is called
+// directly, without a network. Run: `lang test tests.lang`.
+
+import encoding
+import helpers
+import http
+import httpbin
+import json
+import time
+import url
+import zlib
+
+fn app_with(config: httpbin.Config) -> http.Router {
+  let app = try httpbin.new_app(config) catch err {
+    panic("can't create app: ${err.message()}")
+  }
+  return httpbin.make_router(app)
+}
+
+fn test_router() -> http.Router {
+  return app_with(httpbin.Config())
+}
+
+// http.request doesn't split off the query, so it is done here.
+fn new_request(method: String, target: String) -> http.Request {
+  let q = target.index_of("?") ?? -1
+  let path = if q < 0 { target } else { target.slice(from: 0, to: q) }
+  var req = http.request(method, path: path)
+  req.headers["host"] = "host"
+  if q >= 0 {
+    // in order, the last value of a name winning, as the server does
+    var params: Map<String, String> = {}
+    for pair in target.slice(from: q + 1, to: target.length).split("&") {
+      let eq = pair.index_of("=") ?? pair.length
+      let key = try url.decode(pair.slice(from: 0, to: eq)) catch err { pair }
+      let value = if eq < pair.length { pair.slice(from: eq + 1, to: pair.length) } else { "" }
+      params[key] = try url.decode(value.replace("+", new: " ")) catch err { value }
+    }
+    req.query_params = params
+  }
+  return req
+}
+
+fn do(router: http.Router, method: String, target: String) -> http.Response {
+  return try router.handle(new_request(method, target: target)) catch err {
+    panic("handler failed: ${err.message()}")
+  }
+}
+
+fn body_json(res: http.Response) -> json.Value {
+  let text = try res.text() catch err {
+    panic("body isn't text")
+  }
+  return try json.parse(text) catch err {
+    panic("body isn't JSON: ${text}")
+  }
+}
+
+fn field(v: json.Value, name: String) -> json.Value {
+  return match v {
+    Object(fields) => fields[name] ?? json.Value.Null
+    _ => json.Value.Null
+  }
+}
+
+fn text_of(v: json.Value) -> String {
+  return match v {
+    String(value) => value
+    _ => json.encode(v)
+  }
+}
+
+type StatusCase {
+  target: String
+  status: Int
+}
+
+fn check_statuses(router: http.Router, cases: List<StatusCase>) -> List<String> {
+  var failures: List<String> = []
+  for c in cases {
+    let res = do(router, method: "GET", target: c.target)
+    if res.status != c.status {
+      failures.append("${c.target}: got ${res.status}, want ${c.status}")
+    }
+  }
+  return failures
+}
+
+// ---- TestIndex, TestFormsPost, TestUTF8 ----
+
+test "index" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/")
+  expect res.status == 200
+  expect res.headers["content-type"] == "text/html; charset=utf-8"
+  expect (try res.text()).contains("go-httpbin")
+  expect do(r, method: "GET", target: "/foo").status == 404
+}
+
+test "forms post and utf8 pages" {
+  let r = test_router()
+  expect (try do(r, method: "GET", target: "/forms/post").text()).contains("<form method=\"post\" action=\"/post\">")
+  expect (try do(r, method: "GET", target: "/encoding/utf8").text()).contains("Unicode Demo")
+}
+
+// ---- TestGet ----
+
+test "get echoes args, headers, method and url" {
+  let r = test_router()
+  var req = new_request("GET", target: "/get?foo=foo&bar=bar")
+  req.headers["user-agent"] = "test"
+  let res = try r.handle(req)
+  expect res.status == 200
+  expect res.headers["content-type"] == "application/json; charset=utf-8"
+  let body = body_json(res)
+  expect json.encode(field(body, name: "args")) == "{\"bar\":[\"bar\"],\"foo\":[\"foo\"]}"
+  expect text_of(field(body, name: "method")) == "GET"
+  expect text_of(field(body, name: "url")) == "http://host/get?foo=foo&bar=bar"
+  expect json.encode(field(field(body, name: "headers"), name: "User-Agent")) == "[\"test\"]"
+}
+
+test "get only allows GET and HEAD" {
+  let r = test_router()
+  for m in ["POST", "PUT", "DELETE", "PATCH"] {
+    let res = do(r, method: m, target: "/get")
+    expect res.status == 405
+  }
+  expect do(r, method: "HEAD", target: "/get").status == 200
+}
+
+test "get: origin from the forwarding headers" {
+  let r = test_router()
+  var req = new_request("GET", target: "/get")
+  req.headers["x-forwarded-for"] = "1.1.1.1, 2.2.2.2"
+  expect text_of(field(body_json(try r.handle(req)), name: "origin")) == "1.1.1.1"
+  var req2 = new_request("GET", target: "/get")
+  req2.headers["fly-client-ip"] = "3.3.3.3"
+  req2.headers["x-forwarded-for"] = "1.1.1.1"
+  expect text_of(field(body_json(try r.handle(req2)), name: "origin")) == "3.3.3.3"
+}
+
+test "get: scheme from X-Forwarded-Proto" {
+  let r = test_router()
+  var req = new_request("GET", target: "/get")
+  req.headers["x-forwarded-proto"] = "https"
+  expect text_of(field(body_json(try r.handle(req)), name: "url")) == "https://host/get"
+  var req2 = new_request("GET", target: "/get")
+  req2.headers["x-forwarded-ssl"] = "on"
+  expect text_of(field(body_json(try r.handle(req2)), name: "url")) == "https://host/get"
+}
+
+test "exclude headers" {
+  let r = app_with(httpbin.Config(exclude_headers: "x-ignore*,x-info-this-key"))
+  var req = new_request("GET", target: "/headers")
+  req.headers["x-ignore-foo"] = "1"
+  req.headers["x-info-this-key"] = "2"
+  req.headers["x-keep"] = "3"
+  let hs = field(body_json(try r.handle(req)), name: "headers")
+  expect field(hs, name: "X-Ignore-Foo") == json.Value.Null
+  expect field(hs, name: "X-Info-This-Key") == json.Value.Null
+  expect json.encode(field(hs, name: "X-Keep")) == "[\"3\"]"
+}
+
+// ---- TestCORS ----
+
+test "cors headers on every response" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/get")
+  expect res.headers["access-control-allow-origin"] == "*"
+  expect res.headers["access-control-allow-credentials"] == "true"
+  var req = new_request("OPTIONS", target: "/get")
+  req.headers["origin"] = "origin"
+  req.headers["access-control-request-headers"] = "X-Test"
+  let pre = try r.handle(req)
+  expect pre.status == 200
+  expect pre.headers["access-control-allow-origin"] == "origin"
+  expect pre.headers["access-control-allow-methods"] == "GET, POST, HEAD, PUT, DELETE, PATCH, OPTIONS"
+  expect pre.headers["access-control-max-age"] == "3600"
+  expect pre.headers["access-control-allow-headers"] == "X-Test"
+}
+
+// ---- TestIP, TestUserAgent, TestHeaders ----
+
+test "ip as text" {
+  let r = test_router()
+  var req = new_request("GET", target: "/ip?format=text")
+  req.headers["x-forwarded-for"] = "9.9.9.9"
+  expect try (try r.handle(req)).text() == "9.9.9.9\n"
+}
+
+test "user agent" {
+  let r = test_router()
+  var req = new_request("GET", target: "/user-agent")
+  req.headers["user-agent"] = "test"
+  expect text_of(field(body_json(try r.handle(req)), name: "user-agent")) == "test"
+}
+
+// ---- TestPost & co ----
+
+test "post: form body" {
+  let r = test_router()
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "application/x-www-form-urlencoded"
+  req.body = "foo=foo&bar=bar1&bar=bar2&baz=a+b%21".bytes()
+  let body = body_json(try r.handle(req))
+  expect json.encode(field(body, name: "form")) == "{\"bar\":[\"bar1\",\"bar2\"],\"baz\":[\"a b!\"],\"foo\":[\"foo\"]}"
+  expect text_of(field(body, name: "data")) == "foo=foo&bar=bar1&bar=bar2&baz=a+b%21"
+}
+
+test "post: json body" {
+  let r = test_router()
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "application/json; charset=utf-8"
+  req.body = "{\"foo\": \"foo\", \"bar\": [1, 2, 3], \"baz\": {\"x\": true}}".bytes()
+  let body = body_json(try r.handle(req))
+  // sorted like Go's maps
+  expect json.encode(field(body, name: "json")) == "{\"bar\":[1,2,3],\"baz\":{\"x\":true},\"foo\":\"foo\"}"
+}
+
+test "post: invalid json is a 400" {
+  let r = test_router()
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "application/json"
+  req.body = "{\"foo".bytes()
+  expect (try r.handle(req)).status == 400
+}
+
+test "post: multipart form with files" {
+  let r = test_router()
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "multipart/form-data; boundary=XYZ"
+  req.body = "--XYZ\r\nContent-Disposition: form-data; name=\"foo\"\r\n\r\nfoo\r\n--XYZ\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nfile content\r\n--XYZ--\r\n".bytes()
+  let res = try r.handle(req)
+  expect res.status == 200
+  let body = body_json(res)
+  expect json.encode(field(body, name: "form")) == "{\"foo\":[\"foo\"]}"
+  expect json.encode(field(body, name: "files")) == "{\"file\":[\"file content\"]}"
+}
+
+test "post: unknown content type becomes a data URL" {
+  let r = test_router()
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "application/x-foo"
+  req.body = "abc".bytes()
+  expect text_of(field(body_json(try r.handle(req)), name: "data")) == "data:application/x-foo;base64,YWJj"
+}
+
+test "post: body too large" {
+  let r = app_with(httpbin.Config(max_body_size: 8))
+  var req = new_request("POST", target: "/post")
+  req.headers["content-type"] = "text/plain"
+  req.body = "0123456789".bytes()
+  expect (try r.handle(req)).status == 400
+}
+
+test "put, patch, delete and anything" {
+  let r = test_router()
+  expect do(r, method: "PUT", target: "/put").status == 200
+  expect do(r, method: "PATCH", target: "/patch").status == 200
+  expect do(r, method: "DELETE", target: "/delete").status == 200
+  expect do(r, method: "GET", target: "/delete").status == 405
+  for m in ["GET", "POST", "PUT", "PATCH", "DELETE", "FOO"] {
+    let res = do(r, method: m, target: "/anything/foo/bar")
+    expect res.status == 200
+    expect text_of(field(body_json(res), name: "method")) == m
+  }
+}
+
+test "upload counts bytes" {
+  let r = test_router()
+  var req = new_request("POST", target: "/upload")
+  req.body = "hello".bytes()
+  expect text_of(field(body_json(try r.handle(req)), name: "bytes_received")) == "5"
+}
+
+// ---- TestStatus ----
+
+test "status codes and special cases" {
+  let r = test_router()
+  let ok = do(r, method: "GET", target: "/status/418")
+  expect ok.status == 418
+  expect try ok.text() == "I'm a teapot!"
+  let redirect = do(r, method: "GET", target: "/status/302")
+  expect redirect.headers["location"] == "/redirect/1"
+  let unauthorized = do(r, method: "GET", target: "/status/401")
+  expect unauthorized.headers["www-authenticate"] == "Basic realm=\"Fake Realm\""
+  let multiple = do(r, method: "GET", target: "/status/300")
+  expect (try multiple.text()).starts_with("<!doctype html>\n<head>\n<title>Multiple Choices</title>")
+  expect do(r, method: "GET", target: "/status/599").status == 599
+}
+
+test "status errors" {
+  let failures = check_statuses(test_router(), cases: [
+    StatusCase(target: "/status", status: 404),
+    StatusCase(target: "/status/", status: 404),
+    StatusCase(target: "/status/200/foo", status: 404),
+    StatusCase(target: "/status/3.14", status: 400),
+    StatusCase(target: "/status/foo", status: 400),
+    StatusCase(target: "/status/600", status: 400),
+    StatusCase(target: "/status/1024", status: 400),
+    StatusCase(target: "/status/200:foo,500:1", status: 400),
+    StatusCase(target: "/status/200:1,foo:1", status: 400),
+  ])
+  expect failures == []
+}
+
+test "status: weighted choice" {
+  let r = test_router()
+  for i in 0..<20 {
+    let code = do(r, method: "GET", target: "/status/200:0.7,429:0.2,503:0.1").status
+    expect code == 200 or code == 429 or code == 503
+  }
+  expect do(r, method: "GET", target: "/status/200:0,404:1").status == 404
+}
+
+test "weighted random choice picks by weight" {
+  let choices = try helpers.parse_weighted_choices("100:1,200:2,300:1")
+  expect helpers.weighted_random_choice(choices, r: 0.0) == 100
+  expect helpers.weighted_random_choice(choices, r: 0.3) == 200
+  expect helpers.weighted_random_choice(choices, r: 0.74) == 200
+  expect helpers.weighted_random_choice(choices, r: 0.8) == 300
+}
+
+// ---- TestUnstable ----
+
+test "unstable" {
+  let r = test_router()
+  expect do(r, method: "GET", target: "/unstable?failure_rate=0").status == 200
+  expect do(r, method: "GET", target: "/unstable?failure_rate=1").status == 500
+  expect do(r, method: "GET", target: "/unstable?failure_rate=2").status == 400
+  expect do(r, method: "GET", target: "/unstable?failure_rate=x").status == 400
+  expect do(r, method: "GET", target: "/unstable?seed=x").status == 400
+  // the same seed gives the same answer
+  let a = do(r, method: "GET", target: "/unstable?seed=1234").status
+  expect do(r, method: "GET", target: "/unstable?seed=1234").status == a
+}
+
+// ---- TestResponseHeaders ----
+
+test "response headers" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/response-headers?Foo=foo&Bar=bar")
+  expect res.headers["foo"] == "foo"
+  expect res.headers["bar"] == "bar"
+  expect res.headers["content-type"] == "application/json; charset=utf-8"
+  expect json.encode(body_json(res)) == "{\"Bar\":[\"bar\"],\"Content-Type\":[\"application/json; charset=utf-8\"],\"Foo\":[\"foo\"]}"
+}
+
+test "response headers escape dangerous content" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/response-headers?Content-Type=text/html&xss=%3Cimg%3E")
+  expect res.headers["content-type"] == "text/html"
+  expect (try res.text()).contains("&lt;img&gt;")
+  let unsafe = app_with(httpbin.Config(unsafe_allow_dangerous_responses: true))
+  expect (try do(unsafe, method: "GET", target: "/response-headers?Content-Type=text/html&xss=%3Cimg%3E").text()).contains("<img>")
+}
+
+// ---- TestRedirects ----
+
+test "redirects" {
+  for prefix in ["", "/test-prefix"] {
+    let r = app_with(httpbin.Config(prefix: prefix))
+    let cases = [
+      ["/redirect/1", "${prefix}/get"],
+      ["/redirect/2", "${prefix}/relative-redirect/1"],
+      ["/redirect/100", "${prefix}/relative-redirect/99"],
+      ["/redirect/1?absolute=true", "http://host/get"],
+      ["/redirect/2?absolute=TRUE", "http://host/absolute-redirect/1"],
+      ["/redirect/100?absolute=t", "${prefix}/relative-redirect/99"],
+      ["/relative-redirect/1", "${prefix}/get"],
+      ["/relative-redirect/2", "${prefix}/relative-redirect/1"],
+      ["/absolute-redirect/1", "http://host/get"],
+      ["/absolute-redirect/100", "http://host/absolute-redirect/99"],
+    ]
+    for c in cases {
+      let res = do(r, method: "GET", target: "${prefix}${c[0]}")
+      expect res.status == 302
+      expect res.headers["location"] == c[1]
+    }
+    let failures = check_statuses(r, cases: [
+      StatusCase(target: "${prefix}/redirect", status: 404),
+      StatusCase(target: "${prefix}/redirect/", status: 404),
+      StatusCase(target: "${prefix}/redirect/-1", status: 400),
+      StatusCase(target: "${prefix}/redirect/3.14", status: 400),
+      StatusCase(target: "${prefix}/redirect/foo", status: 400),
+      StatusCase(target: "${prefix}/redirect/10/foo", status: 404),
+      StatusCase(target: "${prefix}/absolute-redirect/-1", status: 400),
+      StatusCase(target: "${prefix}/relative-redirect/foo", status: 400),
+    ])
+    expect failures == []
+  }
+}
+
+// ---- TestRedirectTo ----
+
+test "redirect to" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/redirect-to?url=http://www.example.com/")
+  expect res.status == 302
+  expect res.headers["location"] == "http://www.example.com/"
+  let code = do(r, method: "GET", target: "/redirect-to?url=/get&status_code=307")
+  expect code.status == 307
+  expect code.headers["location"] == "/get"
+  let failures = check_statuses(r, cases: [
+    StatusCase(target: "/redirect-to", status: 400),
+    StatusCase(target: "/redirect-to?status_code=302", status: 400),
+    StatusCase(target: "/redirect-to?url=foo&status_code=201", status: 403),
+    StatusCase(target: "/redirect-to?url=/foo&status_code=418", status: 400),
+    StatusCase(target: "/redirect-to?url=/foo&status_code=3.14", status: 400),
+  ])
+  expect failures == []
+}
+
+test "redirect to: allowed domains" {
+  let r = app_with(httpbin.Config(allowed_redirect_domains: ["httpbingo.org", "example.org"]))
+  expect do(r, method: "GET", target: "/redirect-to?url=http://httpbingo.org").status == 302
+  expect do(r, method: "GET", target: "/redirect-to?url=/relative").status == 302
+  let denied = do(r, method: "GET", target: "/redirect-to?url=http://evil.com")
+  expect denied.status == 403
+  expect try denied.text() == "Forbidden redirect URL. Please be careful with this link.\n\nAllowed redirect destinations:\n- example.org\n- httpbingo.org"
+}
+
+// ---- TestCookies ----
+
+test "cookies echo" {
+  let r = test_router()
+  var req = new_request("GET", target: "/cookies")
+  req.headers["cookie"] = "k1=v1; k2=v2"
+  expect json.encode(field(body_json(try r.handle(req)), name: "cookies")) == "{\"k1\":\"v1\",\"k2\":\"v2\"}"
+}
+
+test "set cookies redirects and sets" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/cookies/set?k1=v1")
+  expect res.status == 302
+  expect res.headers["location"] == "/cookies"
+  expect (res.headers["set-cookie"] ?? "").starts_with("k1=v1; Path=/")
+}
+
+// ---- TestBasicAuth, TestHiddenBasicAuth, TestBearer, TestDigestAuth ----
+
+test "basic auth" {
+  let r = test_router()
+  var req = new_request("GET", target: "/basic-auth/user/pass")
+  req.headers["authorization"] = "Basic ${"user:pass".bytes().base64()}"
+  let res = try r.handle(req)
+  expect res.status == 200
+  expect try res.text() == "{\n  \"authenticated\": true,\n  \"user\": \"user\",\n  \"authorized\": true\n}\n"
+  var bad = new_request("GET", target: "/basic-auth/user/pass")
+  bad.headers["authorization"] = "Basic ${"user:bad".bytes().base64()}"
+  let denied = try r.handle(bad)
+  expect denied.status == 401
+  expect denied.headers["www-authenticate"] == "Basic realm=\"Fake Realm\""
+  expect do(r, method: "GET", target: "/hidden-basic-auth/user/pass").status == 404
+}
+
+test "bearer" {
+  let r = test_router()
+  var req = new_request("GET", target: "/bearer")
+  req.headers["authorization"] = "Bearer abc123"
+  expect text_of(field(body_json(try r.handle(req)), name: "token")) == "abc123"
+  for header in ["", "Bearer", "Bearer a b", "Basic abc", "bearer abc"] {
+    var bad = new_request("GET", target: "/bearer")
+    bad.headers["authorization"] = header
+    let res = try r.handle(bad)
+    expect res.status == 401
+    expect res.headers["www-authenticate"] == "Bearer"
+  }
+}
+
+test "digest auth" {
+  let r = test_router()
+  let challenge = do(r, method: "GET", target: "/digest-auth/auth/user/password")
+  expect challenge.status == 401
+  expect (challenge.headers["www-authenticate"] ?? "").starts_with("Digest qop=auth, realm=\"go-httpbin\", algorithm=MD5, nonce=")
+  let sha = do(r, method: "GET", target: "/digest-auth/auth/user/password/SHA-256")
+  expect (sha.headers["www-authenticate"] ?? "").contains("algorithm=SHA-256")
+  expect do(r, method: "GET", target: "/digest-auth/auth-int/user/password").status == 400
+  expect do(r, method: "GET", target: "/digest-auth/auth/user/password/SHA-512").status == 400
+  // captured from a browser login, from the original test suite
+  var ok = new_request("GET", target: "/digest-auth/auth/user/pass/MD5")
+  ok.headers["authorization"] = "Digest username=\"user\", realm=\"go-httpbin\", nonce=\"6fb213c6593975c877bb1247370527ad\", uri=\"/digest-auth/auth/user/pass/MD5\", algorithm=MD5, response=\"9b7a05d78051b4f668356eedf32f55d6\", opaque=\"fd1c386a015a2bb7c41585f54329ce91\", qop=auth, nc=00000001, cnonce=\"aaab705226af5bd4\""
+  expect (try r.handle(ok)).status == 200
+}
+
+// ---- TestGzip, TestDeflate ----
+
+test "gzip and deflate" {
+  let r = test_router()
+  let gz = do(r, method: "GET", target: "/gzip")
+  expect gz.headers["content-encoding"] == "gzip"
+  let body = try json.parse(try zlib.gunzip(gz.body).text())
+  expect field(body, name: "gzipped") == json.Value.Bool(value: true)
+  let df = do(r, method: "GET", target: "/deflate")
+  expect df.headers["content-encoding"] == "deflate"
+  let dbody = try json.parse(try zlib.inflate(df.body).text())
+  expect field(dbody, name: "deflated") == json.Value.Bool(value: true)
+}
+
+// ---- TestDelay, TestDrip (argument checks) ----
+
+test "delay and drip errors" {
+  let failures = check_statuses(test_router(), cases: [
+    StatusCase(target: "/delay/0", status: 200),
+    StatusCase(target: "/delay/foo", status: 400),
+    StatusCase(target: "/delay/-1", status: 400),
+    StatusCase(target: "/delay/11s", status: 400),
+    StatusCase(target: "/drip?duration=0&delay=0&numbytes=3", status: 200),
+    StatusCase(target: "/drip?numbytes=0", status: 400),
+    StatusCase(target: "/drip?numbytes=foo", status: 400),
+    StatusCase(target: "/drip?duration=-1s", status: 400),
+    StatusCase(target: "/drip?delay=foo", status: 400),
+    StatusCase(target: "/drip?code=600", status: 400),
+    StatusCase(target: "/drip?duration=6s&delay=6s", status: 400),
+    StatusCase(target: "/drip?duration=0&delay=0&code=201", status: 201),
+  ])
+  expect failures == []
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/drip?duration=0&delay=0&numbytes=5")
+  expect try res.text() == "*****"
+}
+
+// ---- TestRange ----
+
+test "range" {
+  let r = test_router()
+  let all = do(r, method: "GET", target: "/range/10")
+  expect all.status == 200
+  expect try all.text() == "abcdefghij"
+  expect all.headers["etag"] == "range10"
+  expect all.headers["accept-ranges"] == "bytes"
+  var part = new_request("GET", target: "/range/100")
+  part.headers["range"] = "bytes=10-24"
+  let res = try r.handle(part)
+  expect res.status == 206
+  expect try res.text() == "klmnopqrstuvwxy"
+  expect res.headers["content-range"] == "bytes 10-24/100"
+  var suffix = new_request("GET", target: "/range/26")
+  suffix.headers["range"] = "bytes=-5"
+  expect try (try r.handle(suffix)).text() == "vwxyz"
+  var multi = new_request("GET", target: "/range/26")
+  multi.headers["range"] = "bytes=0-1,5-6"
+  let m = try r.handle(multi)
+  expect m.status == 206
+  expect (m.headers["content-type"] ?? "").starts_with("multipart/byteranges; boundary=")
+  var bad = new_request("GET", target: "/range/26")
+  bad.headers["range"] = "bytes=30-40"
+  expect (try r.handle(bad)).status == 416
+  expect do(r, method: "GET", target: "/range/0").status == 400
+  expect do(r, method: "GET", target: "/range/foo").status == 400
+}
+
+// ---- TestCache, TestCacheControl, TestETag ----
+
+test "cache" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/cache")
+  expect res.status == 200
+  expect not (res.headers["last-modified"] is none)
+  expect not (res.headers["etag"] is none)
+  var cached = new_request("GET", target: "/cache")
+  cached.headers["if-none-match"] = "x"
+  expect (try r.handle(cached)).status == 304
+  expect do(r, method: "GET", target: "/cache/60").headers["cache-control"] == "public, max-age=60"
+  expect do(r, method: "GET", target: "/cache/foo").status == 400
+}
+
+test "etag" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/etag/abc")
+  expect res.headers["etag"] == "\"abc\""
+  var inm = new_request("GET", target: "/etag/abc")
+  inm.headers["if-none-match"] = "\"abc\""
+  expect (try r.handle(inm)).status == 304
+  var other = new_request("GET", target: "/etag/abc")
+  other.headers["if-none-match"] = "\"xyz\""
+  expect (try r.handle(other)).status == 200
+  var im = new_request("GET", target: "/etag/abc")
+  im.headers["if-match"] = "\"xyz\""
+  expect (try r.handle(im)).status == 412
+  var im_ok = new_request("GET", target: "/etag/abc")
+  im_ok.headers["if-match"] = "\"abc\""
+  expect (try r.handle(im_ok)).status == 200
+}
+
+// ---- TestBytes, TestStreamBytes ----
+
+test "bytes" {
+  let r = test_router()
+  let res = do(r, method: "GET", target: "/bytes/1024")
+  expect res.status == 200
+  expect res.body.length == 1024
+  expect res.headers["content-type"] == "application/octet-stream"
+  let a = do(r, method: "GET", target: "/bytes/16?seed=1234")
+  let b = do(r, method: "GET", target: "/bytes/16?seed=1234")
+  expect a.body == b.body
+  let failures = check_statuses(r, cases: [
+    StatusCase(target: "/bytes/0", status: 200),
+    StatusCase(target: "/bytes/-1", status: 400),
+    StatusCase(target: "/bytes/3.14", status: 400),
+    StatusCase(target: "/bytes/foo", status: 400),
+    StatusCase(target: "/bytes/1048577", status: 400),
+    StatusCase(target: "/bytes/16?seed=foo", status: 400),
+    StatusCase(target: "/stream-bytes/16?chunk_size=foo", status: 400),
+  ])
+  expect failures == []
+}
+
+// ---- TestLinks, TestImage, TestBase64 ----
+
+test "links" {
+  let r = test_router()
+  let redirect = do(r, method: "GET", target: "/links/10")
+  expect redirect.status == 302
+  expect redirect.headers["location"] == "/links/10/0"
+  let page = do(r, method: "GET", target: "/links/3/1")
+  expect try page.text() == "<html><head><title>Links</title></head><body><a href=\"/links/3/0\">0</a> 1 <a href=\"/links/3/2\">2</a> </body></html>"
+  expect do(r, method: "GET", target: "/links/257").status == 400
+  expect do(r, method: "GET", target: "/links/1/foo").status == 400
+}
+
+test "images" {
+  let r = test_router()
+  for kind in ["png", "jpeg", "webp", "svg", "avif"] {
+    let res = do(r, method: "GET", target: "/image/${kind}")
+    expect res.status == 200
+    expect res.body.length > 0
+  }
+  expect do(r, method: "GET", target: "/image/svg").headers["content-type"] == "image/svg+xml"
+  expect do(r, method: "GET", target: "/image/gif").status == 404
+  var accept = new_request("GET", target: "/image")
+  accept.headers["accept"] = "image/webp"
+  expect (try r.handle(accept)).headers["content-type"] == "image/webp"
+  var bad = new_request("GET", target: "/image")
+  bad.headers["accept"] = "text/html"
+  expect (try r.handle(bad)).status == 415
+}
+
+test "base64" {
+  let r = test_router()
+  expect try do(r, method: "GET", target: "/base64/dmFsaWRfYmFzZTY0X2VuY29kZWRfc3RyaW5n").text() == "valid_base64_encoded_string"
+  expect try do(r, method: "GET", target: "/base64/decode/dmFsaWRfYmFzZTY0X2VuY29kZWRfc3RyaW5n").text() == "valid_base64_encoded_string"
+  expect try do(r, method: "GET", target: "/base64/encode/valid_base64_encoded_string").text() == "dmFsaWRfYmFzZTY0X2VuY29kZWRfc3RyaW5n"
+  expect try do(r, method: "GET", target: "/base64/decode/YWJjMTIzIT8kKiYoKSctPUB-").text() == "abc123!?$*&()'-=@~"
+  let failures = check_statuses(r, cases: [
+    StatusCase(target: "/base64/invalid_base64_encoded_string", status: 400),
+    StatusCase(target: "/base64/unknown/dmFsaWQ=", status: 400),
+    StatusCase(target: "/base64/decode", status: 400),
+    StatusCase(target: "/base64/decode/", status: 404),
+  ])
+  expect failures == []
+}
+
+// ---- misc ----
+
+test "not implemented, hostname, uuid, json, xml" {
+  let r = test_router()
+  expect do(r, method: "GET", target: "/brotli").status == 501
+  expect text_of(field(body_json(do(r, method: "GET", target: "/hostname")), name: "hostname")) == "go-httpbin"
+  expect text_of(field(body_json(do(r, method: "GET", target: "/uuid")), name: "uuid")).length == 36
+  expect do(r, method: "GET", target: "/json").headers["content-type"] == "application/json; charset=utf-8"
+  expect do(r, method: "GET", target: "/xml").headers["content-type"] == "application/xml"
+  expect try do(r, method: "GET", target: "/robots.txt").text() == "User-agent: *\nDisallow: /deny\n"
+}
+
+test "sse and jsonl argument checks" {
+  let failures = check_statuses(test_router(), cases: [
+    StatusCase(target: "/sse?count=0", status: 400),
+    StatusCase(target: "/sse?count=foo", status: 400),
+    StatusCase(target: "/sse?duration=foo", status: 400),
+    StatusCase(target: "/sse?duration=0", status: 400),
+    StatusCase(target: "/sse?delay=foo", status: 400),
+    StatusCase(target: "/sse?jitter=2", status: 400),
+    StatusCase(target: "/sse?duration=6s&delay=6s", status: 400),
+    StatusCase(target: "/sse?count=2&duration=1ms", status: 200),
+    StatusCase(target: "/jsonl?count=foo", status: 400),
+    StatusCase(target: "/jsonl?jitter=-1", status: 400),
+    StatusCase(target: "/jsonl?count=0", status: 200),
+  ])
+  expect failures == []
+}
+
+test "trailers: forbidden names" {
+  let r = test_router()
+  expect do(r, method: "GET", target: "/trailers?content-type=x").status == 400
+  expect do(r, method: "GET", target: "/trailers?x-ok=1").status == 200
+}
+
+test "helpers: go-style parsing" {
+  expect helpers.canonical_header_key("x-forwarded-FOR") == "X-Forwarded-For"
+  expect try helpers.atoi("+12") == 12
+  expect (try helpers.parse_duration("1.5")).millis() == 1500
+  expect (try helpers.parse_duration("250ms")).millis() == 250
+  expect helpers.compute_pause_per_write(time_seconds(1), count: 11).millis() == 100
+  expect helpers.encode_server_timings([helpers.ServerTiming(name: "a", dur: time_seconds(1), desc: "d")]) == "a;dur=1000.00;desc=\"d\""
+}
+
+fn time_seconds(n: Int) -> time.Duration {
+  return time.seconds(n)
+}

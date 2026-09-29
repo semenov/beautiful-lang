@@ -1,0 +1,48 @@
+
+Summary:
+  Total:	10.0001 secs
+  Slowest:	0.0023 secs
+  Fastest:	0.0002 secs
+  Average:	0.0003 secs
+  Requests/sec:	23719.3845
+  
+  Total data:	16448 bytes
+  Size/request:	64 bytes
+
+Response time histogram:
+  0.000 [1]	|
+  0.000 [251]	|■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■
+  0.001 [0]	|
+  0.001 [0]	|
+  0.001 [0]	|
+  0.001 [0]	|
+  0.001 [0]	|
+  0.002 [0]	|
+  0.002 [0]	|
+  0.002 [0]	|
+  0.002 [5]	|■
+
+
+Latency distribution:
+  10%% in 0.0002 secs
+  25%% in 0.0002 secs
+  50%% in 0.0003 secs
+  75%% in 0.0003 secs
+  90%% in 0.0003 secs
+  95%% in 0.0003 secs
+  99%% in 0.0023 secs
+
+Details (average, fastest, slowest):
+  DNS+dialup:	n/a (not measurable: included in resp wait)
+  DNS-lookup:	n/a (not measurable: included in resp wait)
+  req write:	n/a (not measurable: included in resp wait)
+  resp wait:	0.0003 secs, 0.0002 secs, 0.0023 secs
+  resp read:	0.0000 secs, 0.0000 secs, 0.0000 secs
+
+Status code distribution:
+  [200]	257 responses
+
+Error distribution:
+  [236935]	http: GET http://127.0.0.1:8098/ failed: Couldn't connect to server
+  [5]	http: GET http://127.0.0.1:8098/ failed: Failure when receiving data from the peer
+

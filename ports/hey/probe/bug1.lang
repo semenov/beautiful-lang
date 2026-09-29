@@ -1,0 +1,8 @@
+import process
+
+fn main() {
+  let n = try "x".to_int() catch err {
+    process.exit(2)
+  }
+  print("${n}")
+}

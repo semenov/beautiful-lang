@@ -1,0 +1,10 @@
+// Response headers are a case-sensitive map: this sends two content types.
+//   curl -si localhost:18102/   ->  content-type: text/plain; charset=utf-8
+//                                   Content-Type: text/html
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/", req => http.text(200, "<b>hi</b>").with_header("Content-Type", "text/html"))
+  try http.serve(router, port: 18102)
+}

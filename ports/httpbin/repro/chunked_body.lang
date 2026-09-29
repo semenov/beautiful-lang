@@ -1,0 +1,11 @@
+// A request body sent with Transfer-Encoding: chunked arrives empty.
+//   curl -s localhost:18101/ -H 'Transfer-Encoding: chunked' -d 'abc'   -> "body: 0 bytes" (expected 3)
+//   printf abc | curl -s -T - localhost:18101/                          -> "body: 0 bytes"
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.post("/", req => http.text(200, "body: ${req.body.length} bytes\n"))
+  router.put("/", req => http.text(200, "body: ${req.body.length} bytes\n"))
+  try http.serve(router, port: 18101)
+}

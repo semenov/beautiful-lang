@@ -1,0 +1,20 @@
+import http
+import time
+
+fn show(req: http.ClientRequest) {
+  let t = time.now()
+  let r = try http.send(req) catch err {
+    print("${req.method} failed: ${err.message()}")
+    return
+  }
+  print("== ${req.method} -> ${r.status} in ${t.elapsed().seconds()}\n${try r.text() catch e { "?" }}")
+}
+
+fn main() throws {
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/echo"))
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/echo", method: "POST", headers: {"Content-Type": "text/html", "User-Agent": "hey/0.0.1", "Host": "example.com"}, body: "abc".bytes()))
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/echo", method: "HEAD", timeout: 3))
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/echo", method: "OPTIONS"))
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/echo", method: "GET", body: "zzz".bytes()))
+  show(http.ClientRequest(url: "http://127.0.0.1:8099/slow=2", timeout: 0))
+}
