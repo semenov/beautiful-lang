@@ -449,6 +449,11 @@ typedef struct lt_text {
     // characters; -1 until counted (then chars == len means ASCII, where a
     // character's index is its byte offset)
     int64_t chars;
+    // a hint for walking by character: the last (character index, byte
+    // offset) pair found, as (index << 32 | offset); 0 (the start) until
+    // then. One word, read and written with relaxed atomics, so threads
+    // sharing the text always see a pair that belongs together.
+    uint64_t at;
     char data[];
 } lt_text;
 
@@ -533,6 +538,7 @@ static lt_text *lt_text_new(int64_t len) {
     t->rc = 1;
     t->len = len;
     t->chars = -1;
+    t->at = 0;
     t->data[len] = 0;
     return t;
 }
@@ -547,7 +553,7 @@ static lt_text *lt_text_cstr(const char *s) {
     return lt_text_from(s, (int64_t)strlen(s));
 }
 
-static struct { int64_t rc; int64_t len; int64_t chars; char data[1]; } lt_empty_text_obj = { -1, 0, 0, "" };
+static struct { int64_t rc; int64_t len; int64_t chars; uint64_t at; char data[1]; } lt_empty_text_obj = { -1, 0, 0, 0, "" };
 #define LT_EMPTY_TEXT ((lt_text *)&lt_empty_text_obj)
 
 LT_INLINE bool lt_text_eq(lt_text *a, lt_text *b) {
@@ -807,18 +813,63 @@ static int64_t lt_text_length(lt_text *t) {
 // whether characters are bytes (ASCII): then indexes are byte offsets
 static inline bool lt_text_ascii(lt_text *t) { return lt_text_length(t) == t->len; }
 
-// byte offset of the character with index `ci` (clamped to the end)
+#define LT_IS_LEAD(c) (((unsigned char)(c) & 0xC0) != 0x80)
+
+LT_INLINE void lt_text_at_load(lt_text *t, int64_t *ci, int64_t *bi) {
+    uint64_t at = __atomic_load_n(&t->at, __ATOMIC_RELAXED);
+    *ci = (int64_t)(at >> 32);
+    *bi = (int64_t)(at & 0xFFFFFFFFu);
+}
+LT_INLINE void lt_text_at_store(lt_text *t, int64_t ci, int64_t bi) {
+    if (bi > 0xFFFFFFFFll || ci > 0xFFFFFFFFll) return; // texts over 4 GB: no hint
+    __atomic_store_n(&t->at, ((uint64_t)ci << 32) | (uint64_t)bi, __ATOMIC_RELAXED);
+}
+
+// byte offset of the character with index `ci` (clamped to the end).
+// Walks from the remembered position (forward or back) or from the start,
+// whichever is nearer, so a loop over the characters is linear.
 static int64_t lt_text_char_offset(lt_text *t, int64_t ci) {
     if (ci <= 0) return 0;
     if (lt_text_ascii(t)) return ci < t->len ? ci : t->len;
-    int64_t n = 0;
-    for (int64_t i = 0; i < t->len; i++) {
-        if (((unsigned char)t->data[i] & 0xC0) != 0x80) {
-            if (n == ci) return i;
-            n++;
+    if (ci >= lt_text_length(t)) return t->len;
+    int64_t c, b;
+    lt_text_at_load(t, &c, &b);
+    if (ci < c && ci < c - ci) c = b = 0; // nearer the start than the hint
+    const char *d = t->data;
+    if (ci >= c) {
+        while (c < ci) { // forward: step over one character
+            b++;
+            while (b < t->len && !LT_IS_LEAD(d[b])) b++;
+            c++;
+        }
+    } else {
+        while (c > ci) { // back
+            b--;
+            while (b > 0 && !LT_IS_LEAD(d[b])) b--;
+            c--;
         }
     }
-    return t->len;
+    lt_text_at_store(t, ci, b);
+    return b;
+}
+
+// the character index of byte offset `byte` (a character's first byte, or
+// the end); uses the same hint
+static int64_t lt_text_char_index(lt_text *t, int64_t byte) {
+    if (byte <= 0) return 0;
+    if (byte >= t->len) return lt_text_length(t);
+    if (lt_text_ascii(t)) return byte;
+    int64_t c, b;
+    lt_text_at_load(t, &c, &b);
+    if (byte < b && byte < b - byte) c = b = 0;
+    const char *d = t->data;
+    if (byte >= b) {
+        for (; b < byte; b++) c += LT_IS_LEAD(d[b]);
+    } else {
+        for (b--; b >= byte; b--) c -= LT_IS_LEAD(d[b]);
+    }
+    if (LT_IS_LEAD(d[byte])) lt_text_at_store(t, c, byte); // only a valid pair
+    return c;
 }
 
 static lt_text *lt_text_slice(lt_text *t, int64_t from, int64_t to) {
@@ -1770,11 +1821,7 @@ static int64_t lt_text_find(lt_text *t, lt_text *part, int64_t from) {
     if (start > t->len) return -1;
     const char *hit = lt_find(t->data + start, t->len - start, part->data, part->len);
     if (!hit) return -1;
-    if (lt_text_ascii(t)) return hit - t->data;
-    int64_t n = 0;
-    for (const char *p = t->data; p < hit; p++)
-        if (((unsigned char)*p & 0xC0) != 0x80) n++;
-    return n;
+    return lt_text_char_index(t, hit - t->data);
 }
 
 // the character index of the last `part`, or -1
@@ -1782,11 +1829,7 @@ static int64_t lt_text_rfind(lt_text *t, lt_text *part) {
     if (part->len > t->len) return -1;
     for (int64_t i = t->len - part->len; i >= 0; i--) {
         if (memcmp(t->data + i, part->data, (size_t)part->len) == 0) {
-            if (lt_text_ascii(t)) return i;
-            int64_t n = 0;
-            for (int64_t j = 0; j < i; j++)
-                if (((unsigned char)t->data[j] & 0xC0) != 0x80) n++;
-            return n;
+            return lt_text_char_index(t, i);
         }
     }
     return -1;

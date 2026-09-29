@@ -1,0 +1,47 @@
+// Walking non-ASCII text by character: slices forward, backward and at
+// random agree with `chars()`, and positions from index_of agree too.
+fn check(s: String) -> String {
+  let cs = s.chars()
+  var bad = 0
+  for i in 0..<s.length {
+    if s.slice(from: i, to: i + 1) != cs[i] {
+      bad += 1
+    }
+  }
+  var i = s.length - 1
+  while i >= 0 {
+    if s.slice(from: i, to: i + 1) != cs[i] {
+      bad += 1
+    }
+    i -= 1
+  }
+  var j = 0
+  for k in 0..<200 {
+    j = (j * 31 + k * 7 + 3) % s.length
+    if s.slice(from: j, to: j + 1) != cs[j] {
+      bad += 1
+    }
+  }
+  return "length ${s.length}, ${bad} wrong"
+}
+
+fn main() {
+  print(check("${"a".repeat(1000)}é"))
+  print(check("aé日😀".repeat(300)))
+  print(check("ж"))
+  let s = "héllo wörld, héllo again"
+  print("${s.index_of("wörld")} ${s.last_index_of("héllo")} ${s.index_of("x")}")
+  print(s.slice(from: 13, to: 18))
+  print(s.slice(from: 1, to: 4))
+  print(s.slice(from: 20, to: 100))
+  print("[${s.slice(from: 5, to: 2)}]")
+  var n = 0
+  var from = 0
+  let t = "aé".repeat(1000)
+  while t.slice(from: from, to: t.length).index_of("é") is some(p) {
+    n += 1
+    from = from + p + 1
+  }
+  print("${n} é")
+  print("${"日本語テキスト".slice(from: 2, to: 5)} ${"日本語テキスト".pad_start(10, fill: "·")}")
+}

@@ -426,7 +426,7 @@ impl<'a> CGen<'a> {
         }
         let i = self.lits.len();
         self.lits.insert(s.to_string(), i);
-        let _ = writeln!(self.lit_defs, "static struct {{ int64_t rc; int64_t len; int64_t chars; char data[{}]; }} lit{} = {{ -1, {}, {}, {} }};", s.len() + 1, i, s.len(), s.chars().count(), c_str(s));
+        let _ = writeln!(self.lit_defs, "static struct {{ int64_t rc; int64_t len; int64_t chars; uint64_t at; char data[{}]; }} lit{} = {{ -1, {}, {}, 0, {} }};", s.len() + 1, i, s.len(), s.chars().count(), c_str(s));
         format!("((lt_text*)&lit{})", i)
     }
 
