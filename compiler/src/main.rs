@@ -2,6 +2,7 @@ mod ast;
 mod cgen;
 mod check;
 mod diag;
+mod doc;
 mod lexer;
 mod lower;
 mod mir;
@@ -14,20 +15,193 @@ use diag::Sources;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "usage:
-  lang new <name>                   create a project
-  lang add <name> <git-url> [--version <tag>] [--path <dir>]   add a package
-  lang add <name> --path <dir>      add a package on this disk
-  lang fetch                        download the packages in lang.lock
-  lang update                       move packages to their newest matching versions
+const USAGE: &str = "lang: a language for CLI tools, scripts and backend services.
+
+New to it (an AI agent, or a person)? Start here:
+  lang guide                        the language in one read: syntax, rules, fixes for common errors
+  lang guide <topic>                one part of it: lang guide errors, lang guide concurrency
+  lang doc                          the standard library's modules
+  lang doc <module>                 a module's API: lang doc http
+  lang doc <module>.<name>          one function or type: lang doc http.Router, lang doc List.map
+  lang doc --search <word>          find functions by name or description: lang doc --search gzip
+
+Programs:
   lang run <file.lang> [args]       compile and run
   lang build <file.lang> [-o out]   compile an optimized binary
-  lang test <file.lang>             run the tests in the file
-  lang check <file.lang>            only check for errors
-options:
-  --emit-c <file.c>                 also write the generated C
+  lang test <file.lang>             run the file's `test` blocks
+  lang check <file.lang>            only check for errors (fast)
+
+Projects and packages:
+  lang new <name>                   create a project (lang.toml, main.lang)
+  lang add <name> <git-url> [--version <tag>] [--path <dir in the repository>]
+  lang add <name> --path <dir>      a package on this disk
+  lang fetch                        download the packages in lang.lock
+  lang update                       move packages to their newest matching versions
+
+Options:
   --debug                           check memory safety and leaks (slow)
-  --static                          (build, Linux) one file that needs no libraries at all";
+  --static                          (build, Linux) one file that needs no libraries at all
+  --emit-c <file.c>                 also write the generated C";
+
+// The standard library's modules, for `lang doc`.
+const STD_NAMES: &[&str] = &[
+    "files", "path", "io", "process", "env", "cli", "log", "time", "json", "http", "net", "sql", "db", "crypto", "encoding", "random", "regex", "csv", "xml", "url", "zlib", "math",
+];
+
+// `lang help`, `lang guide`, `lang doc`
+fn learn_command(args: &[String]) -> Option<ExitCode> {
+    let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
+    match cmd {
+        "help" | "--help" | "-h" => {
+            println!("{}", USAGE);
+            Some(ExitCode::SUCCESS)
+        }
+        "guide" => {
+            match args.get(1) {
+                None => print!("{}", doc::GUIDE),
+                Some(topic) => match doc::guide_topic(topic) {
+                    Some(text) => print!("{}", text),
+                    None => {
+                        eprintln!("no part of the guide is about `{}`; the parts are:\n  {}", topic, doc::guide_topics().join("\n  "));
+                        return Some(ExitCode::from(1));
+                    }
+                },
+            }
+            Some(ExitCode::SUCCESS)
+        }
+        "doc" => Some(doc_command(&args[1..])),
+        _ => None,
+    }
+}
+
+// Modules `lang doc` can show: the prelude, the standard library, and the
+// packages of the project in the current directory.
+fn doc_sources() -> Vec<(String, String, bool)> {
+    let mut out = vec![("prelude".to_string(), include_str!("prelude.lang").to_string(), true)];
+    for n in STD_NAMES {
+        if let Some(src) = std_module(n) {
+            out.push((n.to_string(), src.to_string(), false));
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = project::find_root(&cwd.join("x.lang"));
+    if let Ok(deps) = project::resolve(&root, false) {
+        for (name, dir) in deps {
+            if let Ok(src) = std::fs::read_to_string(dir.join(format!("{}.lang", name))) {
+                out.push((name, src, false));
+            }
+        }
+    }
+    out
+}
+
+fn doc_command(args: &[String]) -> ExitCode {
+    let sources = doc_sources();
+    let parsed: Vec<(String, doc::ModuleDoc)> = sources.iter().map(|(n, s, p)| (n.clone(), doc::parse(s, *p))).collect();
+    let find_module = |n: &str| parsed.iter().find(|(m, _)| m == n);
+    match args.first().map(|s| s.as_str()) {
+        None => {
+            println!("The standard library (`import <module>`, then `module.name`):\n");
+            for (n, m) in &parsed {
+                // the first sentence of the module's comment
+                let flat = m.intro.split("\n\n").next().unwrap_or("").replace('\n', " ");
+                let first = flat.split(". ").next().unwrap_or("").trim().trim_end_matches('.');
+                let first = first.strip_prefix(&format!("{}:", n)).unwrap_or(first).trim();
+                let label = if n == "prelude" { "prelude (no import)".to_string() } else { n.clone() };
+                println!("  {:<20} {}", label, first);
+            }
+            println!("\nMore: lang doc <module>, lang doc <module>.<name>, lang doc --search <word>");
+            ExitCode::SUCCESS
+        }
+        Some("--search") => {
+            let word = match args.get(1) {
+                Some(w) => w.to_lowercase(),
+                None => {
+                    eprintln!("usage: lang doc --search <word>");
+                    return ExitCode::from(2);
+                }
+            };
+            let mut hits = 0;
+            for (mname, m) in &parsed {
+                for it in &m.items {
+                    let owner = if mname == "prelude" { String::new() } else { format!("{}.", mname) };
+                    if it.text.to_lowercase().contains(&word) {
+                        println!("{}{}:\n{}\n", owner, it.name, indent(&first_lines(&it.text)));
+                        hits += 1;
+                    }
+                    for mem in &it.members {
+                        if mem.text.to_lowercase().contains(&word) {
+                            println!("{}{}.{}:\n{}\n", owner, it.name, mem.name, indent(&mem.text));
+                            hits += 1;
+                        }
+                    }
+                }
+            }
+            if hits == 0 {
+                eprintln!("nothing mentions `{}`", word);
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        Some(q) => {
+            let parts: Vec<&str> = q.split('.').collect();
+            // a module, or module.name, or module.Type.method
+            if let Some((n, m)) = find_module(parts[0]) {
+                if parts.len() == 1 {
+                    print!("{}", doc::render_module(n, m));
+                    return ExitCode::SUCCESS;
+                }
+                return show_item(&m.items, &parts[1..], q);
+            }
+            // a prelude type: List, List.map, Text.split
+            let prelude = &find_module("prelude").unwrap().1;
+            if prelude.items.iter().any(|i| i.name == parts[0]) {
+                return show_item(&prelude.items, &parts, q);
+            }
+            eprintln!("there is no module or prelude type `{}`; see `lang doc` for the list", parts[0]);
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn show_item(items: &[doc::Item], path: &[&str], full: &str) -> ExitCode {
+    let it = match items.iter().find(|i| i.name == path[0]) {
+        Some(i) => i,
+        None => {
+            let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+            eprintln!("no `{}`; there is: {}", full, names.join(", "));
+            return ExitCode::from(1);
+        }
+    };
+    if path.len() == 1 {
+        println!("{}", doc::render_item(it));
+        return ExitCode::SUCCESS;
+    }
+    match it.members.iter().find(|m| m.name == path[1]) {
+        Some(m) => {
+            println!("{}", m.text);
+            ExitCode::SUCCESS
+        }
+        None => {
+            let names: Vec<&str> = it.members.iter().map(|i| i.name.as_str()).collect();
+            eprintln!("`{}` has no `{}`; it has: {}", path[0], path[1], names.join(", "));
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn first_lines(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= 6 {
+        return text.to_string();
+    }
+    format!("{}\n...", lines[..6].join("\n"))
+}
+
+fn indent(text: &str) -> String {
+    text.lines().map(|l| format!("  {}", l)).collect::<Vec<_>>().join("\n")
+}
+
 
 struct Opts {
     cmd: String,
@@ -446,6 +620,9 @@ fn build_dir() -> PathBuf {
 
 fn main() -> ExitCode {
     let raw: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = learn_command(&raw) {
+        return code;
+    }
     if let Some(code) = project_command(&raw) {
         return code;
     }

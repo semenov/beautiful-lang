@@ -33,7 +33,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Top npm packages by downloads**: go through them, decide what
       belongs in the stdlib, what should be a package, what we don't need
 
-- [ ] **The `lang` CLI teaches the language**: tell an agent that knows
+- [x] **The `lang` CLI teaches the language**: tell an agent that knows
       nothing about it "run `lang help`", and it can learn the syntax and
       look up any stdlib module or function from the command line
       (`lang guide`, `lang doc http`, `lang doc http.Router`), built from the
@@ -42,7 +42,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] `lang fmt`: the formatter the design calls mandatory
   - [ ] `Decimal` for money
   - [ ] `time.timeout(duration, work)`
-  - [ ] `lang doc`
+  - [x] `lang doc`
   - [ ] a `Date` type (calendar dates apart from instants)
   - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
   - [ ] test doubles: a fixed clock, calling handlers without a network (done

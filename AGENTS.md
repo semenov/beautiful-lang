@@ -1,8 +1,20 @@
 # Writing lang: a guide for agents
 
-Everything needed to write correct code on the first try. The standard
-library reference is [`STDLIB.md`](STDLIB.md); the reasons behind the rules
-are in [`DESIGN.md`](DESIGN.md).
+Everything needed to write correct code on the first try (`lang guide`
+prints this). Look up any library from the command line:
+
+```
+lang doc                     the modules
+lang doc http                one module's API, with its comments
+lang doc http.Router         one type or function
+lang doc List.map            built-in types: List, Map, Set, Text, Bytes, Int, ...
+lang doc --search gzip       find by name or description
+lang guide errors            one section of this guide
+```
+
+`lang doc` also shows the packages of the project you're in. The same
+reference is in [`STDLIB.md`](STDLIB.md); the reasons behind the rules are
+in [`DESIGN.md`](DESIGN.md).
 
 ## Files and programs
 
