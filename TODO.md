@@ -7,7 +7,13 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [x] `plumb init` instead of `plumb new` (the current directory becomes the
       project) (Vlad, 2026-09-29)
-- [ ] **Compile time vs Go**: benchmark, fix what's slow (Vlad, 2026-09-29)
+- [x] **Compile time vs Go**: benchmark, fix what's slow (Vlad, 2026-09-29):
+      build cache (unchanged: 12 ms); run/test compile the runtime once and
+      cache it (backend after a change: 1.0 s -> 0.62 s; Go 0.13 s)
+  - [ ] next: the program's own C in several units compiled in parallel
+        (its -O1 compile is 0.38 s of the 0.62); smaller generated C
+        (stdlib code such as Router.route is compiled into every program);
+        `build` with the cached runtime too, if it doesn't cost speed
 - [ ] **A critic's review of the language**: write the complaints, then
       fix the language or explain in the README why it's right; keep it
       simple and fast (Vlad, 2026-09-29)

@@ -8,6 +8,7 @@ mod lexer;
 mod lower;
 mod mir;
 mod parser;
+mod split;
 mod project;
 mod rc;
 mod types;
@@ -721,8 +722,32 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         let _ = std::fs::remove_file(&c_path);
         return true;
     }
+    // run and test: the runtime is compiled once (optimized) and cached,
+    // so only the program's own code is compiled each time
+    let mut sources: Vec<PathBuf> = vec![c_path.clone()];
+    let mut program_c: Option<PathBuf> = None;
+    if !optimize && !opts.static_link && std::env::var("PLUMB_NO_SPLIT").is_err() {
+        if let Some(units) = split::split(&c) {
+            let rt_flags: Vec<String> = if opts.debug { cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect() } else { cmd.get_args().map(|a| a.to_string_lossy().to_string()).map(|a| if a == "-O1" { "-O2".into() } else { a }).collect() };
+            match runtime_object(&cc, &rt_flags, &units.runtime, &cache) {
+                Some(obj) => {
+                    let p = build_dir().join(format!("{}-{}-program.c", exe_name, std::process::id()));
+                    if std::fs::write(&p, &units.program).is_ok() {
+                        sources = vec![p.clone(), obj];
+                        program_c = Some(p);
+                    }
+                }
+                None => {}
+            }
+        }
+    }
     // libraries after the source: GNU ld only takes what's needed so far
-    let status = cmd.arg("-o").arg(exe).arg(&c_path).arg("-lm").args(&libs).status();
+    let status = cmd.arg("-o").arg(exe).args(&sources).arg("-lm").args(&libs).status();
+    if let Some(p) = &program_c {
+        if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
     // kept when the C compiler fails: the message points at it
     if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
         let _ = std::fs::remove_file(&c_path);
@@ -741,6 +766,40 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
             false
         }
     }
+}
+
+// The runtime unit compiled to an object file, from the cache when the
+// same runtime was compiled with the same flags before.
+fn runtime_object(cc: &str, flags: &[String], text: &str, cache: &Path) -> Option<PathBuf> {
+    let mut h = Fnv(0xcbf29ce484222325);
+    h.add(text.as_bytes());
+    h.add(cc.as_bytes());
+    for f in flags {
+        h.add(b"\0");
+        h.add(f.as_bytes());
+    }
+    let obj = cache.join(format!("rt-{:016x}.o", h.0));
+    if obj.exists() {
+        if let Ok(f) = std::fs::File::options().append(true).open(&obj) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
+        return Some(obj);
+    }
+    let _ = std::fs::create_dir_all(cache);
+    let src = build_dir().join(format!("rt-{}.c", std::process::id()));
+    let tmp = cache.join(format!("tmp-rt-{}.o", std::process::id()));
+    std::fs::write(&src, text).ok()?;
+    let ok = Command::new(cc).args(flags).arg("-c").arg("-o").arg(&tmp).arg(&src).status().map(|s| s.success()).unwrap_or(false);
+    if ok {
+        let _ = std::fs::remove_file(&src);
+    }
+    if !ok || std::fs::rename(&tmp, &obj).is_err() {
+        // the single-file build still works; keep the C for a look
+        let _ = std::fs::remove_file(&tmp);
+        eprintln!("warning: the runtime didn't compile on its own ({}); compiling it with the program", src.display());
+        return None;
+    }
+    Some(obj)
 }
 
 struct Fnv(u64);

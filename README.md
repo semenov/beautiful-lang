@@ -214,6 +214,16 @@ reference counting that the compiler inserts, with no garbage collector.
 (`benchmarks/`: `ONLY=Go,Plumb python3 run.py`; median of 3 runs on an
 Apple M-series laptop, 2026-09-29. Where we lose, `TODO.md` says why.)
 
+Compiling is slower than Go's, because the C compiler does most of the
+work. For the notes backend (`benchmarks/backend`, 167 lines), after a
+change: `plumb check` 8 ms, `plumb run` 0.62 s, `plumb build` (optimized)
+1.03 s; Go with a warm cache, `go build` 0.13 s. What helps:
+
+- an unchanged program comes from a build cache (12 ms);
+- `run` and `test` compile the runtime once per configuration (optimized)
+  and cache it, so only the program's own code goes through the C compiler
+  each time.
+
 ## How tasks run
 
 `spawn f(x)` starts a task: a function running on its own stack, in
