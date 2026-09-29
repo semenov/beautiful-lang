@@ -81,10 +81,10 @@ pub fn add(req: http.Request, app: api.App) throws -> http.Response {
     throw api.blank("body")
   }
   let now = api.now()
-  let id = try app.conn.insert(
+  let id = try app.write(() => try app.conn.insert(
     "insert into comments (body, article_id, author_id, created_at, updated_at) values (?, ?, ?, ?, ?)",
     [input.body, article_id, viewer, now, now],
-  )
+  ))
   let rows = try find(app, article_id: article_id, id: id, viewer: viewer)
   return api.reply(201, CommentBody(comment: comment(rows[0])))
 }
@@ -112,6 +112,6 @@ pub fn delete(req: http.Request, app: api.App) throws -> http.Response {
   if row.author_id != viewer {
     throw api.forbidden("comment")
   }
-  try app.conn.execute("delete from comments where id = ?", [id])
+  try app.write(() => try app.conn.execute("delete from comments where id = ?", [id]))
   return http.text(204, "")
 }

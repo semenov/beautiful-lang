@@ -101,9 +101,11 @@ pub fn register(req: http.Request, app: api.App) throws -> http.Response {
     throw api.blank("email")
   }
   try check_password(input.password)
-  try check_free(app, username: username, email: email, id: 0)
   let hash = crypto.hash_password(input.password)
-  let id = try app.conn.insert("insert into users (username, email, password_hash) values (?, ?, ?)", [username, email, hash])
+  let id = try app.write(() => {
+    try check_free(app, username: username, email: email, id: 0)
+    try app.conn.insert("insert into users (username, email, password_hash) values (?, ?, ?)", [username, email, hash])
+  })
   return answer(201, account: try load(app, id: id), app: app)
 }
 
@@ -152,10 +154,12 @@ pub fn update(req: http.Request, app: api.App) throws -> http.Response {
     try check_password(password)
     account.password_hash = crypto.hash_password(password)
   }
-  try check_free(app, username: account.username, email: account.email, id: id)
-  try app.conn.execute(
-    "update users set username = ?, email = ?, password_hash = ?, bio = ?, image = ? where id = ?",
-    [account.username, account.email, account.password_hash, api.nullable(account.bio), api.nullable(account.image), id],
-  )
+  try app.write(() => {
+    try check_free(app, username: account.username, email: account.email, id: id)
+    try app.conn.execute(
+      "update users set username = ?, email = ?, password_hash = ?, bio = ?, image = ? where id = ?",
+      [account.username, account.email, account.password_hash, api.nullable(account.bio), api.nullable(account.image), id],
+    )
+  })
   return answer(200, account: account, app: app)
 }

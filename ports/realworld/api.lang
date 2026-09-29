@@ -12,6 +12,19 @@ pub type App {
   conn: db.Connection
   // signs and checks the JWTs
   secret: String
+  // held while writing (see `write`)
+  writes: Shared<Int> = Shared<Int>(0)
+
+  // Runs `work`, which changes the database, while no other request does.
+  // All requests share one connection, so a transaction would otherwise
+  // take in other requests' statements, and two at once fail ("cannot
+  // start a transaction within a transaction").
+  pub fn write<R>(self, work: fn() throws -> R) throws -> R {
+    with count = self.writes.lock() {
+      count += 1
+      return try work()
+    }
+  }
 }
 
 // An answer in the API's error shape instead of the normal one:
