@@ -3926,7 +3926,8 @@ impl Checker {
                                     }
                                 };
                                 let ftys: Vec<Ty> = variants[idx].fields.iter().map(|f| f.ty.subst(targs)).collect();
-                                let args = self.ctor_args(args.as_deref(), &ftys, name, *span);
+                                let fnames: Vec<String> = variants[idx].fields.iter().map(|f| f.name.clone()).collect();
+                                let args = self.ctor_args(args.as_deref(), &ftys, &fnames, name, *span);
                                 TPat::Variant { idx, args }
                             }
                             TypeKind::Record { fields } => {
@@ -3934,7 +3935,8 @@ impl Checker {
                                     self.err(*span, format!("expected `{}`", def.name));
                                 }
                                 let ftys: Vec<Ty> = fields.iter().map(|f| f.ty.subst(targs)).collect();
-                                let args = self.ctor_args(args.as_deref(), &ftys, name, *span);
+                                let fnames: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                                let args = self.ctor_args(args.as_deref(), &ftys, &fnames, name, *span);
                                 TPat::Record { args }
                             }
                             _ => {
@@ -3970,7 +3972,10 @@ impl Checker {
                         let ftys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
                         let args = match args {
                             None => vec![],
-                            Some(_) => self.ctor_args(args.as_deref(), &ftys, name, *span),
+                            Some(_) => {
+                                let fnames: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                                self.ctor_args(args.as_deref(), &ftys, &fnames, name, *span)
+                            }
                         };
                         TPat::Type { def: d, targs: vec![], args, bind: None }
                     }
@@ -3985,7 +3990,7 @@ impl Checker {
         }
     }
 
-    fn ctor_args(&mut self, args: Option<&[Pattern]>, ftys: &[Ty], name: &str, span: Span) -> Vec<TPat> {
+    fn ctor_args(&mut self, args: Option<&[Pattern]>, ftys: &[Ty], fnames: &[String], name: &str, span: Span) -> Vec<TPat> {
         match args {
             None => ftys.iter().map(|_| TPat::Wild).collect(),
             Some(ps) => {
@@ -3994,6 +3999,15 @@ impl Checker {
                 }
                 if ps.len() != ftys.len() {
                     self.err_help(span, format!("`{}` has {} field(s), but the pattern has {}", name, ftys.len(), ps.len()), "bind every field by position, or write `(_)` to ignore them all");
+                }
+                // `Rect(height, width)` for `Rect(width:, height:)` would swap them
+                for (i, p) in ps.iter().enumerate() {
+                    if let Pattern::Bind(n, sp) = p {
+                        if fnames.get(i).map(|f| f != n).unwrap_or(false) && fnames.contains(n) {
+                            let order: Vec<&str> = fnames.iter().map(|f| f.as_str()).collect();
+                            self.err_help(*sp, format!("`{}` binds the field `{}` here: fields bind by position, and `{}` is another field", n, fnames[i], n), format!("write them in the declared order: `{}({})`", name, order.join(", ")));
+                        }
+                    }
                 }
                 ps.iter().zip(ftys).map(|(p, t)| self.pattern(p, t)).collect()
             }
