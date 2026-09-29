@@ -1,0 +1,20 @@
+// Optional values as parameters: none is NULL.
+
+import db
+
+type Row {
+  name: String
+  bio: String?
+  age: Int?
+}
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table users (name text, bio text, age integer)", [])
+    let bio: String? = none
+    let age: Int? = 36
+    try conn.execute("insert into users (name, bio, age) values (?, ?, ?)", ["ada", bio, age])
+    try conn.execute("insert into users (name, bio, age) values (?, ?, ?)", ["bob", "hi", none])
+    print("${try conn.query<Row>("select * from users", [])}")
+  }
+}

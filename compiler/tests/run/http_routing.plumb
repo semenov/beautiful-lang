@@ -2,6 +2,7 @@
 // query with repeated names, cookies that can't carry extra attributes.
 import crypto
 import http
+import json
 import time
 
 fn show(res: http.Response) -> String {
@@ -35,4 +36,23 @@ fn main() throws {
   print("${t.headers.keys()}")
   print("${http.status_text(418)} / ${http.status_text(999)}.")
   print(crypto.md5("abc".bytes()).hex())
+
+  // the most specific route wins, whatever the order they were added in
+  var r = http.Router()
+  r.get("/files/*path", req => http.text(200, "rest ${req.param("path") ?? ""}"))
+  r.get("/files/:name/edit", req => http.text(200, "edit ${req.param("name") ?? ""}"))
+  r.get("/files/:name", req => http.text(200, "file ${req.param("name") ?? ""}"))
+  r.get("/files/feed", req => http.text(200, "feed"))
+  for path in ["/files/feed", "/files/a", "/files/a/edit", "/files/a/b/c", "/files/feed/edit"] {
+    let res = try r.handle(http.request("GET", path: path))
+    print("${path}: ${try res.text()}")
+  }
+
+  let camel = http.json_with(200, value: Page(page_size: 20, next_page: none), options: json.EncodeOptions(keys: json.Keys.Camel, omit_none: true))
+  print(try camel.text())
+}
+
+type Page {
+  page_size: Int
+  next_page: Int?
 }

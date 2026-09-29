@@ -12,3 +12,9 @@ t=1; Path=/; Expires=Wed, 21 Oct 2026 07:28:00 GMT; HttpOnly
 ["content-type"]
 I'm a teapot / .
 900150983cd24fb0d6963f7d28e17f72
+/files/feed: feed
+/files/a: file a
+/files/a/edit: edit a
+/files/a/b/c: rest a/b/c
+/files/feed/edit: edit feed
+{"pageSize":20}

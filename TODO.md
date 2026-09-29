@@ -148,16 +148,16 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           open transaction and vanishes on its rollback (major)
     - [x] no connection pool: every query of every request runs one at a
           time (major)
-    - [ ] the first matching route wins (`/articles/:slug` before
+    - [x] the first matching route wins (`/articles/:slug` before
           `/articles/feed`); Go routers pick the most specific (major)
     - [ ] `json.decode<T>` can't tell a missing field from `null` (PUT
           semantics) (major)
     - [ ] `crypto.hash_password` ~200 ms vs ~22 ms for OpenSSL's PBKDF2
-    - [ ] a `String?` as an SQL parameter (docs say `none` is allowed)
+    - [x] a `String?` as an SQL parameter (docs say `none` is allowed)
     - [ ] SQL can't be shared between queries (not even a top-level `let`)
     - [ ] database errors are untyped (UNIQUE violation is only text)
-    - [ ] `http.json` has no camelCase option; `omit_none` is all or nothing
-    - [ ] `time.DateTime` has no milliseconds
+    - [x] `http.json` has no camelCase option; `omit_none` is all or nothing
+    - [x] `time.DateTime` has no milliseconds
     - [ ] no plain mutex (a `Shared<Int>` nobody reads); middleware can't pass
           the signed-in user to handlers; no route groups / prefixes
     - [ ] a `{` block after `??` parses as a map literal (unclear error)

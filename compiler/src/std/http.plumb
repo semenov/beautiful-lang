@@ -291,6 +291,12 @@ pub fn json<T>(status: Int, value: T) -> Response {
   return Response(status: status, body: json.encode(value).bytes(), headers: {"content-type": "application/json"})
 }
 
+// The value as JSON written as the options say:
+// `http.json_with(200, value: user, options: json.EncodeOptions(keys: json.Keys.Camel))`.
+pub fn json_with<T>(status: Int, value: T, options: json.EncodeOptions) -> Response {
+  return Response(status: status, body: json.encode_with(value, options: options).bytes(), headers: {"content-type": "application/json"})
+}
+
 // Any bytes: `http.bytes(200, data: png, content_type: "image/png")`.
 pub fn bytes(status: Int, data: Bytes, content_type: String) -> Response {
   return Response(status: status, body: data, headers: {"content-type": content_type})
@@ -353,34 +359,34 @@ pub type Router {
   }
 
   pub mutating fn get(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "GET", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "GET", parts: split_path(pattern), handler: handler))
   }
 
   pub mutating fn post(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "POST", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "POST", parts: split_path(pattern), handler: handler))
   }
 
   pub mutating fn put(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "PUT", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "PUT", parts: split_path(pattern), handler: handler))
   }
 
   pub mutating fn delete(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
   }
 
   pub mutating fn patch(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "PATCH", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "PATCH", parts: split_path(pattern), handler: handler))
   }
 
   // Any other method: add("PROPFIND", pattern: "/dav/*path", handler: ...). HEAD is answered
   // by GET routes and OPTIONS by the router itself unless added here.
   pub mutating fn add(method: String, pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: method.upper(), parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: method.upper(), parts: split_path(pattern), handler: handler))
   }
 
   // Every method: any("/anything/*rest", ...).
   pub mutating fn any(pattern: String, handler: fn(Request) throws -> Response) {
-    self.routes.append(Route(method: "*", parts: split_path(pattern), handler: handler))
+    self.add_route(Route(method: "*", parts: split_path(pattern), handler: handler))
   }
 
   // A WebSocket endpoint: the connection is upgraded and `handler` talks
@@ -400,6 +406,8 @@ pub type Router {
   // Finds the route for a request and runs its handler: 404 when no route
   // has this path, 405 when one has it for another method. A pattern part
   // `*name` matches the rest of the path. HEAD is answered by GET routes.
+  // The most specific route wins, whatever the order they were added in:
+  // "/articles/feed" before "/articles/:slug" before "/articles/*rest".
   pub fn handle(self, request: Request) throws -> Response {
     if self.middleware.is_empty() {
       return try self.route(request)
@@ -411,6 +419,18 @@ pub type Router {
       next = r => try m(r, inner)
     }
     return try next(request)
+  }
+
+  // kept most specific first, so the first route that matches is the one
+  mutating fn add_route(route: Route) {
+    var at = self.routes.length
+    for i in 0..<self.routes.length {
+      if more_specific(route.parts, than: self.routes[i].parts) {
+        at = i
+        break
+      }
+    }
+    self.routes.insert(route, at: at)
   }
 
   fn route(self, request: Request) throws -> Response {
@@ -469,6 +489,30 @@ pub type Router {
     }
     return text(405, "method not allowed").with_header("allow", allow)
   }
+}
+
+// At the first part where they differ: a fixed part beats `:name`, which
+// beats `*name`.
+fn more_specific(a: List<String>, than: List<String>) -> Bool {
+  let n = if a.length < than.length { a.length } else { than.length }
+  for i in 0..<n {
+    let x = part_rank(a[i])
+    let y = part_rank(than[i])
+    if x != y {
+      return x < y
+    }
+  }
+  return false
+}
+
+fn part_rank(part: String) -> Int {
+  if part.starts_with("*") {
+    return 2
+  }
+  if part.starts_with(":") {
+    return 1
+  }
+  return 0
 }
 
 fn split_path(path: String) -> List<String> {

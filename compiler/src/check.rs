@@ -1272,6 +1272,17 @@ impl Checker {
         if matches!(e.kind, TK::NoneLit) {
             return Some(TExpr { kind: TK::Variant { def: d, idx: 0, fields: vec![] }, ty: exp.clone(), span: sp });
         }
+        // an optional value: none is Null
+        if let Ty::Opt(inner) = &act {
+            let inner = (**inner).clone();
+            self.fcx().scopes.push(HashMap::new());
+            let id = self.declare(sp, "_", inner.clone(), false);
+            self.fcx().scopes.pop();
+            let some = self.to_db_value(TExpr { kind: TK::Local(id), ty: inner, span: sp }, exp, d)?;
+            let null = TExpr { kind: TK::Variant { def: d, idx: 0, fields: vec![] }, ty: exp.clone(), span: sp };
+            let arms = vec![TArm { pat: TPat::Some(Box::new(TPat::Bind(id))), guard: None, body: some }, TArm { pat: TPat::Wild, guard: None, body: null }];
+            return Some(TExpr { kind: TK::Match { scrut: Box::new(e), arms }, ty: exp.clone(), span: sp });
+        }
         let (inner, e) = match &act {
             Ty::Adt(nd, _) => match &self.prog.defs[*nd].kind {
                 TypeKind::Newtype(i) => {

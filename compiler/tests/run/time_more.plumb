@@ -26,4 +26,10 @@ fn main() throws {
     try time.sleep_until(start.plus(time.millis(20).times(n)))
   }
   print("5 ticks of 20ms: ~100ms: ${start.elapsed().millis() >= 100 and start.elapsed().millis() < 130}")
+
+  // milliseconds
+  let ms = try time.parse_iso("2026-09-29T12:00:00.25Z")
+  print("${ms} ${ms.iso_millis()} ${ms.plus_seconds(-1)} ${time.from_unix_millis(-1)}")
+  let whole = try time.parse_iso("2026-09-29T12:00:00Z")
+  print("${whole} ${whole.iso_millis()} ${whole.is_before(ms)}")
 }
