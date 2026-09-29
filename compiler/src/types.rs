@@ -289,8 +289,9 @@ pub enum TStmt {
     ForMap { var: LocalId, map: TExpr, body: TBlock },
     ForSet { var: LocalId, set: TExpr, body: TBlock },
     ForChannel { var: LocalId, chan: TExpr, body: TBlock },
-    // `with x = shared.lock() { ... }`: `x` is a mutable copy of the value
-    WithLock { var: LocalId, shared: TExpr, body: TBlock },
+    // `with x = shared.lock() { ... }`: `x` is a mutable copy of the value;
+    // `read`: `with x = shared.read() { ... }`, a reader (x can't change)
+    WithLock { var: LocalId, shared: TExpr, body: TBlock, read: bool },
     // `with f = try files.open(p) { ... }`: `close` runs on every way out
     With { var: LocalId, value: TExpr, body: TBlock, close: FnId },
     Expect { cond: TExpr, text: String, span: Span },

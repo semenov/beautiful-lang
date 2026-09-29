@@ -1,0 +1,15 @@
+// `with v = s.read()` gives a value that can't be changed (the .err file).
+type Store {
+  names: List<String> = []
+  count: Int = 0
+}
+
+fn main() {
+  let s = Shared<Store>(Store())
+  with v = s.read() {
+    v.count += 1
+    v.names.append("x")
+    print("${v.count}")
+  }
+  let r = s.read()
+}

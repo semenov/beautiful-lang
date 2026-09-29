@@ -486,12 +486,25 @@ builtin type Task<T> {
 // Inside the block the value is used and changed like a variable, fields
 // and all (`s.todos.append(x)`); the lock is released at the end of the
 // block, even on an error. A lock directly inside another is an error.
+//
+// Readers that only look use `read()`: they run at the same time, and
+// `v` can't be changed (like a `let`):
+//
+//   with c = cache.read() {
+//     let hit = c[key]             // many readers at once; a `lock()`
+//   }                              // waits for them, and they for it
+//
+// A waiting `lock()` holds back new readers, and the readers that waited
+// during a `lock()` go before the next one: neither side starves.
 builtin type Shared<T> {
+  // for changing the value: one task at a time
   fn lock(self) -> Locked<T>
+  // for reading it: readers run at the same time
+  fn read(self) -> Locked<T>
 }
 
-// What `lock()` gives: only for `with v = s.lock() { }`, where `v` is the
-// value itself.
+// What `lock()` and `read()` give: only for `with v = s.lock() { }`, where
+// `v` is the value itself.
 builtin type Locked<T> {
 }
 

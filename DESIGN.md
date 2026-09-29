@@ -429,6 +429,11 @@ used result is always a mutation or an action. The rule also catches the
   even on an error. There is no `update`. A `lock()` directly inside another
   `lock()` is a compile error; a deadlock through function calls is reported
   at runtime instead of hanging.
+  Readers use `with v = s.read() { ... }`: `v` can't be changed, and
+  readers run at the same time (a readers-writer lock; a read-mostly cache
+  is the most common shared state in a backend). Readers count themselves
+  per core, so they don't contend on one word; a waiting writer holds back
+  new readers, and the readers that waited go before the next writer.
 - **Processes:** `process.run("git", ["log", "-n", "5"])` takes a list of
   arguments, not a shell string.
 - **Time:** `Instant` and `Date` are different types. Time zones are always

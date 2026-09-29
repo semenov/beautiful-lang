@@ -50,6 +50,8 @@ struct FnCtx {
     with_value: bool,
     resource_ok: bool,
     lock_depth: usize,
+    // variables of `with v = s.read()`
+    read_vars: Vec<LocalId>,
     module: usize,
 }
 
@@ -874,6 +876,7 @@ impl Checker {
             with_value: false,
             resource_ok: false,
             lock_depth: 0,
+            read_vars: vec![],
             module: md,
         });
     }
@@ -1675,7 +1678,7 @@ impl Checker {
                 // `with x = shared.lock() { ... }`
                 if let ExprKind::Call { callee, args, .. } = &value.kind {
                     if let ExprKind::Field(recv, m, _) = &callee.kind {
-                        if m == "lock" && args.is_empty() {
+                        if (m == "lock" || m == "read") && args.is_empty() {
                             let sh = self.expr(recv, None);
                             let st = self.resolve(&sh.ty);
                             if let Ty::Adt(d, a) = &st {
@@ -1684,12 +1687,15 @@ impl Checker {
                                         self.err_help(*span, "a lock inside another lock can deadlock", "take the locks one after another, or keep both values in one `Shared`");
                                     }
                                     self.fcx().scopes.push(HashMap::new());
-                                    let v = self.declare(*span, name, a[0].clone(), true);
+                                    let v = self.declare(*span, name, a[0].clone(), m == "lock");
+                                    if m == "read" {
+                                        self.fcx().read_vars.push(v);
+                                    }
                                     self.fcx().lock_depth += 1;
                                     let b = self.block(body, false, None);
                                     self.fcx().lock_depth -= 1;
                                     self.fcx().scopes.pop();
-                                    return TStmt::WithLock { var: v, shared: sh, body: b };
+                                    return TStmt::WithLock { var: v, shared: sh, body: b, read: m == "read" };
                                 }
                             }
                         }
@@ -1770,6 +1776,10 @@ impl Checker {
                     }
                     if !l.mutable && name.starts_with("?.") {
                         self.err_help(e.span, "`?.` can't change the value inside an optional", "take it out, change it and put it back: `var v = x ?? ...`, change `v`, then `x = v`");
+                        return None;
+                    }
+                    if !l.mutable && self.fc().read_vars.contains(&id) {
+                        self.err_help(e.span, format!("can't change `{}`: `read()` is for reading", name), "to change the value, take the lock: `with v = s.lock() { ... }`");
                         return None;
                     }
                     if !l.mutable {

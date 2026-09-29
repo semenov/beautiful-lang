@@ -868,7 +868,7 @@ impl<'a> CGen<'a> {
                 let de = self.drop_(e, "x->v");
                 let z = self.zero(e);
                 let _ = writeln!(self.helper_types, "struct {c}_s {{ int64_t rc; lt_lock lock; {ec} v; }};", c = c, ec = ec);
-                let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {de} free(x); }}\nstatic {c} {c}_new({ec} v) {{ {c} x = ({c})calloc(1, sizeof(struct {c}_s)); x->rc = 1; lt_lock_init(&x->lock); x->v = v; return x; }}\nstatic {ec} {c}_acquire({c} x) {{ lt_lock_acquire(&x->lock); {ec} v = x->v; x->v = {z}; return v; }}\nstatic void {c}_release({c} x, {ec} v) {{ x->v = v; lt_lock_release(&x->lock); }}", c = c, ec = ec, de = de, z = z);
+                let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {de} lt_lock_free(&x->lock); free(x); }}\nstatic {c} {c}_new({ec} v) {{ {c} x = ({c})calloc(1, sizeof(struct {c}_s)); x->rc = 1; lt_lock_init(&x->lock); x->v = v; return x; }}\nstatic {ec} {c}_acquire({c} x) {{ lt_lock_acquire(&x->lock); {ec} v = x->v; x->v = {z}; return v; }}\nstatic void {c}_release({c} x, {ec} v) {{ x->v = v; lt_lock_release(&x->lock); }}\nstatic {ec} {c}_acquire_read({c} x) {{ lt_lock_acquire_read(&x->lock); return x->v; }}\nstatic void {c}_release_read({c} x, {ec} v) {{ (void)v; lt_lock_release_read(&x->lock); }}", c = c, ec = ec, de = de, z = z);
             }
             Kind::Record { boxed: true, fields, .. } => self.gen_box(id, fields.iter().map(|f| f.1).collect(), None),
             Kind::Enum { boxed: true, variants, .. } => {
@@ -3120,6 +3120,18 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
                 self.need(H::Ops, st);
                 format!("{}_release({}, {})", self.tys[st].c, a[0], a[1])
+            }
+            // a reader borrows the value in place (x->v stays); readers
+            // don't change it, and giving it back drops nothing
+            "Shared.acquire_read" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_acquire_read({})", self.tys[st].c, a[0])
+            }
+            "Shared.release_read" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_release_read({}, {})", self.tys[st].c, a[0], a[1])
             }
             "Channel.send" | "Channel.try_send" => {
                 let e = match &self.tys[tid0.unwrap()].kind {

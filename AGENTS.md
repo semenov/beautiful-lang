@@ -288,8 +288,11 @@ let pages = [try a.wait(), try b.wait()]
 let sizes = try urls.parallel_map(limit: 8, transform: u => try fetch(u).length)
 
 let counter = Shared<Int>(0)              // shared state: only through a lock
-with n = counter.lock() {
+with n = counter.lock() {                 // one task at a time: may change it
   n += 1
+}
+with n = counter.read() {                 // readers at the same time: n can't
+  print("${n}")                           // change (like a `let`)
 }
 let jobs = Channel<String>(capacity: 100)   // passing data between tasks
 ```
@@ -327,8 +330,8 @@ Sending to many listeners (chat, live updates over WebSockets): one
 ```
 let listeners = Shared<Map<Int, Channel<String>>>({})
 // a listener: register, then read its channel until it's closed
-// the sender:
-with ls = listeners.lock() {
+// the sender (only reads the map: senders don't wait for each other):
+with ls = listeners.read() {
   for entry in ls {
     let _ = entry.value.try_send(text)   // false: that listener is full
   }

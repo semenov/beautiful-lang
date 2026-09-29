@@ -1,0 +1,70 @@
+// Shared.read(): readers run at the same time and see the value only as a
+// whole; lock() changes it alone. Writers keep a + b == 0 and the list as
+// long as a; readers check that every time.
+type Pair {
+  a: Int = 0
+  b: Int = 0
+  items: List<Int> = []
+  name: String = ""
+}
+
+fn reader(p: Shared<Pair>, n: Int) -> Int {
+  var bad = 0
+  var seen = 0
+  for i in 0..<n {
+    with v = p.read() {
+      if v.a + v.b != 0 or v.items.length != v.a or v.name.length != v.a {
+        bad += 1
+      }
+      let copy = v.items
+      seen = max(seen, copy.length)
+    }
+  }
+  return bad
+}
+
+fn writer(p: Shared<Pair>, n: Int) -> Int {
+  for i in 0..<n {
+    with v = p.lock() {
+      v.a += 1
+      v.b -= 1
+      v.items.append(i)
+      v.name = "${v.name}x"
+    }
+  }
+  return n
+}
+
+fn first_item(p: Shared<Pair>) -> Int? {
+  with v = p.read() {
+    return v.items.first()
+  }
+}
+
+fn main() throws {
+  let p = Shared<Pair>(Pair())
+  var readers: List<Task<Int>> = []
+  var writers: List<Task<Int>> = []
+  for k in 0..<4 {
+    readers.append(spawn reader(p, n: 20000))
+    writers.append(spawn writer(p, n: 500))
+  }
+  var bad = 0
+  for t in readers {
+    bad += try t.wait()
+  }
+  var written = 0
+  for t in writers {
+    written += try t.wait()
+  }
+  with v = p.read() {
+    print("wrong reads: ${bad}, written: ${written}, a: ${v.a}, b: ${v.b}, items: ${v.items.length}")
+  }
+  print("${first_item(p)}")
+  // a reader inside a writer's function and the other way round, one after
+  // the other
+  let _ = try (spawn writer(p, n: 1)).wait()
+  with v = p.read() {
+    print("${v.a} ${v.name.length}")
+  }
+}
