@@ -44,17 +44,18 @@ important:
    category, and there's no conversion between code points and characters.
 5. The rest of the ports' open items in `TODO.md`.
 
-## Waiting for Vlad's decision (language-model changes)
+## Decided by Vlad (2026-09-29), to build
 
-1. **A type's own text form.** `fn to_string(self) -> String` used by
-   `"${x}"`. Today a `Duration` prints as `Duration(nanos: 1234000)`.
-2. **JSON field names and omitting empty fields.** This needs some syntax
-   for field attributes (like Go's struct tags). httpbin needed
-   `user-agent`.
-3. **Exact JSON numbers.** `json.Value.Number` is a Float, so `1.0`, `1e5`
-   and 20-digit integers don't round-trip. gron wrote its own parser.
-   Decide after reading gron's report.
-4. Older proposals: `?.`, and channel `select`.
+1. **A type's own text form: yes.** `fn to_string(self) -> String` on a type
+   is used by `"${x}"`; stdlib types (Duration, errors, Date) get readable text.
+2. **JSON names: options on the call, no field attributes.**
+   `json.encode(x, keys: "kebab", omit_empty: true)`; attributes only if a
+   port needs different names for fields of one object.
+3. **Exact JSON numbers: yes.** `json.Value.Number` holds the number as
+   written; `n.to_int()`, `n.to_float()`, `n.to_decimal()`; `"${n}"` prints
+   it as written.
+4. **`?.`: yes** (`user?.address?.city`). Channel `select`: later, when a
+   program needs it.
 
 ## Next, without a decision needed
 
