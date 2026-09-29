@@ -1,0 +1,398 @@
+// llm: language models over the OpenAI chat API, which most providers
+// speak: OpenAI, OpenRouter, Groq, Together, DeepSeek, Mistral, and local
+// servers (Ollama, LM Studio, vLLM, llama.cpp).
+//
+//   let ai = try llm.from_env()
+//   print(try ai.ask("openai/gpt-4o-mini", prompt: "Say hi"))
+//
+//   // typed answers: the model must fill a `Recipe`
+//   let r = try ai.object<Recipe>(llm.Chat(model: m, messages: [llm.user("A soup recipe")]))
+//
+//   // tools: the model calls them, `run` feeds the results back
+//   let weather = llm.tool<City>("weather", description: "Weather in a city", handler: get_weather)
+//   let reply = try ai.run(llm.Chat(model: m, messages: [llm.user("Rain in Oslo?")], tools: [weather]), max_steps: 5)
+//
+//   // streaming: text as it's written
+//   with s = try ai.stream(chat) {
+//     while try s.next() is some(piece) { ... }
+//   }
+//
+// Install: lang add llm https://github.com/semenov/beautiful-lang --path packages/llm
+
+import env
+import http
+import io
+import json
+
+// Where to send requests.
+pub type Client {
+  // up to and including /v1
+  base_url: Text = "https://api.openai.com/v1"
+  api_key: Text = ""
+  // more headers for every request (OpenRouter: "HTTP-Referer", "X-Title")
+  headers: Map<Text, Text> = {}
+  // seconds without progress before giving up
+  timeout: Int = 300
+
+  // One answer.
+  pub fn chat(self, chat: Chat) throws -> Reply {
+    let body = request_json(chat, stream: false, schema: none)
+    let res = try self.post("/chat/completions", body: body)
+    let parsed = try json.decode<ChatResponse>(try res.text())
+    let choice = parsed.choices.first() ?? throw Failure(message: "llm: the answer has no choices")
+    let calls = (choice.message.tool_calls ?? []).map(c => ToolCall(id: c.id, name: c.function.name, arguments: c.function.arguments))
+    let message = Message(role: "assistant", content: choice.message.content ?? "", tool_calls: calls)
+    var history = chat.messages
+    history.append(message)
+    return Reply(text: message.content, tool_calls: calls, finish_reason: choice.finish_reason ?? "", usage: parsed.usage ?? Usage(), messages: history)
+  }
+
+  // The shortest way: one question, the text of the answer.
+  pub fn ask(self, model: Text, prompt: Text) throws -> Text {
+    return (try self.chat(Chat(model: model, messages: [user(prompt)]))).text
+  }
+
+  // An answer of type T: the model is given T's JSON Schema and must
+  // follow it (structured outputs); the answer is decoded into T.
+  pub fn object<T>(self, chat: Chat) throws -> T {
+    let body = request_json(chat, stream: false, schema: json.schema<T>())
+    let res = try self.post("/chat/completions", body: body)
+    let parsed = try json.decode<ChatResponse>(try res.text())
+    let choice = parsed.choices.first() ?? throw Failure(message: "llm: the answer has no choices")
+    let text = choice.message.content ?? ""
+    return try json.decode<T>(strip_fences(text)) catch err {
+      throw Failure(message: "llm: the answer doesn't fit the requested type", cause: err)
+    }
+  }
+
+  // Chats until the model answers without calling tools: each tool call is
+  // run and its result sent back. An error in a tool goes to the model as
+  // text, so it can react. At most `max_steps` answers.
+  pub fn run(self, chat: Chat, max_steps: Int) throws -> Reply {
+    var current = chat
+    for _ in 0..<max_steps {
+      let reply = try self.chat(current)
+      if reply.tool_calls.is_empty() {
+        return reply
+      }
+      current.messages = reply.messages
+      for call in reply.tool_calls {
+        let result = try call_tool(chat.tools, call: call)
+        current.messages.append(Message(role: "tool", content: result, tool_call_id: call.id))
+      }
+    }
+    throw Failure(message: "llm: no final answer after ${max_steps} steps")
+  }
+
+  // The answer's text as it's written. Get it with `with s = try ai.stream(chat)`.
+  pub fn stream(self, chat: Chat) throws -> TextStream {
+    let body = request_json(chat, stream: true, schema: none)
+    with s = TextStream(response: try http.open(self.request("/chat/completions", body: body))) {
+      if s.response.status() >= 400 {
+        throw api_error(s.response.status(), body: try s.response.read_all().text())
+      }
+      return s
+    }
+  }
+
+  // Embeddings: a vector of numbers per input text.
+  pub fn embed(self, model: Text, inputs: List<Text>) throws -> List<List<Float>> {
+    let body = json.Value.Object(fields: {"model": text_value(model), "input": json.Value.Array(items: inputs.map(t => text_value(t)))})
+    let res = try self.post("/embeddings", body: body)
+    let parsed = try json.decode<EmbeddingResponse>(try res.text())
+    return parsed.data.sorted_by(d => d.index).map(d => d.embedding)
+  }
+
+  fn request(self, path: Text, body: json.Value) -> http.ClientRequest {
+    var headers = self.headers
+    headers["content-type"] = "application/json"
+    if not self.api_key.is_empty() {
+      headers["authorization"] = "Bearer ${self.api_key}"
+    }
+    return http.ClientRequest(url: "${self.base_url}${path}", method: "POST", headers: headers, body: json.encode(body).bytes(), timeout: self.timeout)
+  }
+
+  fn post(self, path: Text, body: json.Value) throws -> http.Response {
+    let res = try http.send(self.request(path, body: body))
+    if res.status >= 400 {
+      throw api_error(res.status, body: try res.text())
+    }
+    return res
+  }
+}
+
+pub fn openai(api_key: Text) -> Client {
+  return Client(api_key: api_key)
+}
+
+pub fn openrouter(api_key: Text) -> Client {
+  return Client(base_url: "https://openrouter.ai/api/v1", api_key: api_key)
+}
+
+// Ollama's OpenAI endpoint on this machine.
+pub fn ollama() -> Client {
+  return Client(base_url: "http://localhost:11434/v1")
+}
+
+// From the environment: LLM_BASE_URL (+ LLM_API_KEY), or OPENROUTER_API_KEY,
+// or OPENAI_API_KEY.
+pub fn from_env() throws -> Client {
+  if env.get("LLM_BASE_URL") is some(base) {
+    return Client(base_url: base, api_key: env.get("LLM_API_KEY") ?? "")
+  }
+  if env.get("OPENROUTER_API_KEY") is some(key) {
+    return openrouter(key)
+  }
+  if env.get("OPENAI_API_KEY") is some(key) {
+    return openai(key)
+  }
+  throw Failure(message: "llm: set LLM_BASE_URL, OPENROUTER_API_KEY or OPENAI_API_KEY")
+}
+
+// ---- conversations
+
+pub type Message {
+  // "system", "user", "assistant" or "tool"
+  role: Text
+  content: Text
+  // assistant messages: the tools the model wants called
+  tool_calls: List<ToolCall> = []
+  // tool messages: which call this is the result of
+  tool_call_id: Text = ""
+}
+
+pub fn system(text: Text) -> Message {
+  return Message(role: "system", content: text)
+}
+
+pub fn user(text: Text) -> Message {
+  return Message(role: "user", content: text)
+}
+
+pub fn assistant(text: Text) -> Message {
+  return Message(role: "assistant", content: text)
+}
+
+pub type ToolCall {
+  id: Text
+  name: Text
+  // JSON text
+  arguments: Text
+}
+
+pub type Chat {
+  // "gpt-4o-mini", "anthropic/claude-sonnet-4" (OpenRouter), "llama3.2" (Ollama)
+  model: Text
+  messages: List<Message>
+  temperature: Float? = none
+  max_tokens: Int? = none
+  tools: List<Tool> = []
+  // more request fields, sent as they are: {"top_p": ..., "reasoning": ...}
+  extra: Map<Text, json.Value> = {}
+}
+
+pub type Usage {
+  prompt_tokens: Int = 0
+  completion_tokens: Int = 0
+  total_tokens: Int = 0
+}
+
+pub type Reply {
+  text: Text
+  tool_calls: List<ToolCall>
+  // "stop", "length", "tool_calls", ...
+  finish_reason: Text
+  usage: Usage
+  // the conversation with this answer added: continue it with more messages
+  messages: List<Message>
+}
+
+// A function the model may call. Build it with `llm.tool<Args>(...)`.
+pub type Tool {
+  name: Text
+  description: Text
+  // JSON Schema of the arguments
+  schema: Text
+  handler: fn(Text) throws -> Text
+}
+
+// A tool whose arguments are an `A` record: the model sees A's JSON Schema;
+// its arguments are decoded into an A for `handler`, whose text goes back
+// to the model.
+pub fn tool<A>(name: Text, description: Text, handler: fn(A) throws -> Text) -> Tool {
+  return Tool(name: name, description: description, schema: json.schema<A>(), handler: args => try handler(try json.decode<A>(args)))
+}
+
+// The answer's text in pieces, from `Client.stream`.
+pub type TextStream {
+  response: http.ResponseStream
+
+  // The next piece of text; none at the end.
+  pub fn next(self) throws -> Text? {
+    while try self.response.read_line() is some(line) {
+      if not line.starts_with("data:") {
+        continue
+      }
+      let data = line.slice(from: 5, to: line.length).trim()
+      if data == "[DONE]" {
+        return none
+      }
+      let chunk = try json.decode<StreamChunk>(data)
+      for c in chunk.choices {
+        if c.delta.content is some(text) {
+          if not text.is_empty() {
+            return text
+          }
+        }
+      }
+    }
+    return none
+  }
+
+  pub fn close(self) throws {
+    try self.response.close()
+  }
+}
+
+// ---- the wire format
+
+type ChatResponse {
+  choices: List<Choice>
+  usage: Usage?
+}
+
+type Choice {
+  message: ResponseMessage
+  finish_reason: Text?
+}
+
+type ResponseMessage {
+  content: Text?
+  tool_calls: List<ResponseToolCall>?
+}
+
+type ResponseToolCall {
+  id: Text
+  function: ResponseFunction
+}
+
+type ResponseFunction {
+  name: Text
+  arguments: Text
+}
+
+type StreamChunk {
+  choices: List<StreamChoice>
+}
+
+type StreamChoice {
+  delta: Delta
+}
+
+type Delta {
+  content: Text?
+}
+
+type EmbeddingResponse {
+  data: List<Embedding>
+}
+
+type Embedding {
+  index: Int
+  embedding: List<Float>
+}
+
+type ErrorResponse {
+  error: ErrorBody
+}
+
+type ErrorBody {
+  message: Text
+}
+
+fn text_value(t: Text) -> json.Value {
+  return json.Value.String(value: t)
+}
+
+fn request_json(chat: Chat, stream: Bool, schema: Text?) -> json.Value {
+  var fields: Map<Text, json.Value> = {}
+  fields["model"] = text_value(chat.model)
+  fields["messages"] = json.Value.Array(items: chat.messages.map(m => message_json(m)))
+  if chat.temperature is some(t) {
+    fields["temperature"] = json.Value.Number(value: t)
+  }
+  if chat.max_tokens is some(n) {
+    fields["max_tokens"] = json.Value.Number(value: n.to_float())
+  }
+  if not chat.tools.is_empty() {
+    fields["tools"] = json.Value.Array(items: chat.tools.map(t => tool_json(t)))
+  }
+  if stream {
+    fields["stream"] = json.Value.Bool(value: true)
+  }
+  if schema is some(s) {
+    let format = json.Value.Object(fields: {"name": text_value("answer"), "strict": json.Value.Bool(value: true), "schema": parse_schema(s)})
+    fields["response_format"] = json.Value.Object(fields: {"type": text_value("json_schema"), "json_schema": format})
+  }
+  for entry in chat.extra.entries() {
+    fields[entry.key] = entry.value
+  }
+  return json.Value.Object(fields: fields)
+}
+
+fn message_json(m: Message) -> json.Value {
+  var fields: Map<Text, json.Value> = {"role": text_value(m.role)}
+  if m.content.is_empty() and not m.tool_calls.is_empty() {
+    fields["content"] = json.Value.Null
+  } else {
+    fields["content"] = text_value(m.content)
+  }
+  if not m.tool_calls.is_empty() {
+    fields["tool_calls"] = json.Value.Array(items: m.tool_calls.map(c => json.Value.Object(fields: {
+      "id": text_value(c.id),
+      "type": text_value("function"),
+      "function": json.Value.Object(fields: {"name": text_value(c.name), "arguments": text_value(c.arguments)}),
+    })))
+  }
+  if not m.tool_call_id.is_empty() {
+    fields["tool_call_id"] = text_value(m.tool_call_id)
+  }
+  return json.Value.Object(fields: fields)
+}
+
+fn tool_json(t: Tool) -> json.Value {
+  let function = json.Value.Object(fields: {"name": text_value(t.name), "description": text_value(t.description), "parameters": parse_schema(t.schema)})
+  return json.Value.Object(fields: {"type": text_value("function"), "function": function})
+}
+
+fn parse_schema(s: Text) -> json.Value {
+  // generated by json.schema: always valid
+  return try json.parse(s) catch err {
+    return json.Value.Object(fields: {})
+  }
+}
+
+fn call_tool(tools: List<Tool>, call: ToolCall) throws -> Text {
+  let t = tools.find(t => t.name == call.name) ?? throw Failure(message: "llm: the model called an unknown tool `${call.name}`")
+  let handler = t.handler
+  return try handler(call.arguments) catch err {
+    return "error: ${err.message()}"
+  }
+}
+
+fn api_error(status: Int, body: Text) -> Error {
+  let message = try json.decode<ErrorResponse>(body) catch err {
+    return Failure(message: "llm: HTTP ${status}: ${body.slice(from: 0, to: min(body.length, 300))}")
+  }
+  return Failure(message: "llm: HTTP ${status}: ${message.error.message}")
+}
+
+// Some models wrap JSON in ```json fences even when asked not to.
+fn strip_fences(text: Text) -> Text {
+  let t = text.trim()
+  if t.starts_with("```") {
+    let lines = t.lines()
+    return lines.drop(1).take(lines.length - 2).join("\n")
+  }
+  return t
+}

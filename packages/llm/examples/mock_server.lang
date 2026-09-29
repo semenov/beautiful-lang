@@ -1,0 +1,84 @@
+// A fake OpenAI-compatible server for testing the llm package.
+import http
+import io
+import json
+import time
+
+type Req {
+  stream: Bool = false
+  tools: List<ReqTool> = []
+  messages: List<ReqMsg>
+  response_format: json.Value?
+}
+
+type ReqTool {
+  function: ReqFn
+}
+
+type ReqFn {
+  name: Text
+}
+
+type ReqMsg {
+  role: Text
+  content: Text?
+}
+
+type EmbedReq {
+  input: List<Text>
+}
+
+fn completions(req: http.Request) throws -> http.Response {
+  if (req.header("authorization") ?? "") != "Bearer test" {
+    return http.text(401, "{\"error\": {\"message\": \"bad key\"}}")
+  }
+  let r = try json.decode<Req>(try req.text())
+  let last = r.messages.last() ?? throw Failure(message: "no messages")
+  if r.stream {
+    return http.stream(200, content_type: "text/event-stream", writer: out => try stream_words(out, text: last.content ?? ""))
+  }
+  if r.response_format is some(_) {
+    return answer("{\"name\": \"Soup\", \"minutes\": 20, \"steps\": [\"boil\", \"eat\"]}", finish: "stop", calls: "")
+  }
+  if not r.tools.is_empty() and last.role != "tool" {
+    let call = "[{\"id\": \"call_1\", \"type\": \"function\", \"function\": {\"name\": \"${r.tools[0].function.name}\", \"arguments\": \"{\\\"city\\\": \\\"Oslo\\\"}\"}}]"
+    return answer("", finish: "tool_calls", calls: call)
+  }
+  if last.role == "tool" {
+    return answer("The tool said: ${last.content ?? ""}", finish: "stop", calls: "")
+  }
+  return answer("echo: ${last.content ?? ""}", finish: "stop", calls: "")
+}
+
+fn answer(content: Text, finish: Text, calls: Text) -> http.Response {
+  let c = if content.is_empty() { "null" } else { json.encode(content) }
+  let tc = if calls.is_empty() { "" } else { ", \"tool_calls\": ${calls}" }
+  let body = "{\"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": ${c}${tc}}, \"finish_reason\": \"${finish}\"}], \"usage\": {\"prompt_tokens\": 5, \"completion_tokens\": 7, \"total_tokens\": 12}}"
+  return http.bytes(200, data: body.bytes(), content_type: "application/json")
+}
+
+fn stream_words(out: io.Stream, text: Text) throws {
+  try out.write_text(": PROCESSING\n\n")
+  for w in "streamed answer to: ${text}".split(" ") {
+    try out.write_text("data: {\"choices\": [{\"delta\": {\"content\": ${json.encode("${w} ")}}}]}\n\n")
+    try time.sleep(time.millis(20))
+  }
+  try out.write_text("data: {\"choices\": [{\"delta\": {}, \"finish_reason\": \"stop\"}]}\n\ndata: [DONE]\n\n")
+}
+
+fn embeddings(req: http.Request) throws -> http.Response {
+  let r = try json.decode<EmbedReq>(try req.text())
+  var items: List<Text> = []
+  for i in 0..<r.input.length {
+    items.append("{\"index\": ${i}, \"embedding\": [${r.input[i].length}, 0.5]}")
+  }
+  let body = "{\"data\": [${items.reversed().join(", ")}]}"
+  return http.bytes(200, data: body.bytes(), content_type: "application/json")
+}
+
+fn main() throws {
+  var router = http.Router()
+  router.post("/v1/chat/completions", completions)
+  router.post("/v1/embeddings", embeddings)
+  try http.serve(router, port: 8096)
+}

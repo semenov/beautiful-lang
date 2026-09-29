@@ -105,6 +105,7 @@ impl Parser {
                 Ok(())
             }
             Tok::RBrace | Tok::Eof => Ok(()),
+            Tok::Catch => Err(self.err_here("`catch` needs `try` before the call it handles").help("write `try f(x) catch err { ... }`")),
             t => {
                 let d = Self::describe(t);
                 Err(self.err_here(format!("expected the end of the line, found {}", d)))

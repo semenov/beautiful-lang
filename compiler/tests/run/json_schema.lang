@@ -1,0 +1,19 @@
+import json
+
+enum Mood {
+  Happy
+  Sad
+  Other(reason: Text)
+}
+
+type Person {
+  name: Text
+  age: Int
+  tags: List<Text>
+  email: Text?
+  mood: Mood
+}
+
+fn main() {
+  print(json.schema<Person>())
+}

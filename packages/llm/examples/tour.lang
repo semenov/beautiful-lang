@@ -1,0 +1,44 @@
+import io
+import llm
+
+type Recipe {
+  name: Text
+  minutes: Int
+  steps: List<Text>
+}
+
+type City {
+  city: Text
+}
+
+fn weather(c: City) throws -> Text {
+  return "rain in ${c.city}"
+}
+
+fn main() throws {
+  let ai = llm.Client(base_url: "http://localhost:8096/v1", api_key: "test")
+  let m = "test-model"
+  print(try ai.ask(m, prompt: "hello"))
+  let reply = try ai.chat(llm.Chat(model: m, messages: [llm.system("be brief"), llm.user("hi")], temperature: 0.2))
+  print("${reply.text} | ${reply.finish_reason} | tokens ${reply.usage.total_tokens} | history ${reply.messages.length}")
+  let r = try ai.object<Recipe>(llm.Chat(model: m, messages: [llm.user("a soup")]))
+  print("${r.name}: ${r.minutes} min, ${r.steps}")
+  let tool = llm.tool<City>("weather", description: "Weather in a city", handler: weather)
+  let done = try ai.run(llm.Chat(model: m, messages: [llm.user("rain in Oslo?")], tools: [tool]), max_steps: 3)
+  print("${done.text} (after ${done.messages.length} messages)")
+  with s = try ai.stream(llm.Chat(model: m, messages: [llm.user("tell")])) {
+    with out = io.stdout() {
+      while try s.next() is some(piece) {
+        try out.write_text(piece)
+      }
+      try out.write_text("\n")
+    }
+  }
+  let vectors = try ai.embed("embed-model", inputs: ["a", "bbb"])
+  print("${vectors}")
+  let bad = llm.Client(base_url: "http://localhost:8096/v1", api_key: "wrong")
+  let _ = try bad.ask(m, prompt: "x") catch err {
+    print(err.message())
+    return
+  }
+}

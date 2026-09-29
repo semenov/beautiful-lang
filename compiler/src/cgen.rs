@@ -1342,6 +1342,56 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         format!("lt_buf_c(b, '{open}'); b->level++; for (int64_t i = 0; i < {n}; i++) {{ if (i) lt_buf_c(b, ','); lt_buf_newline(b); {item} }} b->level--; if ({n}) lt_buf_newline(b); lt_buf_c(b, '{close}');", open = open, close = close, n = n, item = item)
     }
 
+    // JSON Schema of the JSON form (see gen_enc); recursion becomes {}
+    fn schema_of(&self, id: usize, stack: &mut Vec<usize>) -> String {
+        if stack.contains(&id) {
+            return "{}".into();
+        }
+        stack.push(id);
+        let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+        let s = match &self.tys[id].kind {
+            Kind::Int => r#"{"type":"integer"}"#.to_string(),
+            Kind::Float => r#"{"type":"number"}"#.to_string(),
+            Kind::Bool => r#"{"type":"boolean"}"#.to_string(),
+            Kind::Text => r#"{"type":"string"}"#.to_string(),
+            Kind::Bytes => r#"{"type":"string","contentEncoding":"base64"}"#.to_string(),
+            Kind::List(e) | Kind::Set(e) => format!(r#"{{"type":"array","items":{}}}"#, self.schema_of(*e, stack)),
+            Kind::Map(_, v) => format!(r#"{{"type":"object","additionalProperties":{}}}"#, self.schema_of(*v, stack)),
+            Kind::Opt { inner, .. } => format!(r#"{{"anyOf":[{},{{"type":"null"}}]}}"#, self.schema_of(*inner, stack)),
+            Kind::Record { fields, .. } => {
+                let fields = fields.clone();
+                let props: Vec<String> = fields.iter().map(|(n, t)| format!("{}:{}", q(n), self.schema_of(*t, stack))).collect();
+                let req: Vec<String> = fields.iter().map(|(n, _)| q(n)).collect();
+                format!(r#"{{"type":"object","properties":{{{}}},"required":[{}],"additionalProperties":false}}"#, props.join(","), req.join(","))
+            }
+            Kind::Enum { variants, .. } => {
+                let variants = variants.clone();
+                let plain: Vec<String> = variants.iter().filter(|(_, f)| f.is_empty()).map(|(n, _)| q(n)).collect();
+                let mut any: Vec<String> = vec![];
+                if !plain.is_empty() {
+                    any.push(format!(r#"{{"type":"string","enum":[{}]}}"#, plain.join(",")));
+                }
+                for (n, fs) in variants.iter().filter(|(_, f)| !f.is_empty()) {
+                    let mut props = vec![format!(r#""type":{{"type":"string","enum":[{}]}}"#, q(n))];
+                    let mut req = vec![q("type")];
+                    for (fname, ft) in fs {
+                        props.push(format!("{}:{}", q(fname), self.schema_of(*ft, stack)));
+                        req.push(q(fname));
+                    }
+                    any.push(format!(r#"{{"type":"object","properties":{{{}}},"required":[{}],"additionalProperties":false}}"#, props.join(","), req.join(",")));
+                }
+                if any.len() == 1 {
+                    any.pop().unwrap()
+                } else {
+                    format!(r#"{{"anyOf":[{}]}}"#, any.join(","))
+                }
+            }
+            _ => "{}".to_string(),
+        };
+        stack.pop();
+        s
+    }
+
     fn gen_enc(&mut self, id: usize) {
         let c = self.tys[id].c.clone();
         let kind = self.tys[id].kind.clone();
@@ -2943,6 +2993,11 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "http.ResponseStream.read_line" => format!("lt_conn_read_line(&((lt_hstream *){})->body->h, {})", a[0], a[1]),
             "http.ResponseStream.read_all" => format!("lt_conn_read_all(&((lt_hstream *){})->body->h, {})", a[0], a[1]),
             "http.ResponseStream.close" => format!("({{ lt_hstream_join((lt_hstream *){}); (lt_err){{0}}; }})", a[0]),
+            "json.schema" => {
+                let id = self.tid(&tys[0]);
+                let s = self.schema_of(id, &mut vec![]);
+                format!("lt_text_cstr({})", c_str(&s))
+            }
             "json.encode" | "json.encode_pretty" => {
                 let id = tid0.unwrap();
                 self.need(H::Enc, id);
