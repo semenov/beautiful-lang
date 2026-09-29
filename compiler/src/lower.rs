@@ -145,13 +145,15 @@ impl<'a> Lowerer<'a> {
         let failure_vtable = self.vtable(failure, vec![self.prog.b.error]);
         let cancelled_vtable = self.vtable(Ty::Adt(self.prog.b.cancelled, vec![]), vec![self.prog.b.error]);
         let closed_vtable = self.vtable(Ty::Adt(self.prog.b.channel_closed, vec![]), vec![self.prog.b.error]);
+        // errors the runtime makes with lt_make_file_error(kind, ...): the
+        // kind is the position here, plus one
         let mut file_errors = vec![];
-        for name in ["NotFound", "PermissionDenied", "IsADirectory", "AlreadyExists"] {
-            let d = (0..self.prog.defs.len()).find(|&d| self.prog.defs[d].name == name && self.prog.module_names.get(self.prog.defs[d].module).map(|m| m == "files").unwrap_or(false));
+        for (i, (module, name)) in [("files", "NotFound"), ("files", "PermissionDenied"), ("files", "IsADirectory"), ("files", "AlreadyExists"), ("sql", "UniqueViolation")].iter().enumerate() {
+            let d = (0..self.prog.defs.len()).find(|&d| self.prog.defs[d].name == *name && self.prog.module_names.get(self.prog.defs[d].module).map(|m| m == module).unwrap_or(false));
             if let Some(d) = d {
                 let t = Ty::Adt(d, vec![]);
                 let vt = self.vtable(t.clone(), vec![self.prog.b.error]);
-                file_errors.push((t, vt));
+                file_errors.push((i + 1, t, vt));
             }
         }
         self.drain();

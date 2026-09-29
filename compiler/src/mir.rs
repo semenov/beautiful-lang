@@ -171,7 +171,7 @@ pub struct Module {
     pub shows: Vec<(Ty, FnIdx)>,
     // files.NotFound, PermissionDenied, IsADirectory, AlreadyExists (when
     // the program uses `files`): their types and vtables
-    pub file_errors: Vec<(Ty, usize)>,
+    pub file_errors: Vec<(usize, Ty, usize)>,
 }
 
 impl Stmt {

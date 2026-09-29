@@ -1,0 +1,23 @@
+// A UNIQUE or primary key violation is a sql.UniqueViolation.
+
+import db
+import sql
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table users (id integer primary key, email text unique)", [])
+    let _ = try conn.insert("insert into users (email) values (?)", ["a@b.c"])
+    let _ = try conn.insert("insert into users (email) values (?)", ["a@b.c"]) catch err {
+      if err is sql.UniqueViolation {
+        print("taken: ${err.column} (${err.message()})")
+      }
+      0
+    }
+    try conn.execute("insert into users (id, email) values (1, 'x')", []) catch err {
+      print("${err is sql.UniqueViolation}")
+    }
+    try conn.execute("insert into nope values (1)", []) catch err {
+      print("${err is sql.UniqueViolation}: ${err.message()}")
+    }
+  }
+}

@@ -1172,6 +1172,18 @@ them, and `none`).
 // text with `query.value`.
 pub type Query = String
 
+// A row that would repeat a value that must be unique (a UNIQUE column, a
+// primary key): "the email is taken".
+//   try conn.insert(...) catch err {
+//     if err is sql.UniqueViolation { throw ApiError(status: 422, ...) }
+//     throw err
+//   }
+pub type UniqueViolation implements Error {
+  // "users.email" (SQLite), or the constraint's name (Postgres)
+  column: String
+  text: String
+}
+
 // A parameter or column value.
 pub enum Value {
   Null

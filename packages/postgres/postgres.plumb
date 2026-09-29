@@ -341,6 +341,10 @@ fn server_error(body: Bytes) -> Error {
   if fields["C"] is some(c) {
     text = "${text} [${c}]"
   }
+  // unique_violation; "n" is the constraint's name
+  if fields["C"] == "23505" {
+    return sql.UniqueViolation(column: fields["n"] ?? "", text: text)
+  }
   return Failure(message: text)
 }
 

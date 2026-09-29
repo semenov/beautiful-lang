@@ -3960,12 +3960,13 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             let _ = write!(make_failure, "static lt_err lt_make_cancelled(void) {{ return to_iface_vt{}(({}){{0}}); }}\nstatic lt_err lt_make_channel_closed(void) {{ return to_iface_vt{}(({}){{0}}); }}\n", self.m.cancelled_vtable, cc, self.m.closed_vtable, xc);
         }
         // lt_make_file_error: 1 NotFound, 2 PermissionDenied, 3 IsADirectory,
-        // 4 AlreadyExists, when the program has `files`; else a Failure
+        // 4 AlreadyExists (with `files`), 5 sql.UniqueViolation (with `sql`,
+        // `path` is the column); else a Failure
         {
             let mut cases = String::new();
-            for (i, (t, vt)) in self.m.file_errors.clone().iter().enumerate() {
+            for (kind, t, vt) in self.m.file_errors.clone().iter() {
                 let c = self.cty(t);
-                let _ = write!(cases, " case {}: return to_iface_vt{}(({}){{ lt_text_ret(path), msg }});", i + 1, vt, c);
+                let _ = write!(cases, " case {}: return to_iface_vt{}(({}){{ lt_text_ret(path), msg }});", kind, vt, c);
             }
             let _ = writeln!(make_failure, "static lt_err lt_make_file_error(int kind, lt_text *path, lt_text *msg) {{ (void)path; switch (kind) {{{} default: return lt_make_failure(msg); }} }}", cases);
         }

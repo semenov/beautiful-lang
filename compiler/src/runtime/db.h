@@ -46,6 +46,17 @@ static void lt_db_free(lt_handle *h) {
 
 static lt_err lt_db_error(sqlite3 *db, const char *what, const char *sql) {
     char buf[1024];
+    // "UNIQUE constraint failed: users.email": a sql.UniqueViolation
+    int code = db ? sqlite3_extended_errcode(db) : 0;
+    if (code == SQLITE_CONSTRAINT_UNIQUE || code == SQLITE_CONSTRAINT_PRIMARYKEY) {
+        const char *m = sqlite3_errmsg(db);
+        const char *col = strstr(m, ": ");
+        snprintf(buf, sizeof buf, "db: %s: %s", what, m);
+        lt_text *c = lt_text_cstr(col ? col + 2 : "");
+        lt_err e = lt_make_file_error(5, c, lt_text_cstr(buf)); // keeps its own reference to c
+        lt_text_drop(c);
+        return e;
+    }
     if (sql) snprintf(buf, sizeof buf, "db: %s: %s (in: %.200s)", what, db ? sqlite3_errmsg(db) : "?", sql);
     else snprintf(buf, sizeof buf, "db: %s: %s", what, db ? sqlite3_errmsg(db) : "?");
     return lt_make_failure(lt_text_cstr(buf));

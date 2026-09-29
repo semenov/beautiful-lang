@@ -200,7 +200,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           SHA-NI): later
     - [x] a `String?` as an SQL parameter (docs say `none` is allowed)
     - [ ] SQL can't be shared between queries (not even a top-level `let`)
-    - [ ] database errors are untyped (UNIQUE violation is only text)
+    - [x] database errors are untyped: `sql.UniqueViolation` (SQLite and Postgres)
     - [x] `http.json` has no camelCase option; `omit_none` is all or nothing
     - [x] `time.DateTime` has no milliseconds
     - [ ] no plain mutex (a `Shared<Int>` nobody reads); middleware can't pass

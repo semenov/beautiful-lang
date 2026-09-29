@@ -1,0 +1,3 @@
+taken: users.email (db: the statement failed: UNIQUE constraint failed: users.email)
+true
+false: db: the SQL is wrong: no such table: nope (in: insert into nope values (1))
