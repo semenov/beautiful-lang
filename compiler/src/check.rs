@@ -80,6 +80,16 @@ fn orderable(t: &Ty) -> bool {
     matches!(t, Ty::Int | Ty::Float | Ty::Text | Ty::Bool)
 }
 
+// Also Decimal, and lists of orderable values (compared element by
+// element, like words in a dictionary): `sorted_by(s => [s.group, s.name])`.
+fn orderable_in(b: &Builtins, t: &Ty) -> bool {
+    match t {
+        Ty::Adt(d, a) if *d == b.list && a.len() == 1 => orderable_in(b, &a[0]) || matches!(a[0], Ty::Var(_) | Ty::Param(_) | Ty::Err),
+        Ty::Adt(d, _) => *d == b.decimal,
+        _ => orderable(t),
+    }
+}
+
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -2767,7 +2777,13 @@ impl Checker {
             }
             ("List", "join") => need(self, t0, |t| *t == Ty::Text, "a list of `String`"),
             ("List", "sort_by") | ("List", "sorted_by") | ("List", "min_by") | ("List", "max_by") => {
-                need(self, last, orderable, "a key that can be ordered (a number or text)")
+                if let Some(t) = last {
+                    let t = self.zonk_ty(&t, &mut None);
+                    if !matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) && !orderable_in(&self.prog.b, &t) {
+                        let s = self.prog.show(&t);
+                        self.err_help(span, format!("`{}` needs a key that can be ordered, but this is `{}`", f.name, s), "a number, text, Decimal, or a list of them compared in turn: `sorted_by(p => [p.last_name, p.first_name])`");
+                    }
+                }
             }
             ("", "min") | ("", "max") | ("", "__less") => need(self, t0, orderable, "values that can be ordered (numbers or text)"),
             _ => {}
@@ -3273,7 +3289,7 @@ impl Checker {
                     return bad(self, format!("can't compare `{}` and `{}`", a, b), None);
                 }
                 let t = self.resolve(&lt);
-                if !orderable(&t) && !matches!(t, Ty::Var(_)) && !self.is_decimal(&t) {
+                if !orderable_in(&self.prog.b, &self.zonk_ty(&t, &mut None)) && !matches!(t, Ty::Var(_)) {
                     let s = self.prog.show(&t);
                     let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers and text can be ordered; compare a field instead") };
                     return bad(self, format!("`{}` values can't be ordered", s), help);

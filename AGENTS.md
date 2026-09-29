@@ -78,6 +78,7 @@ let age = ages["Ada"] ?? 0     // reading gives Int?
 ages.remove("Ada")
 let counts = words.count_each()               // Map<String, Int>
 let top = counts.entries().sorted_by(e => e.value).reversed().take(10)
+let byname = people.sorted_by(p => [p.last, p.first])  // lists compare in turn
 
 let size = if n > 100 { "big" } else { "small" }   // if and match give values
 let label = match shape {

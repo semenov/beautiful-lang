@@ -36,7 +36,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [ ] reading `m[k]` then writing `m[k]` copies the value (quadratic); `take` avoids it: document or optimize
     - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
     - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
-    - [ ] sorting by a list key (lexicographic) or with a comparator
+    - [x] sorting by a list key (lexicographic); `<` on lists. A comparator: not needed so far
     - [x] or-patterns in `match`: `"a" | "b" => ...`
     - [ ] `Duration` in interpolation shows its fields
     - [ ] a variant named `String` can't be built by its bare name: suggest `Value.String(...)`

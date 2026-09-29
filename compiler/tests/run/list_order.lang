@@ -1,0 +1,15 @@
+// Lists compare element by element: sort keys with several parts.
+
+type Person {
+  last: String
+  first: String
+  age: Int
+}
+
+fn main() {
+  let people = [Person(last: "Lee", first: "Bo", age: 30), Person(last: "Ada", first: "Zed", age: 20), Person(last: "Lee", first: "Al", age: 41), Person(last: "Ada", first: "Amy", age: 35)]
+  print("${people.sorted_by(p => [p.last, p.first]).map(p => "${p.first} ${p.last}")}")
+  let paths = [[1, 10], [1, 2], [0, 5, 1], [1], [0, 5]]
+  print("${paths.sorted_by(p => p)} ${[3, 1] < [3, 1, 0]} ${["b"] > ["a", "z"]}")
+  print("${(people.max_by(p => [p.age]) ?? people[0]).first}")
+}

@@ -718,6 +718,12 @@ impl<'a> CGen<'a> {
             Kind::Int | Kind::Float | Kind::Bool => "return a < b ? -1 : (a > b ? 1 : 0);".to_string(),
             Kind::Decimal => "return lt_decimal_cmp(a, b);".to_string(),
             Kind::Text => "return lt_text_cmp(a, b);".into(),
+            // element by element; a shorter list that is a prefix comes first
+            Kind::List(e) => {
+                let e = *e;
+                let c = self.cmp_expr(e, "a->items[i]", "b->items[i]");
+                format!("int64_t n = a->len < b->len ? a->len : b->len; for (int64_t i = 0; i < n; i++) {{ int64_t r = {}; if (r) return r; }} return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);", c)
+            }
             _ => "(void)a; (void)b; lt_panic_at(\"these values can't be ordered\", 0);".into(),
         };
         let _ = writeln!(self.helpers, "static int64_t cmp_{}({} a, {} b) {{ {} }}", id, c, c, body);
