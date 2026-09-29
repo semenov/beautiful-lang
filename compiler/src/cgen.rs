@@ -3682,6 +3682,9 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
     fn mut_intrinsic(&mut self, fi: usize, name: &str, tys: &[Ty], p: &str, a: &[String], args: &[Op], throws: bool) -> String {
         let line = self.line();
         let tid0 = self.tid(&tys[0]);
+        if name == "String.append_parts" {
+            return format!("lt_text_append_n({}, {}, (lt_text*[]){{ {} }})", p, a.len(), a.join(", "));
+        }
         if !matches!(self.tys[tid0].kind, Kind::Bytes) {
             self.need(H::Ops, tid0);
         }

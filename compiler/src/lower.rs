@@ -576,6 +576,16 @@ impl<'a> Lowerer<'a> {
             }
             TStmt::Assign(place, e) => {
                 self.set_line(e.span);
+                // `x = "${x}..."`: append to x in place (when nothing else holds it)
+                if let TK::Interp(parts) = &e.kind {
+                    if parts.len() >= 2 && same_place(place, &parts[0]) {
+                        let ops: Vec<Op> = parts[1..].iter().map(|p| self.expr(p)).collect();
+                        let p = self.place(place, true);
+                        let callee = MCallee::Intrinsic("String.append_parts".into(), vec![Ty::Text]);
+                        self.emit(Stmt::MutCall { dst: None, err: None, place: p, callee, args: ops });
+                        return;
+                    }
+                }
                 let v = self.expr(e);
                 let root = self.fbr().map[&place.root];
                 if place.path.is_empty() && !self.fbr().f.locals[root].self_ptr {
@@ -1938,5 +1948,21 @@ pub fn intrinsic_name(prog: &Program, f: &FnDef) -> String {
         }
         None if f.module != 0 => format!("{}.{}", prog.module_names[f.module], f.name),
         None => f.name.clone(),
+    }
+}
+
+// Whether `e` reads the place `p`: the same local and the same fields.
+fn same_place(p: &TPlace, e: &TExpr) -> bool {
+    let mut fields = vec![];
+    let mut cur = e;
+    loop {
+        match &cur.kind {
+            TK::Field(inner, f) => {
+                fields.push(*f);
+                cur = inner;
+            }
+            TK::Local(id) => break *id == p.root && fields.len() == p.path.len() && fields.iter().rev().zip(&p.path).all(|(f, el)| matches!(el, PlaceElem::Field(g) if g == f)),
+            _ => break false,
+        }
     }
 }

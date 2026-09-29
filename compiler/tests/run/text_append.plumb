@@ -1,0 +1,56 @@
+// `x = "${x}..."` appends in place when nothing else holds x's text (a
+// loop building text is linear); when something does, it keeps its value.
+type Doc {
+  title: String
+  body: String = ""
+
+  mutating fn add(line: String) {
+    self.body = "${self.body}${line}\n"
+  }
+}
+
+fn build(n: Int) -> String {
+  var out = ""
+  for i in 0..<n {
+    out = "${out}${i % 10}é"
+  }
+  return out
+}
+
+fn main() throws {
+  var out = ""
+  for i in 0..<400000 {
+    out = "${out}x"
+  }
+  print("${out.length}")
+  var s = "é"
+  let keep = s
+  s = "${s}a${s}"
+  s = "${s}${s}"
+  print("${s} ${keep}")
+  var d = Doc(title: "t")
+  d.add("one")
+  d.add("two")
+  let copy = d
+  d.add("three")
+  print("${d.body.length} ${copy.body.length}")
+  var parts: List<String> = []
+  var acc = "a"
+  for i in 0..<3 {
+    parts.append(acc)
+    acc = "${acc}${i}"
+  }
+  print("${parts} ${acc}")
+  let shared = Shared<String>("")
+  let t = spawn build(300000)
+  for i in 0..<1000 {
+    with v = shared.lock() {
+      v = "${v}${i % 10}"
+    }
+  }
+  let big = try t.wait()
+  print("${big.length} ${big.slice(from: 599990, to: 600000)}")
+  with v = shared.lock() {
+    print("${v.length} ${v.slice(from: 990, to: 1000)}")
+  }
+}

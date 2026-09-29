@@ -798,6 +798,66 @@ static lt_text *lt_text_concat_n(int n, lt_text **parts) {
     return t;
 }
 
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#define LT_USABLE(p) malloc_size(p)
+#else
+#include <malloc.h>
+#define LT_USABLE(p) malloc_usable_size(p)
+#endif
+
+// the bytes the block of text `t` has room for (`size`: what its length needs)
+static size_t lt_text_room(lt_text *t, size_t size) {
+#ifndef LT_DEBUG_ALLOC
+    size_t c = (size + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
+    if (c < LT_CLASSES) return (c ? c : 1) * LT_CLASS_BYTES;
+    if (size >= LT_BIG) return ((lt_big_hdr *)((char *)t - sizeof(lt_big_hdr)))->mapped - sizeof(lt_big_hdr);
+#endif
+    return LT_USABLE(t);
+}
+
+// `x = "${x}..."`: appends the parts to the text in *tp. A text nothing else
+// holds grows in place, with room to spare (as a list does), so building
+// text in a loop is linear; a shared one is copied.
+static void lt_text_append_n(lt_text **tp, int n, lt_text **parts) {
+    lt_text *t = *tp;
+    int64_t add = 0;
+    bool alias = false;
+    for (int i = 0; i < n; i++) {
+        add += parts[i]->len;
+        alias |= parts[i] == t;
+    }
+    if (!LT_UNIQUE(t) || alias) {
+        lt_text *all[n + 1];
+        all[0] = t;
+        for (int i = 0; i < n; i++) all[i + 1] = parts[i];
+        *tp = lt_text_concat_n(n + 1, all);
+        lt_text_drop(t);
+        return;
+    }
+    if (add == 0) return;
+    size_t old = LT_TEXT_SIZE(t->len), need = LT_TEXT_SIZE(t->len + add);
+    if (need > lt_text_room(t, old)) {
+        size_t want = need;
+        // past the small size classes, grow by half again, short of a big
+        // block (those keep room themselves; see lt_big_realloc)
+        if (need >= LT_CLASSES * LT_CLASS_BYTES && need < LT_BIG) {
+            want = need + need / 2;
+            if (want >= LT_BIG) want = LT_BIG - 1;
+        }
+        t = (lt_text *)lt_realloc(t, old, want);
+    }
+    char *w = t->data + t->len;
+    for (int i = 0; i < n; i++) {
+        memcpy(w, parts[i]->data, (size_t)parts[i]->len);
+        w += parts[i]->len;
+    }
+    t->len += add;
+    *w = 0;
+    t->chars = -1; // (the position hint in `at` is still right)
+    *tp = t;
+}
+
 static int64_t lt_text_length(lt_text *t) {
     int64_t c = __atomic_load_n(&t->chars, __ATOMIC_RELAXED);
     if (c >= 0) return c;
