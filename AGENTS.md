@@ -239,7 +239,8 @@ let n = if args.length > 0 { try args[0].to_int() } else { usage("no count") }
   `a.to_float() / b.to_float()`.
 - Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`;
   `0xFF`, `0b1010`, `0o755`, `1_000_000`.
-- String to numbers: `try text.to_int()`, `try text.to_float()`.
+- String to numbers: `try text.to_int()`, `try text.to_float()`. They are
+  strict: `" 42"` (trim first), `"1_000"`, `"nan"`, `"inf"` and `"1e400"` are errors.
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
   `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;
   `n.to_decimal()` from an Int; `1.50` prints as `1.50` and equals `1.5`.

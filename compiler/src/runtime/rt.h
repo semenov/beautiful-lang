@@ -1058,61 +1058,78 @@ static lt_text *lt_text_quote(lt_text *t) {
     return r;
 }
 
+// `"<t>" is not <what>` and, if there is one, `: <why>`
+static lt_err lt_number_error(lt_text *t, const char *what, const char *why) {
+    lt_text *q = lt_text_quote(t);
+    char buf[160];
+    snprintf(buf, sizeof buf, " is not %s%s%s", what, why ? ": " : "", why ? why : "");
+    lt_text *suffix = lt_text_cstr(buf);
+    lt_text *parts[2] = { q, suffix };
+    lt_text *msg = lt_text_concat_n(2, parts);
+    lt_text_drop(q);
+    lt_text_drop(suffix);
+    return lt_make_failure(msg);
+}
+
+// what's wrong with number text beyond its digits: spaces around it, `_`
+static const char *lt_number_text_problem(lt_text *t) {
+    if (t->len == 0) return "it's empty";
+    if (lt_is_space(t->data[0]) || lt_is_space(t->data[t->len - 1])) return "it has spaces around it (trim it first)";
+    if (memchr(t->data, '_', (size_t)t->len)) return "`_` isn't allowed in number text";
+    return NULL;
+}
+
+// strict: an optional sign and digits, nothing else
 static lt_err lt_text_to_int(lt_text *t, int64_t *out) {
-    int64_t a = 0, b = t->len;
-    while (a < b && lt_is_space(t->data[a])) a++;
-    while (b > a && lt_is_space(t->data[b - 1])) b--;
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a whole number", why);
+    int64_t i = 0, b = t->len;
     bool neg = false;
-    int64_t i = a;
-    if (i < b && (t->data[i] == '-' || t->data[i] == '+')) {
+    if (t->data[i] == '-' || t->data[i] == '+') {
         neg = t->data[i] == '-';
         i++;
     }
-    bool ok = i < b;
+    if (i == b) return lt_number_error(t, "a whole number", NULL);
     uint64_t v = 0;
-    for (; i < b && ok; i++) {
+    bool big = false;
+    for (; i < b; i++) {
         char c = t->data[i];
-        if (c == '_' && i > a) continue;
-        if (c < '0' || c > '9') {
-            ok = false;
-            break;
-        }
-        if (v > (UINT64_MAX - 9) / 10) {
-            ok = false;
-            break;
-        }
-        v = v * 10 + (uint64_t)(c - '0');
+        if (c < '0' || c > '9') return lt_number_error(t, "a whole number", NULL);
+        if (v > (UINT64_MAX - 9) / 10) big = true;
+        else v = v * 10 + (uint64_t)(c - '0');
     }
-    if (ok && (neg ? v > (uint64_t)INT64_MAX + 1 : v > (uint64_t)INT64_MAX)) ok = false;
-    if (!ok) {
-        lt_text *q = lt_text_quote(t);
-        lt_text *suffix = lt_text_cstr(" is not a whole number");
-        lt_text *parts[2] = { q, suffix };
-        lt_text *msg = lt_text_concat_n(2, parts);
-        lt_text_drop(q);
-        lt_text_drop(suffix);
-        return lt_make_failure(msg);
-    }
+    if (big || (neg ? v > (uint64_t)INT64_MAX + 1 : v > (uint64_t)INT64_MAX))
+        return lt_number_error(t, "a whole number", "it's too big for an Int");
     *out = neg ? (int64_t)(0 - v) : (int64_t)v;
     return (lt_err){ 0 };
 }
 
+// strict: [sign] digits [. digits] [e [sign] digits], as in JSON (and ".5",
+// "5."); no NaN, infinity or hexadecimal, and not so big it's infinite
 static lt_err lt_text_to_float(lt_text *t, double *out) {
-    char *end = NULL;
-    lt_text *tr = lt_text_trim(t);
-    errno = 0;
-    double v = tr->len ? strtod(tr->data, &end) : 0;
-    bool ok = tr->len > 0 && end == tr->data + tr->len;
-    lt_text_drop(tr);
-    if (!ok) {
-        lt_text *q = lt_text_quote(t);
-        lt_text *suffix = lt_text_cstr(" is not a number");
-        lt_text *parts[2] = { q, suffix };
-        lt_text *msg = lt_text_concat_n(2, parts);
-        lt_text_drop(q);
-        lt_text_drop(suffix);
-        return lt_make_failure(msg);
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a number", why);
+    const char *d = t->data;
+    int64_t i = 0, n = t->len, digits = 0;
+    if (d[i] == '-' || d[i] == '+') i++;
+    if (i < n && (d[i] == 'n' || d[i] == 'N' || d[i] == 'i' || d[i] == 'I'))
+        return lt_number_error(t, "a number", "NaN and infinity aren't accepted");
+    while (i < n && d[i] >= '0' && d[i] <= '9') i++, digits++;
+    if (i < n && d[i] == '.') {
+        i++;
+        while (i < n && d[i] >= '0' && d[i] <= '9') i++, digits++;
     }
+    bool ok = digits > 0;
+    if (ok && i < n && (d[i] == 'e' || d[i] == 'E')) {
+        i++;
+        if (i < n && (d[i] == '-' || d[i] == '+')) i++;
+        int64_t ed = 0;
+        while (i < n && d[i] >= '0' && d[i] <= '9') i++, ed++;
+        ok = ed > 0;
+    }
+    if (!ok || i != n) return lt_number_error(t, "a number", NULL);
+    double v = strtod(d, NULL);
+    if (isinf(v)) return lt_number_error(t, "a number", "it's too big for a Float");
     *out = v;
     return (lt_err){ 0 };
 }
@@ -1786,11 +1803,9 @@ static lt_decimal lt_decimal_lit(const char *s) {
 }
 
 static lt_err lt_text_to_decimal(lt_text *t, lt_decimal *out) {
-    const char *s = t->data;
-    int64_t n = t->len;
-    while (n > 0 && (*s == ' ' || *s == '\t')) s++, n--;
-    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) n--;
-    if (!lt_decimal_parse(s, n, out)) {
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a decimal number", why);
+    if (!lt_decimal_parse(t->data, t->len, out)) {
         char buf[160];
         snprintf(buf, sizeof buf, "\"%.*s\" is not a decimal number (like 19.99)", (int)(t->len > 100 ? 100 : t->len), t->data);
         return lt_make_failure(lt_text_cstr(buf));

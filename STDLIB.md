@@ -1775,9 +1775,13 @@ builtin type String {
   fn repeat(self, times: Int) -> String
   fn pad_start(self, width: Int, fill: String) -> String
   fn pad_end(self, width: Int, fill: String) -> String
+  // "42", "-7": a sign and digits only. Spaces around it (trim first), `_`
+  // and numbers too big for an Int are errors.
   fn to_int(self) throws -> Int
+  // "1.5", "-2e3", ".5": as in JSON. Spaces, `_`, "nan", "inf" and numbers
+  // too big for a Float ("1e400") are errors.
   fn to_float(self) throws -> Float
-  // "19.99" -> 19.99 exactly
+  // "19.99" -> 19.99 exactly; strict like to_float
   fn to_decimal(self) throws -> Decimal
   fn to_string(self) -> String
   // The text as UTF-8 bytes.
@@ -1832,7 +1836,8 @@ builtin type List<T> {
   fn flat_map<R>(self, transform: fn(T) throws -> List<R>) rethrows -> List<R>
   // Without repeats, the first of each kept, in order.
   fn unique(self) -> List<T>
-  // In pieces of `size` (the last may be shorter): batches.
+  // In pieces of `size` (the last may be shorter): batches. A size below 1
+  // is a bug.
   fn chunks(self, size: Int) -> List<List<T>>
   // The position of the first item equal to `item`.
   fn index_of(self, item: T) -> Int?

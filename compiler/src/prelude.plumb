@@ -123,9 +123,13 @@ builtin type String {
   fn repeat(self, times: Int) -> String
   fn pad_start(self, width: Int, fill: String) -> String
   fn pad_end(self, width: Int, fill: String) -> String
+  // "42", "-7": a sign and digits only. Spaces around it (trim first), `_`
+  // and numbers too big for an Int are errors.
   fn to_int(self) throws -> Int
+  // "1.5", "-2e3", ".5": as in JSON. Spaces, `_`, "nan", "inf" and numbers
+  // too big for a Float ("1e400") are errors.
   fn to_float(self) throws -> Float
-  // "19.99" -> 19.99 exactly
+  // "19.99" -> 19.99 exactly; strict like to_float
   fn to_decimal(self) throws -> Decimal
   fn to_string(self) -> String {
     return self
@@ -279,13 +283,23 @@ builtin type List<T> {
     }
     return out
   }
-  // In pieces of `size` (the last may be shorter): batches.
+  // In pieces of `size` (the last may be shorter): batches. A size below 1
+  // is a bug.
   fn chunks(self, size: Int) -> List<List<T>> {
+    if size < 1 {
+      panic("chunks: the size must be at least 1")
+    }
     var out: List<List<T>> = []
-    var i = 0
-    while i < self.length {
-      out.append(self.drop(i).take(size))
-      i += max(size, 1)
+    var piece: List<T> = []
+    for x in self {
+      piece.append(x)
+      if piece.length == size {
+        out.append(piece)
+        piece = []
+      }
+    }
+    if piece.length > 0 {
+      out.append(piece)
     }
     return out
   }
