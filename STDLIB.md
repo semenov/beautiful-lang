@@ -328,6 +328,10 @@ pub type Duration {
 
 pub fn seconds(n: Int) -> Duration
 
+pub fn micros(n: Int) -> Duration
+
+pub fn nanos(n: Int) -> Duration
+
 pub fn millis(n: Int) -> Duration
 
 // A point in time, for measuring how long something takes.
@@ -469,6 +473,19 @@ pub type Request {
   pub fn text(self) throws -> Text
 }
 
+// How long a client request took, each from its start. Connections are
+// reused between requests (keep-alive), so `connect` is often zero.
+pub type Timing {
+  dns: time.Duration = time.nanos(0)
+  connect: time.Duration = time.nanos(0)
+  tls: time.Duration = time.nanos(0)
+  // the answer's first byte arrived
+  first_byte: time.Duration = time.nanos(0)
+  total: time.Duration = time.nanos(0)
+  // true if the request went over an already open connection
+  reused: Bool = false
+}
+
 pub type Response {
   status: Int
   body: Bytes
@@ -477,6 +494,8 @@ pub type Response {
   file: Text = ""
   // When set, the server calls it to write the body (see `stream`).
   writer: (fn(io.Stream) throws)? = none
+  // Client responses: how long the parts of the request took.
+  timing: Timing = Timing()
   // The body as text; an error if it isn't valid UTF-8.
   pub fn text(self) throws -> Text
   // A copy with one more header.
@@ -554,8 +573,12 @@ pub type ClientRequest {
   // Without a "content-type" header, one starting with { or [ is sent as
   // JSON, other text as plain text.
   body: Bytes = Bytes()
-  // Seconds without any progress before giving up.
-  timeout: Int = 60
+  // For the whole request, from connecting to the last byte of the body.
+  // Streams read for long (http.open) need a long one.
+  timeout: time.Duration = time.seconds(60)
+  // 3xx answers are followed (at most 10; a POST becomes a GET after
+  // 301/302/303, as browsers do). Otherwise the 3xx is the answer.
+  follow_redirects: Bool = true
 }
 
 pub fn send(request: ClientRequest) throws -> Response
@@ -586,6 +609,9 @@ pub builtin type ResponseStream {
   fn read(self, max: Int) throws -> Bytes
   fn read_line(self) throws -> Text?
   fn read_all(self) throws -> Bytes
+  // How long the request took up to the headers (`total` is filled in
+  // once the body has been read).
+  fn timing(self) -> Timing
   // Stops receiving the rest.
   fn close(self) throws
 }

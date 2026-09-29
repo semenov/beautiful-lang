@@ -1065,6 +1065,8 @@ static void lt_print(lt_text *t) {
     flockfile(stdout);
     fwrite(t->data, 1, (size_t)t->len, stdout);
     putc_unlocked('\n', stdout);
+    // the reader went away (`... | head`): stop quietly, as tools do
+    if (ferror_unlocked(stdout) && errno == EPIPE) _exit(141);
     funlockfile(stdout);
 }
 

@@ -314,7 +314,11 @@ static lt_err lt_conn_write_raw(lt_handle *h, const void *d, int64_t n) {
         if (e.obj) return e;
     }
     if (c->is_stdout) fflush(stdout);
-    if (!lt_sock_write_all(c->fd, (const char *)d, (size_t)n)) return lt_conn_error(c, "write", strerror(errno));
+    if (!lt_sock_write_all(c->fd, (const char *)d, (size_t)n)) {
+        // the reader went away (`... | head`): stop quietly, as tools do
+        if (errno == EPIPE && c->borrowed) _exit(141);
+        return lt_conn_error(c, "write", strerror(errno));
+    }
     return (lt_err){ 0 };
 }
 

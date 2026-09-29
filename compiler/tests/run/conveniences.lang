@@ -10,7 +10,7 @@ fn main() throws {
   try env.load("missing.env")
   print("${env.get("A") ?? "-"} | ${env.get("B") ?? "-"} | ${env.get("C") ?? "-"} | path kept: ${(env.get("PATH") ?? "") != "nope"}")
   print("sh found: ${process.find("sh") is some(_)}; nope: ${process.find("surely-not-a-program")}")
-  let out = try process.run_command(process.Command(program: "sh", args: ["-c", "pwd; echo $GREETING; cat"], dir: "/tmp", env: {"GREETING": "hello"}, input: "from stdin"))
+  let out = try process.run_command(process.Command(program: "sh", args: ["-c", "pwd; echo $GREETING; cat"], dir: "/", env: {"GREETING": "hello"}, input: "from stdin"))
   print(out.stdout.trim())
   let big = "x".repeat(300000)
   let wc = try process.run_command(process.Command(program: "wc", args: ["-c"], input: big))

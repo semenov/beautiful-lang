@@ -16,6 +16,14 @@ pub fn seconds(n: Int) -> Duration {
   return Duration(nanos: n * 1000000000)
 }
 
+pub fn micros(n: Int) -> Duration {
+  return Duration(nanos: n * 1000)
+}
+
+pub fn nanos(n: Int) -> Duration {
+  return Duration(nanos: n)
+}
+
 pub fn millis(n: Int) -> Duration {
   return Duration(nanos: n * 1000000)
 }

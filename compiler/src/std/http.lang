@@ -15,6 +15,7 @@
 
 import io
 import json
+import time
 
 pub type Request {
   method: Text
@@ -49,6 +50,19 @@ pub type Request {
   }
 }
 
+// How long a client request took, each from its start. Connections are
+// reused between requests (keep-alive), so `connect` is often zero.
+pub type Timing {
+  dns: time.Duration = time.nanos(0)
+  connect: time.Duration = time.nanos(0)
+  tls: time.Duration = time.nanos(0)
+  // the answer's first byte arrived
+  first_byte: time.Duration = time.nanos(0)
+  total: time.Duration = time.nanos(0)
+  // true if the request went over an already open connection
+  reused: Bool = false
+}
+
 pub type Response {
   status: Int
   body: Bytes
@@ -57,6 +71,8 @@ pub type Response {
   file: Text = ""
   // When set, the server calls it to write the body (see `stream`).
   writer: (fn(io.Stream) throws)? = none
+  // Client responses: how long the parts of the request took.
+  timing: Timing = Timing()
 
   // The body as text; an error if it isn't valid UTF-8.
   pub fn text(self) throws -> Text {
@@ -243,15 +259,20 @@ pub type ClientRequest {
   // Without a "content-type" header, one starting with { or [ is sent as
   // JSON, other text as plain text.
   body: Bytes = Bytes()
-  // Seconds without any progress before giving up.
-  timeout: Int = 60
+  // For the whole request, from connecting to the last byte of the body.
+  // Streams read for long (http.open) need a long one.
+  timeout: time.Duration = time.seconds(60)
+  // 3xx answers are followed (at most 10; a POST becomes a GET after
+  // 301/302/303, as browsers do). Otherwise the 3xx is the answer.
+  follow_redirects: Bool = true
 }
+
 
 pub fn send(request: ClientRequest) throws -> Response {
   if not request.url.contains("://") {
     throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")
   }
-  return try __send(request.method, url: request.url, headers: request.headers, body: request.body, timeout: request.timeout)
+  return try __send(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects)
 }
 
 pub fn get(url: Text) throws -> Response {
@@ -278,7 +299,10 @@ pub fn delete(url: Text) throws -> Response {
 //     while try res.read_line() is some(line) { ... }
 //   }
 pub fn open(request: ClientRequest) throws -> ResponseStream {
-  return try __open(request.method, url: request.url, headers: request.headers, body: request.body, timeout: request.timeout)
+  if not request.url.contains("://") {
+    throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")
+  }
+  return try __open(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects)
 }
 
 pub builtin type ResponseStream {
@@ -290,12 +314,15 @@ pub builtin type ResponseStream {
   fn read(self, max: Int) throws -> Bytes
   fn read_line(self) throws -> Text?
   fn read_all(self) throws -> Bytes
+  // How long the request took up to the headers (`total` is filled in
+  // once the body has been read).
+  fn timing(self) -> Timing
   // Stops receiving the rest.
   fn close(self) throws
 }
 
-fn __send(method: Text, url: Text, headers: Map<Text, Text>, body: Bytes, timeout: Int) throws -> Response
-fn __open(method: Text, url: Text, headers: Map<Text, Text>, body: Bytes, timeout: Int) throws -> ResponseStream
+fn __send(method: Text, url: Text, headers: Map<Text, Text>, body: Bytes, timeout_ms: Int, follow: Bool) throws -> Response
+fn __open(method: Text, url: Text, headers: Map<Text, Text>, body: Bytes, timeout_ms: Int, follow: Bool) throws -> ResponseStream
 
 // Saves what `url` answers into the file `to`, without holding it in memory.
 // The response has the status and headers and an empty body. The file is

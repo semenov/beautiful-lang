@@ -1747,14 +1747,21 @@ free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else dr
         self.need(H::Drop, rs);
         self.need(H::Drop, map);
         let (rqc, rsc, mc) = (self.tys[rq].c.clone(), self.tys[rs].c.clone(), self.tys[map].c.clone());
+        let timing = self.http_def("Timing");
+        let tm = self.tid(&timing);
+        let tmc = self.tys[tm].c.clone();
         let _ = write!(
             self.helpers,
             r#"
+// microseconds from curl -> time.Duration (nanoseconds)
+static {tmc} lt_http_timing_value(const int64_t *t, bool reused) {{
+  return ({tmc}){{ {{ t[0] * 1000 }}, {{ t[1] * 1000 }}, {{ t[2] * 1000 }}, {{ t[3] * 1000 }}, {{ t[4] * 1000 }}, reused }};
+}}
 static {rsc} lt_http_response_from(lt_http_out *o) {{
   {mc} h = {mc}_new(8);
   for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) {mc}_put(&h, o->headers->items[i], o->headers->items[i + 1]);
   if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
-  return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0), (lt_fn){{0}} }};
+  return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0), (lt_fn){{0}}, lt_http_timing_value(o->timing, o->reused) }};
 }}
 static lt_text *lt_url_decode(const char *s, int64_t n) {{
   lt_text *t = lt_text_new(n); int64_t w = 0;
@@ -1806,7 +1813,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             rsc = rsc,
             rqc = rqc,
             mc = mc,
-            rs = rs
+            rs = rs,
+            tmc = tmc
         );
         let _ = writeln!(self.protos, "static {} lt_http_response_from(lt_http_out *o);", rsc);
         if self.threads {
@@ -3017,12 +3025,16 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let hs = format!("{mc} m_ = {m}; lt_texts *h_ = lt_texts_new(m_->len * 2 + 1); for (int64_t i_ = 0; i_ < m_->n; i_++) if (m_->e[i_].h) {{ lt_texts_push(&h_, m_->e[i_].k); lt_texts_push(&h_, m_->e[i_].v); }}", mc = mc, m = a[2]);
                 let free_hs = "lt_free(h_, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)h_->cap);";
                 if name == "http.__send" {
-                    format!("({{ {hs} lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_send_request({}, {}, h_, {}, {}, &o_); {free_hs} if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[3], a[4], a[5], hs = hs, free_hs = free_hs)
+                    format!("({{ {hs} lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_send_request({}, {}, h_, {}, {}, {}, &o_); {free_hs} if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[3], a[4], a[5], a[6], hs = hs, free_hs = free_hs)
                 } else {
-                    format!("({{ {hs} lt_err e_ = lt_http_open({}, {}, h_, {}, {}, {}); {free_hs} e_; }})", a[0], a[1], a[3], a[4], a[5], hs = hs, free_hs = free_hs)
+                    format!("({{ {hs} lt_err e_ = lt_http_open({}, {}, h_, {}, {}, {}, {}); {free_hs} e_; }})", a[0], a[1], a[3], a[4], a[5], a[6], hs = hs, free_hs = free_hs)
                 }
             }
             "http.ResponseStream.status" => format!("(((lt_hstream *){})->status)", a[0]),
+            "http.ResponseStream.timing" => {
+                self.gen_http_glue();
+                format!("({{ lt_hstream *s_ = (lt_hstream *){}; lt_http_timing_value(s_->timing, s_->reused); }})", a[0])
+            }
             "http.ResponseStream.header" => format!("lt_hstream_header_get({}, {})", a[0], a[1]),
             "http.ResponseStream.read" => format!("lt_conn_read(&((lt_hstream *){})->body->h, {}, {})", a[0], a[1], a[2]),
             "http.ResponseStream.read_line" => format!("lt_conn_read_line(&((lt_hstream *){})->body->h, {})", a[0], a[1]),

@@ -23,6 +23,7 @@ import env
 import http
 import io
 import json
+import time
 
 // Where to send requests.
 pub type Client {
@@ -32,7 +33,7 @@ pub type Client {
   // more headers for every request (OpenRouter: "HTTP-Referer", "X-Title")
   headers: Map<Text, Text> = {}
   // seconds without progress before giving up
-  timeout: Int = 300
+  timeout: time.Duration = time.seconds(300)
 
   // One answer.
   pub fn chat(self, chat: Chat) throws -> Reply {

@@ -1,7 +1,7 @@
 1 | two
 lines | plain | path kept: true
 sh found: true; nope: none
-/private/tmp
+/
 hello
 from stdin
 wc: 300000

@@ -79,6 +79,24 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
 - [ ] packages: jwt, smtp, s3, mysql, semver, markdown, yaml (maybe stdlib)
 
+## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)
+
+- [x] false "deadlock" panic in servers under many short connections
+- [x] catch blocks ending in process.exit didn't compile
+- [x] HTTP client: connection reuse (keep-alive), a thread pool, total
+      `timeout: Duration`, `follow_redirects`, HEAD, timings, detailed errors
+- [x] writing to a closed pipe (`| head`) exits quietly (status 141)
+- [ ] `eprint(text)` for standard error without `with`
+- [ ] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
+- [ ] `time`: parse_duration, Duration text and arithmetic, precise timers
+      (macOS: sleep(10ms) takes ~70ms), a ticker
+- [ ] `cli`: -n style flags and one-letter names
+- [ ] channels: try_receive, receive with a timeout, select
+- [ ] `-> Never` in user code; constants (`const`)
+- [ ] signals: Ctrl-C handling for tools (with the npm item above)
+- [ ] a field default can't use a type declared later in the file
+- [ ] Float.format: width; NaN text
+
 ## Then: my own review of what's missing or weak
 
 - [ ] Review the stdlib against Go and Node for backend/CLI gaps
