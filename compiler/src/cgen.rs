@@ -2748,6 +2748,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
             "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
+            "xml.__scan" => format!("lt_xml_scan({}, {})", a[0], a[1]),
+            "xml.escape" => format!("lt_xml_escape({})", a[0]),
             n if n.starts_with("zlib.") => {
                 self.zlib = true;
                 match n {

@@ -984,3 +984,272 @@ static void lt_csv_field(lt_buf *b, lt_text *f) {
     }
     lt_buf_c(b, '"');
 }
+
+// ---------------------------------------------------------------- xml
+// The scanner turns a document into flat events for xml.lang to build a tree:
+// "open" name, then "attr" key value per attribute, "text" content, "close".
+
+#include <ctype.h>
+
+typedef struct {
+    const char *s, *e, *start;
+    lt_texts *out;
+    const char *msg;
+    const char *at;
+} lt_xml;
+
+static bool lt_xml_fail(lt_xml *x, const char *msg) {
+    if (!x->msg) {
+        x->msg = msg;
+        x->at = x->s;
+    }
+    return false;
+}
+
+static bool lt_xml_name_char(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == ':' || c == '-' || c == '.' || (unsigned char)c >= 0x80;
+}
+
+// decodes entities in [p, e) into b
+static bool lt_xml_decode(lt_xml *x, const char *p, const char *e, lt_buf *b) {
+    while (p < e) {
+        const char *amp = memchr(p, '&', (size_t)(e - p));
+        if (!amp) {
+            lt_buf_put(b, p, e - p);
+            return true;
+        }
+        lt_buf_put(b, p, amp - p);
+        const char *semi = memchr(amp, ';', (size_t)(e - amp));
+        if (!semi || semi - amp > 12) {
+            x->s = amp;
+            return lt_xml_fail(x, "an `&` that doesn't start an entity (write `&amp;`)");
+        }
+        const char *n = amp + 1;
+        size_t len = (size_t)(semi - n);
+        if (len == 2 && memcmp(n, "lt", 2) == 0) lt_buf_c(b, '<');
+        else if (len == 2 && memcmp(n, "gt", 2) == 0) lt_buf_c(b, '>');
+        else if (len == 3 && memcmp(n, "amp", 3) == 0) lt_buf_c(b, '&');
+        else if (len == 4 && memcmp(n, "quot", 4) == 0) lt_buf_c(b, '"');
+        else if (len == 4 && memcmp(n, "apos", 4) == 0) lt_buf_c(b, '\'');
+        else if (len >= 2 && n[0] == '#') {
+            uint32_t c = 0;
+            bool hex = n[1] == 'x' || n[1] == 'X';
+            const char *d = n + (hex ? 2 : 1);
+            if (d == semi) goto bad;
+            for (; d < semi; d++) {
+                int v = hex ? lt_hex(*d) : (*d >= '0' && *d <= '9' ? *d - '0' : -1);
+                if (v < 0 || c > 0x10FFFF) goto bad;
+                c = c * (hex ? 16 : 10) + (uint32_t)v;
+            }
+            if (c == 0 || c > 0x10FFFF) goto bad;
+            char u[4], *w = u;
+            lt_utf8_put(&w, c);
+            lt_buf_put(b, u, w - u);
+        } else {
+        bad:
+            x->s = amp;
+            return lt_xml_fail(x, "an unknown entity");
+        }
+        p = semi + 1;
+    }
+    return true;
+}
+
+static void lt_xml_emit(lt_xml *x, const char *s, int64_t n) {
+    lt_texts_push(&x->out, lt_text_from(s, n));
+}
+
+static void lt_xml_skip_space(lt_xml *x) {
+    while (x->s < x->e && isspace((unsigned char)*x->s)) x->s++;
+}
+
+static bool lt_xml_skip_past(lt_xml *x, const char *end, const char *what) {
+    size_t n = strlen(end);
+    for (const char *p = x->s; p + n <= x->e; p++) {
+        if (memcmp(p, end, n) == 0) {
+            x->s = p + n;
+            return true;
+        }
+    }
+    return lt_xml_fail(x, what);
+}
+
+static bool lt_xml_name(lt_xml *x, const char **n, int64_t *len) {
+    const char *p = x->s;
+    while (x->s < x->e && lt_xml_name_char(*x->s)) x->s++;
+    if (x->s == p) return lt_xml_fail(x, "expected a name");
+    *n = p;
+    *len = x->s - p;
+    return true;
+}
+
+static bool lt_xml_text(lt_xml *x, const char *p, const char *e, bool keep_space) {
+    if (!keep_space) {
+        const char *q = p;
+        while (q < e && isspace((unsigned char)*q)) q++;
+        if (q == e) return true; // whitespace between elements
+    }
+    lt_buf b = { 0 };
+    if (!lt_xml_decode(x, p, e, &b)) {
+        free(b.d);
+        return false;
+    }
+    lt_xml_emit(x, "text", 4);
+    lt_texts_push(&x->out, lt_buf_text(&b));
+    return true;
+}
+
+static bool lt_xml_run(lt_xml *x) {
+    // open element names, for matching the closing tags
+    const char *names[256];
+    int64_t lens[256];
+    int depth = 0;
+    bool had_root = false;
+    while (x->s < x->e) {
+        if (*x->s != '<') {
+            const char *p = x->s;
+            while (x->s < x->e && *x->s != '<') x->s++;
+            if (depth == 0) {
+                for (const char *q = p; q < x->s; q++) {
+                    if (!isspace((unsigned char)*q)) {
+                        x->s = q;
+                        return lt_xml_fail(x, "text outside the root element");
+                    }
+                }
+                continue;
+            }
+            if (!lt_xml_text(x, p, x->s, false)) return false;
+            continue;
+        }
+        const char *lt = x->s;
+        if (x->e - x->s >= 4 && memcmp(x->s, "<!--", 4) == 0) {
+            if (!lt_xml_skip_past(x, "-->", "a comment without `-->`")) return false;
+        } else if (x->e - x->s >= 9 && memcmp(x->s, "<![CDATA[", 9) == 0) {
+            const char *p = x->s + 9;
+            x->s = p;
+            if (!lt_xml_skip_past(x, "]]>", "a CDATA section without `]]>`")) return false;
+            if (depth == 0) {
+                x->s = lt;
+                return lt_xml_fail(x, "text outside the root element");
+            }
+            lt_xml_emit(x, "text", 4);
+            lt_xml_emit(x, p, x->s - 3 - p);
+        } else if (x->e - x->s >= 2 && x->s[1] == '?') {
+            if (!lt_xml_skip_past(x, "?>", "a `<?` without `?>`")) return false;
+        } else if (x->e - x->s >= 2 && x->s[1] == '!') {
+            // <!DOCTYPE ...>, possibly with [ ... ]
+            int nest = 0;
+            for (x->s += 2; x->s < x->e; x->s++) {
+                if (*x->s == '[') nest++;
+                else if (*x->s == ']') nest--;
+                else if (*x->s == '>' && nest <= 0) break;
+            }
+            if (x->s >= x->e) return lt_xml_fail(x, "a `<!` without `>`");
+            x->s++;
+        } else if (x->e - x->s >= 2 && x->s[1] == '/') {
+            x->s += 2;
+            const char *n;
+            int64_t len;
+            if (!lt_xml_name(x, &n, &len)) return false;
+            if (depth == 0) {
+                x->s = lt;
+                return lt_xml_fail(x, "a closing tag without an opening one");
+            }
+            depth--;
+            if (depth < 256 && (lens[depth] != len || memcmp(names[depth], n, (size_t)len) != 0)) {
+                x->s = lt;
+                return lt_xml_fail(x, "the closing tag doesn't match the open element");
+            }
+            lt_xml_skip_space(x);
+            if (x->s >= x->e || *x->s != '>') return lt_xml_fail(x, "expected `>`");
+            x->s++;
+            lt_xml_emit(x, "close", 5);
+        } else {
+            if (depth == 0 && had_root) return lt_xml_fail(x, "a second root element");
+            had_root = true;
+            x->s++;
+            const char *n;
+            int64_t len;
+            if (!lt_xml_name(x, &n, &len)) return false;
+            lt_xml_emit(x, "open", 4);
+            lt_xml_emit(x, n, len);
+            for (;;) {
+                const char *before = x->s;
+                lt_xml_skip_space(x);
+                if (x->s >= x->e) return lt_xml_fail(x, "a tag without `>`");
+                if (*x->s == '>' || *x->s == '/') break;
+                if (x->s == before) return lt_xml_fail(x, "expected a space before the attribute");
+                const char *k;
+                int64_t klen;
+                if (!lt_xml_name(x, &k, &klen)) return false;
+                lt_xml_skip_space(x);
+                if (x->s >= x->e || *x->s != '=') return lt_xml_fail(x, "expected `=` after the attribute name");
+                x->s++;
+                lt_xml_skip_space(x);
+                if (x->s >= x->e || (*x->s != '"' && *x->s != '\'')) return lt_xml_fail(x, "expected a quoted attribute value");
+                char q = *x->s++;
+                const char *v = x->s;
+                while (x->s < x->e && *x->s != q) {
+                    if (*x->s == '<') return lt_xml_fail(x, "a `<` inside an attribute value");
+                    x->s++;
+                }
+                if (x->s >= x->e) return lt_xml_fail(x, "an attribute value without its closing quote");
+                lt_buf b = { 0 };
+                if (!lt_xml_decode(x, v, x->s, &b)) {
+                    free(b.d);
+                    return false;
+                }
+                x->s++;
+                lt_xml_emit(x, "attr", 4);
+                lt_xml_emit(x, k, klen);
+                lt_texts_push(&x->out, lt_buf_text(&b));
+            }
+            if (*x->s == '/') {
+                x->s++;
+                if (x->s >= x->e || *x->s != '>') return lt_xml_fail(x, "expected `>` after `/`");
+                x->s++;
+                lt_xml_emit(x, "close", 5);
+            } else {
+                x->s++;
+                if (depth >= 256) return lt_xml_fail(x, "elements nested deeper than 256 levels");
+                names[depth] = n;
+                lens[depth] = len;
+                depth++;
+            }
+        }
+    }
+    if (depth > 0) return lt_xml_fail(x, "the document ends inside an element");
+    if (!had_root) return lt_xml_fail(x, "no root element");
+    return true;
+}
+
+static lt_err lt_xml_scan(lt_text *t, lt_texts **out) {
+    lt_xml x = { t->data, t->data + t->len, t->data, lt_texts_new(16), NULL, NULL };
+    if (lt_xml_run(&x)) {
+        *out = x.out;
+        return (lt_err){ 0 };
+    }
+    for (int64_t i = 0; i < x.out->len; i++) lt_text_drop(x.out->items[i]);
+    lt_free(x.out, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)x.out->cap);
+    int64_t line = 1;
+    for (const char *p = x.start; p < x.at && p < x.e; p++) line += *p == '\n';
+    char buf[256];
+    snprintf(buf, sizeof buf, "xml: line %lld: %s", (long long)line, x.msg);
+    return lt_make_failure(lt_text_cstr(buf));
+}
+
+// text for element content, or for attribute values in double quotes
+static lt_text *lt_xml_escape(lt_text *t) {
+    lt_buf b = { 0 };
+    for (int64_t i = 0; i < t->len; i++) {
+        char c = t->data[i];
+        switch (c) {
+        case '<': lt_buf_put(&b, "&lt;", 4); break;
+        case '>': lt_buf_put(&b, "&gt;", 4); break;
+        case '&': lt_buf_put(&b, "&amp;", 5); break;
+        case '"': lt_buf_put(&b, "&quot;", 6); break;
+        default: lt_buf_c(&b, c);
+        }
+    }
+    return lt_buf_text(&b);
+}

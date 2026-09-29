@@ -1,0 +1,14 @@
+rss 2.0
+News & notes
+1: First
+2: Second <b>bold</b>
+Hello world AB!
+<note lang="en"><to>Ann &amp; Bob</to><empty/></note>
+Ann & Bob
+xml: line 1: the closing tag doesn't match the open element
+xml: line 1: the document ends inside an element
+xml: line 1: expected a quoted attribute value
+xml: line 1: an unknown entity
+xml: line 1: a second root element
+xml: line 1: text outside the root element
+xml: line 3: the closing tag doesn't match the open element

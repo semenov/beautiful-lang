@@ -1,0 +1,139 @@
+// xml: reading and writing XML documents.
+//
+//   let feed = try xml.parse(text)
+//   let channel = feed.child("channel") ?? xml.Element(name: "channel")
+//   for item in channel.elements_named("item") {
+//     print(item.child_text("title") ?? "")
+//   }
+//
+// Whitespace between elements is dropped; other text is kept as it is.
+// Comments, `<?...?>` and `<!DOCTYPE>` are skipped. Names with a namespace
+// prefix are kept whole: "soap:Envelope".
+
+pub type Element {
+  name: Text
+  attributes: Map<Text, Text> = {}
+  children: List<Node> = []
+
+  pub fn attribute(self, name: Text) -> Text? {
+    return self.attributes[name]
+  }
+
+  // The first child element with this name.
+  pub fn child(self, name: Text) -> Element? {
+    for node in self.children {
+      if node is ElementNode(element) and element.name == name {
+        return element
+      }
+    }
+    return none
+  }
+
+  // The text of the first child element with this name.
+  pub fn child_text(self, name: Text) -> Text? {
+    if self.child(name) is some(element) {
+      return element.text()
+    }
+    return none
+  }
+
+  // The child elements, without the text between them.
+  pub fn elements(self) -> List<Element> {
+    var out: List<Element> = []
+    for node in self.children {
+      if node is ElementNode(element) {
+        out.append(element)
+      }
+    }
+    return out
+  }
+
+  pub fn elements_named(self, name: Text) -> List<Element> {
+    return self.elements().filter(e => e.name == name)
+  }
+
+  // All the text inside, from every level: <p>a <b>b</b></p> gives "a b".
+  pub fn text(self) -> Text {
+    var parts: List<Text> = []
+    for node in self.children {
+      match node {
+        TextNode(text) => parts.append(text)
+        ElementNode(element) => parts.append(element.text())
+      }
+    }
+    return parts.join("")
+  }
+
+  // A copy with one more child element (for building documents).
+  pub fn add(self, element: Element) -> Element {
+    var e = self
+    e.children.append(ElementNode(element: element))
+    return e
+  }
+
+  // A copy with text added at the end.
+  pub fn add_text(self, text: Text) -> Element {
+    var e = self
+    e.children.append(TextNode(text: text))
+    return e
+  }
+}
+
+pub enum Node {
+  ElementNode(element: Element)
+  TextNode(text: Text)
+}
+
+// Reads a document; errors say where: `xml: line 3: the closing tag doesn't
+// match the open element`.
+pub fn parse(text: Text) throws -> Element {
+  let events = try __scan(text)
+  var open: List<Element> = []
+  var i = 0
+  while i < events.length {
+    let kind = events[i]
+    if kind == "open" {
+      open.append(Element(name: events[i + 1]))
+      i += 2
+    } else if kind == "attr" {
+      open[open.length - 1].attributes[events[i + 1]] = events[i + 2]
+      i += 3
+    } else if kind == "text" {
+      open[open.length - 1].children.append(TextNode(text: events[i + 1]))
+      i += 2
+    } else {
+      let done = open.pop() ?? panic("xml: unbalanced events")
+      if open.is_empty() {
+        return done
+      }
+      open[open.length - 1].children.append(ElementNode(element: done))
+      i += 1
+    }
+  }
+  panic("xml: no root element")
+}
+
+// The element as XML text, without the `<?xml ...?>` line.
+pub fn render(element: Element) -> Text {
+  var out = "<${element.name}"
+  for entry in element.attributes.entries() {
+    out = "${out} ${entry.key}=\"${escape(entry.value)}\""
+  }
+  if element.children.is_empty() {
+    return "${out}/>"
+  }
+  var parts = ["${out}>"]
+  for node in element.children {
+    match node {
+      TextNode(text) => parts.append(escape(text))
+      ElementNode(child) => parts.append(render(child))
+    }
+  }
+  parts.append("</${element.name}>")
+  return parts.join("")
+}
+
+// Text safe inside an element or a quoted attribute: `<` becomes `&lt;` etc.
+pub fn escape(text: Text) -> Text
+
+fn __scan(text: Text) throws -> List<Text>
