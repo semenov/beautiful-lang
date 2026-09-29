@@ -1757,6 +1757,10 @@ impl Checker {
                         self.err_help(e.span, format!("can't change `{}` inside a lambda: lambdas capture a copy", name), "compute the value with the lambda's result (`map`, `fold`, `filter`), or share it through `Shared<T>` and change it in `with v = s.lock() { }`");
                         return None;
                     }
+                    if !l.mutable && name.starts_with("?.") {
+                        self.err_help(e.span, "`?.` can't change the value inside an optional", "take it out, change it and put it back: `var v = x ?? ...`, change `v`, then `x = v`");
+                        return None;
+                    }
                     if !l.mutable {
                         self.err_help(e.span, format!("can't change `{}`: it's declared with `let`", name), format!("declare it with `var {} = ...`", name));
                         return None;
@@ -1933,6 +1937,7 @@ impl Checker {
         }
         let _ = in_try;
         match &e.kind {
+            ExprKind::OptChain { base, var, rest } => self.opt_chain(base, var, rest, span),
             ExprKind::Int(v) => self.lit_int(*v, span, expected),
             ExprKind::Float(v) => {
                 let want = expected.map(|t| self.resolve(t));
@@ -3014,7 +3019,9 @@ impl Checker {
             // need a place: re-derive from the receiver expression is not
             // possible here; interface mutation goes through a variable
             if let TK::Local(l) = r.kind {
-                if !self.fc().locals[l].mutable {
+                if !self.fc().locals[l].mutable && self.fc().locals[l].name.starts_with("?.") {
+                    self.err_help(r.span, "`?.` can't change the value inside an optional", "take it out, change it and put it back: `var v = x ?? ...`, change `v`, then `x = v`");
+                } else if !self.fc().locals[l].mutable {
                     let n = self.fc().locals[l].name.clone();
                     self.err_help(r.span, format!("can't change `{}`: it's declared with `let`", n), format!("declare it with `var {} = ...`", n));
                 }
@@ -3477,6 +3484,39 @@ impl Checker {
         }
         let els_e = els_e.map(|e| Box::new(self.coerce_branch(e, &ty)));
         TExpr { kind: TK::If { cond: Box::new(c), then: tb, els: els_e }, ty, span }
+    }
+
+    // `base?.rest`: a match on `base`; the value (if any) goes to `rest`,
+    // and the result is optional (not doubly: `a?.b` where `b` is a `T?`
+    // gives a `T?`). A rest without a value (`conn?.close()`) is a statement.
+    fn opt_chain(&mut self, base: &Expr, var: &str, rest: &Expr, span: Span) -> TExpr {
+        let b = self.expr(base, None);
+        let bt = self.resolve(&b.ty);
+        let inner = match bt {
+            Ty::Opt(t) => *t,
+            Ty::Err => return TExpr { kind: TK::Unit, ty: Ty::Err, span },
+            other => {
+                let shown = self.prog.show(&other);
+                self.err_help(base.span, format!("`?.` reaches into an optional value, and this is a `{}`", shown), "use `.`");
+                return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+            }
+        };
+        self.fcx().scopes.push(HashMap::new());
+        let id = self.declare(base.span, var, inner, false);
+        let r = self.expr(rest, None);
+        self.fcx().scopes.pop();
+        let rt = self.resolve(&r.ty);
+        let (body, none, ty) = match rt {
+            Ty::Opt(_) | Ty::Err => (r, TExpr { kind: TK::NoneLit, ty: rt.clone(), span }, rt.clone()),
+            Ty::Unit | Ty::Never => (r, TExpr { kind: TK::Unit, ty: Ty::Unit, span }, Ty::Unit),
+            t => {
+                let ot = Ty::opt(t);
+                let sp = r.span;
+                (TExpr { kind: TK::Some(Box::new(r)), ty: ot.clone(), span: sp }, TExpr { kind: TK::NoneLit, ty: ot.clone(), span }, ot)
+            }
+        };
+        let arms = vec![TArm { pat: TPat::Some(Box::new(TPat::Bind(id))), guard: None, body }, TArm { pat: TPat::Wild, guard: None, body: none }];
+        TExpr { kind: TK::Match { scrut: Box::new(b), arms }, ty, span }
     }
 
     fn coerce_branch(&mut self, e: TExpr, ty: &Ty) -> TExpr {

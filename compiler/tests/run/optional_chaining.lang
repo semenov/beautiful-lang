@@ -1,0 +1,37 @@
+// `?.`: reach into an optional value; none stays none, and the rest of the
+// chain runs only on a value.
+type Address {
+  city: String
+  zip: String?
+}
+
+type User {
+  name: String
+  address: Address?
+
+  fn greeting(self) -> String {
+    return "hi ${self.name}"
+  }
+}
+
+fn find(id: Int) -> User? {
+  if id == 1 {
+    return User(name: "Ada", address: Address(city: "London", zip: none))
+  }
+  if id == 2 {
+    return User(name: "Bob", address: none)
+  }
+  return none
+}
+
+fn main() {
+  for id in [1, 2, 3] {
+    let u = find(id)
+    let city = u?.address?.city ?? "?"
+    let zip = u?.address?.zip ?? "-"
+    let upper = u?.name.upper()
+    print("${id}: ${city} ${zip} ${upper} ${u?.greeting()} ${u?.name.length}")
+  }
+  let names: Map<Int, String> = {1: "one"}
+  print("${names[1]?.upper()} ${names[2]?.upper()}")
+}

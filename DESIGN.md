@@ -133,8 +133,11 @@ Changing a value in place is done by a `mutating` method on your own type:
   Describable`. The compiler checks it.
 - **`type UserId = Int` creates a distinct type**, not an alias. Mixing up
   `UserId` and `OrderId` is a compile error. There are no plain aliases.
-- **Missing values:** `T?`, `none`, `??`, `if x is some(v)`, `match`. No
-  `?.` (under review: agents keep writing it, see `TODO.md`).
+- **Missing values:** `T?`, `none`, `??`, `if x is some(v)`, `match`, and
+  `?.` (Vlad, 2026-09-29: agents kept writing it). `user?.address?.city` is
+  none if anything on the way is none; the rest of the chain after `?.` runs
+  only on a value, and the result is optional once, not twice. `?.` can't
+  change the value inside (it would change a copy): that is an error.
 - **Removed:** inheritance, overloading, operator overloading, tuples
   (multiple results are a record; iterating a `Map` gives `entry.key` /
   `entry.value`), default parameter values (record fields keep their

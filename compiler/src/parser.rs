@@ -850,6 +850,8 @@ impl Parser {
 
     fn postfix_expr(&mut self) -> PResult<Expr> {
         let mut e = self.primary()?;
+        // `a?.b`: the chain after `?.` works on the value inside `a`
+        let mut chains: Vec<(Expr, String)> = vec![];
         loop {
             match self.peek() {
                 Tok::LParen => {
@@ -864,7 +866,7 @@ impl Parser {
                             let span = e.span.to(self.prev_span());
                             e = Expr { kind: ExprKind::Call { callee: Box::new(e), type_args: targs, args }, span };
                         }
-                        None => return Ok(e),
+                        None => break,
                     }
                 }
                 Tok::Dot => {
@@ -885,15 +887,28 @@ impl Parser {
                     let span = e.span.to(self.prev_span());
                     e = Expr { kind: ExprKind::Index(Box::new(e), Box::new(idx)), span };
                 }
-                Tok::Question => {
-                    if matches!(self.peek_at(1), Tok::Dot) {
-                        return Err(self.err_here("there is no `?.`").help("unwrap first: `if x is some(v) { v.field }`"));
-                    }
-                    return Err(self.err_here("unexpected `?`").help("use `try f()` to pass an error up, `??` for a fallback"));
+                Tok::Question if matches!(self.peek_at(1), Tok::Dot) => {
+                    self.bump();
+                    self.bump();
+                    let var = format!("?.{}", self.pos);
+                    let (name, nsp) = self.ident("a field or method name")?;
+                    let vspan = e.span;
+                    let base = std::mem::replace(&mut e, Expr { kind: ExprKind::Ident(var.clone()), span: vspan });
+                    chains.push((base, var));
+                    let span = e.span.to(nsp);
+                    e = Expr { kind: ExprKind::Field(Box::new(e), name, nsp), span };
                 }
-                _ => return Ok(e),
+                Tok::Question => {
+                    return Err(self.err_here("unexpected `?`").help("use `try f()` to pass an error up, `??` for a fallback, `?.` to reach into an optional value"));
+                }
+                _ => break,
             }
         }
+        while let Some((base, var)) = chains.pop() {
+            let span = base.span.to(e.span);
+            e = Expr { kind: ExprKind::OptChain { base: Box::new(base), var, rest: Box::new(e) }, span };
+        }
+        Ok(e)
     }
 
     fn is_lambda_start(&self) -> bool {

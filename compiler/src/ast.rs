@@ -269,6 +269,9 @@ pub enum ExprKind {
     If { cond: Box<Expr>, then: Block, els: Option<Box<Expr>> },
     Match { scrut: Box<Expr>, arms: Vec<MatchArm> },
     Is(Box<Expr>, Pattern),
+    // `base?.rest`: none if `base` is none, else `rest` with the value bound
+    // to the hidden name (the rest of the chain, as in Swift)
+    OptChain { base: Box<Expr>, var: String, rest: Box<Expr> },
     Try { expr: Box<Expr>, catch: Option<(String, Block)> },
     ExpectThrows(Box<Expr>),
     // `spawn f(x)`: start the call as a task

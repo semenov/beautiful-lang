@@ -150,7 +150,9 @@ if email is none { return }
 let user = users[id] ?? throw NotFound(id: id)
 ```
 
-**There is no `?.`**. Unwrap first with `if x is some(v)`, or use `??`.
+`user?.address?.city` is none if `user` or its `address` is none (a
+`String?`); combine with `??`: `u?.name ?? "anonymous"`. It reads and calls
+(`u?.greeting()`), but can't change what's inside: unwrap for that.
 `m[key]` gives `V?`; `xs[i]` out of range is a bug (it stops the task).
 Change a value inside a map or list in place: `m[key].append(x)`,
 `accounts[id].balance -= 5`. Reading it out and writing it back
@@ -474,7 +476,8 @@ see private functions.
 | `/` on two `Int`s is not allowed | `a.div(b)` or `a.to_float() / b.to_float()` |
 | there are no global variables | a fixed value: top-level `let`; changing state: `Shared<T>` made in `main` |
 | a top-level `let` holds a fixed value | compute it in a function or in `main` |
-| there is no `?.` | `if x is some(v) { v.field }` or `??` |
+| `?.` can't change the value inside an optional | `var v = x ?? ...`, change `v`, then `x = v` |
+| `?.` reaches into an optional value, and this is a `T` | use `.` |
 | `catch` needs `try` before the call | `try f(x) catch err { ... }` |
 | this call can fail | put `try` in front |
 | the result is not used | `let _ = f()` |

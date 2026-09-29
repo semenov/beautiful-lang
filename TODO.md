@@ -8,7 +8,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Vlad's decisions of 2026-09-29** (details in HANDOFF.md):
   - [x] `fn to_string(self)` used by `"${x}"`; readable stdlib types
         (Duration, Date, DateTime, Zoned; errors print their message)
-  - [ ] `?.`
+  - [x] `?.`
   - [x] exact JSON numbers (`json.Value.Number` as written, `json.Number`)
   - [x] `json.encode` options: `json.encode_with(x, options:
         json.EncodeOptions(keys: Kebab, omit_none: true, pretty: true))`
@@ -219,7 +219,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [ ] Review the stdlib against Go and Node for backend/CLI gaps
 - [ ] Review the language for rough edges found while writing the packages:
-  - `?.` : I reached for it 3 times while writing packages (agents expect it)
+  - `?.` : I reached for it 3 times while writing packages (agents expect it): done
   - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
   - `catch` without `try` in front is a parse error with a vague message
 - [ ] Performance: `words` benchmark is slower than Go (Text is not a view)
