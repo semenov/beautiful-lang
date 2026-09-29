@@ -242,7 +242,12 @@ used result is always a mutation or an action. The rule also catches the
 
 - `Int` is 64-bit. Overflow stops the program.
 - `Float` is 64-bit IEEE.
-- `Decimal` is a standard library type for money.
+- `Decimal` is a built-in type for money: exact, up to 18 digits with a
+  scale that's kept (`1.50` prints as `1.50`, and `1.50 == 1.5`). `+ - *`
+  are exact; `/` is an error, because the result's digits must be chosen:
+  `a.div(b, places: 2)`. Rounding is half away from zero (what Excel and
+  SQL do, and what people expect on invoices). A literal is spelled as
+  written (`19.99`, not the closest Float). JSON and SQL carry it exactly.
 - No implicit conversions, including `Int → Float`.
 - `/` on two `Int`s is a compile error. You write `a.div(b)` or
   `a.to_float() / b.to_float()`.
@@ -322,7 +327,14 @@ used result is always a mutation or an action. The rule also catches the
 - Cancellation is automatic: a waiting operation in a cancelled task throws
   `Cancelled`.
 - Tasks share data only through `Shared<T>` or pass it through `Channel<T>`.
-- Timeouts: `try time.timeout(time.seconds(5), () => try http.get(url))`.
+- Timeouts: `try time.timeout(time.seconds(5), () => try http.get(url))`
+  runs the work as a task and cancels it at the deadline (its own tasks
+  too); every wait is cancellable, including sockets and HTTP requests.
+- **Ctrl-C cancels `main`'s task.** Waits stop with `Cancelled`, `with`
+  blocks close their resources, and the program ends with 130. A second
+  Ctrl-C ends it at once. A loop that never waits checks
+  `process.interrupted()`. So cleanup on Ctrl-C needs nothing new: it's the
+  same path as any error.
 - **Rejected:**
   - a `parallel` block where every line runs at the same time (it looks
     sequential but isn't);
@@ -346,8 +358,14 @@ used result is always a mutation or an action. The rule also catches the
   interface-typed parameter (`Clock`, `Mailer`). The standard library ships
   test implementations: a fixed clock, an in-memory file system, calling an
   HTTP handler without a network.
-- One binary: `lang run`, `lang build`, `lang test`, `lang fmt`, `lang doc`.
-  The formatter has no settings.
+- One binary: `lang run`, `lang build`, `lang test`, `lang fmt`, `lang doc`,
+  `lang guide`. The formatter has no settings.
+- **The tool teaches the language.** An agent that has never seen it is
+  told "run `lang help`": `lang guide` is the whole language in one read
+  (with fixes for the common errors), and `lang doc http.Router` or
+  `lang doc --search gzip` look things up in the sources that are running.
+  Tested with fresh agents: they wrote working programs on the first
+  compile.
 
 ### Standard library
 
@@ -418,6 +436,20 @@ used result is always a mutation or an action. The rule also catches the
   a bug becomes a 500. Handlers can be tested without a network.
 - **Third-party packages** work like Go's (see Modules and packages).
 
+### Data formats and text
+
+- **JSON keys in any case:** decoding matches a field by its exact name,
+  then ignoring case and `_`/`-` (`createdAt` fills `created_at`), so
+  camelCase APIs need no options; `json.encode_camel` writes them.
+- **Templates are Handlebars-style** (`{{name}}`, `{{#each}}`, `{{#if}}`,
+  partials): the most widely known template language that isn't a
+  programming language itself. Values are HTML-escaped in HTML templates,
+  and a name missing from the data is an error with its line, not empty
+  text: a typo can't hide.
+- **YAML, Markdown, JWT, semver, SMTP, S3** are packages written in the
+  language (see `packages/`), not the standard library: each has
+  dialects or evolves on its own.
+
 ### Syntax: C family
 
 Experiment `experiments/run3`: braces and indentation gave no difference (0
@@ -466,9 +498,8 @@ cgen (C) → clang`.
   operators. The prelude marks higher-order functions `rethrows`, so
   `xs.map(x => try f(x))` throws only when the lambda can.
 
-**Not implemented yet:** `Decimal`, `lang fmt`, `lang doc`, `time.timeout`,
-decode key naming, converting between interface combinations (see
-`TODO.md`).
+**Not implemented yet:** converting between interface combinations, the
+other items in `TODO.md`.
 
 ## Open questions
 
