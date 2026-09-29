@@ -28,6 +28,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [ ] **Port a small open-source project** to the language; note what's
       missing in the language and libraries and add it as I go
+  - [x] rakyll/hey (load generator): section below
+  - [ ] tomnomnom/gron (JSON of any shape, streams, colors): in progress
+  - [ ] mccutchen/go-httpbin (the HTTP server API end to end): in progress
 
 - [x] **Learn from fasthttp** (benchmarks/http/README.md; next step below): why Go's fasthttp beats net/http (buffer and
       object reuse, no per-request allocations, lazy header parsing, worker
