@@ -28,3 +28,6 @@ pub fn shuffle<T>(items: List<T>) -> List<T> {
 pub fn token(length: Int) -> Text
 // A random UUID (version 4): "3f0b6c5e-...".
 pub fn uuid() -> Text
+// A UUID that starts with the time (version 7): ids made later sort later,
+// which keeps database indexes compact. Use it for primary keys.
+pub fn uuid_v7() -> Text

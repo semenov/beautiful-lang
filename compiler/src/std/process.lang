@@ -39,6 +39,35 @@ pub builtin type Process {
 // Starts a program without waiting for it (see `run` for the arguments).
 pub fn start(program: Text, args: List<Text>) throws -> Process
 
+// A program to run with more settings than `run` takes.
+pub type Command {
+  program: Text
+  args: List<Text> = []
+  // the directory to run it in; "" for the current one
+  dir: Text = ""
+  // environment variables it gets on top of this program's
+  env: Map<Text, Text> = {}
+  // given as its standard input
+  input: Text = ""
+}
+
+// Runs a `Command` to the end, like `run`:
+//   let out = try process.run_command(process.Command(program: "git", args: ["status"], dir: repo))
+pub fn run_command(command: Command) throws -> Output {
+  var pairs: List<Text> = []
+  for entry in command.env {
+    pairs.append(entry.key)
+    pairs.append(entry.value)
+  }
+  return try __run(command.program, args: command.args, dir: command.dir, env: pairs, input: command.input)
+}
+
+fn __run(program: Text, args: List<Text>, dir: Text, env: List<Text>, input: Text) throws -> Output
+
+// Where a program is on PATH ("/usr/bin/git"), like `which`; none if it
+// isn't installed.
+pub fn find(program: Text) -> Text?
+
 // The command-line arguments, without the program's name.
 pub fn args() -> List<Text>
 

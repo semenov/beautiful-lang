@@ -71,10 +71,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] WebSockets (server and client)
 - [ ] templates (logic-less, HTML-escaping)
 - [ ] `tar` and `zip`
-- [ ] small ones: `env.load(".env")`, `process.find`, `process.run` with cwd /
-      env / input, byte sizes, decode key naming, `random.uuid_v7`, List
-      helpers (flat_map, unique, chunks, partition, index_of), log levels and
-      fields, cli subcommands
+- [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
+      (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
+      chunks, partition, index_of, find_index), log levels and JSON logs
+- [ ] still small: byte sizes, decode key naming, log fields, cli subcommands
 - [ ] signals: Ctrl-C cancels `main` so `with` blocks close (design first)
 - [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
 - [ ] packages: jwt, smtp, s3, mysql, semver, markdown, yaml (maybe stdlib)

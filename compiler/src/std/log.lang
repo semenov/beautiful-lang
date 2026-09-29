@@ -1,6 +1,11 @@
 // log: messages for people running the program, on standard error, with the
 // time: `2026-09-29T12:00:00Z INFO server started`.
 
+// LOG_LEVEL=debug shows `debug` messages too (warn / error show fewer);
+// LOG_FORMAT=json writes a JSON object per line:
+// {"time":"2026-09-29T12:00:00.123Z","level":"info","message":"server started"}
+
+pub fn debug(message: Text)
 pub fn info(message: Text)
 pub fn warn(message: Text)
 pub fn error(message: Text)

@@ -183,6 +183,67 @@ builtin type List<T> {
     try out.sort_by(key)
     return out
   }
+  // Each item's list, one after another: `orders.flat_map(o => o.items)`.
+  fn flat_map<R>(self, transform: fn(T) throws -> List<R>) rethrows -> List<R> {
+    var out: List<R> = []
+    for x in self {
+      out.append_all(try transform(x))
+    }
+    return out
+  }
+  // Without repeats, the first of each kept, in order.
+  fn unique(self) -> List<T> {
+    var seen = Set<T>()
+    var out: List<T> = []
+    for x in self {
+      if not seen.contains(x) {
+        seen.add(x)
+        out.append(x)
+      }
+    }
+    return out
+  }
+  // In pieces of `size` (the last may be shorter): batches.
+  fn chunks(self, size: Int) -> List<List<T>> {
+    var out: List<List<T>> = []
+    var i = 0
+    while i < self.length {
+      out.append(self.drop(i).take(size))
+      i += max(size, 1)
+    }
+    return out
+  }
+  // The position of the first item equal to `item`.
+  fn index_of(self, item: T) -> Int? {
+    for i in 0..<self.length {
+      if self[i] == item {
+        return i
+      }
+    }
+    return none
+  }
+  // The position of the first item that passes `test`.
+  fn find_index(self, test: fn(T) throws -> Bool) rethrows -> Int? {
+    for i in 0..<self.length {
+      if try test(self[i]) {
+        return i
+      }
+    }
+    return none
+  }
+  // The items that pass `test` and the rest, in two lists.
+  fn partition(self, test: fn(T) throws -> Bool) rethrows -> Partition<T> {
+    var yes: List<T> = []
+    var no: List<T> = []
+    for x in self {
+      if try test(x) {
+        yes.append(x)
+      } else {
+        no.append(x)
+      }
+    }
+    return Partition(matching: yes, rest: no)
+  }
   fn reversed(self) -> List<T> {
     var out = self
     out.reverse()
@@ -373,6 +434,12 @@ type Entry<K, V> {
 type Indexed<T> {
   index: Int
   value: T
+}
+
+// What `List.partition` gives.
+type Partition<T> {
+  matching: List<T>
+  rest: List<T>
 }
 
 type Pair<A, B> {

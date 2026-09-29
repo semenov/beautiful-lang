@@ -455,38 +455,95 @@ static _Noreturn void lt_process_exit(int64_t status) {
     exit((int)status);
 }
 
-static lt_err lt_process_run(lt_text *program, lt_texts *args, int64_t *status, lt_text **out, lt_text **err) {
-    int outp[2], errp[2];
-    if (pipe(outp) != 0 || pipe(errp) != 0) return lt_os_error("can't run", program);
+// Runs a program to the end. `dir` ("" for here), `env` (name, value pairs
+// added to this program's environment) and `input` (its standard input)
+// are optional.
+static lt_err lt_process_run_ex(lt_text *program, lt_texts *args, const char *dir, lt_texts *env, lt_text *input, int64_t *status, lt_text **out, lt_text **err) {
+    int outp[2], errp[2], inp[2];
+    if (pipe(outp) != 0) return lt_os_error("can't run", program);
+    if (pipe(errp) != 0) {
+        close(outp[0]);
+        close(outp[1]);
+        return lt_os_error("can't run", program);
+    }
+    if (pipe(inp) != 0) {
+        close(outp[0]);
+        close(outp[1]);
+        close(errp[0]);
+        close(errp[1]);
+        return lt_os_error("can't run", program);
+    }
+    fcntl(outp[0], F_SETFD, FD_CLOEXEC);
+    fcntl(errp[0], F_SETFD, FD_CLOEXEC);
+    fcntl(inp[1], F_SETFD, FD_CLOEXEC);
     posix_spawn_file_actions_t fa;
     posix_spawn_file_actions_init(&fa);
+    posix_spawn_file_actions_adddup2(&fa, inp[0], 0);
     posix_spawn_file_actions_adddup2(&fa, outp[1], 1);
     posix_spawn_file_actions_adddup2(&fa, errp[1], 2);
-    posix_spawn_file_actions_addclose(&fa, outp[0]);
-    posix_spawn_file_actions_addclose(&fa, errp[0]);
+    if (dir && *dir) posix_spawn_file_actions_addchdir_np(&fa, dir);
     char **argv = (char **)calloc((size_t)args->len + 2, sizeof(char *));
     argv[0] = program->data;
     for (int64_t i = 0; i < args->len; i++) argv[i + 1] = args->items[i]->data;
+    // the environment: ours, with `env` added or replaced
+    char **envp = environ;
+    int64_t extra = env ? env->len / 2 : 0;
+    char **built = NULL;
+    if (extra > 0) {
+        int64_t n = 0;
+        while (environ[n]) n++;
+        built = (char **)calloc((size_t)(n + extra + 1), sizeof(char *));
+        int64_t k = 0;
+        for (int64_t i = 0; i < n; i++) {
+            bool replaced = false;
+            for (int64_t j = 0; j + 1 < env->len; j += 2) {
+                lt_text *name = env->items[j];
+                if (strncmp(environ[i], name->data, (size_t)name->len) == 0 && environ[i][name->len] == '=') replaced = true;
+            }
+            if (!replaced) built[k++] = strdup(environ[i]);
+        }
+        for (int64_t j = 0; j + 1 < env->len; j += 2) {
+            size_t len = (size_t)(env->items[j]->len + env->items[j + 1]->len + 2);
+            built[k] = (char *)malloc(len);
+            snprintf(built[k], len, "%s=%s", env->items[j]->data, env->items[j + 1]->data);
+            k++;
+        }
+        envp = built;
+    }
     pid_t pid;
     fflush(stdout);
-    int r = posix_spawnp(&pid, program->data, &fa, NULL, argv, environ);
+    int r = posix_spawnp(&pid, program->data, &fa, NULL, argv, envp);
     posix_spawn_file_actions_destroy(&fa);
     free(argv);
+    if (built) {
+        for (char **q = built; *q; q++) free(*q);
+        free(built);
+    }
     close(outp[1]);
     close(errp[1]);
+    close(inp[0]);
     if (r != 0) {
         close(outp[0]);
         close(errp[0]);
+        close(inp[1]);
         errno = r;
-        return lt_os_error("can't run", program);
+        return lt_os_error(dir && *dir && r == ENOENT ? "can't run (or no such directory)" : "can't run", program);
     }
-    // read both pipes until both are closed
+    signal(SIGPIPE, SIG_IGN);
+    // feed the input and read both outputs until they're closed
     size_t cap[2] = { 4096, 1024 }, len[2] = { 0, 0 };
     char *buf[2] = { (char *)malloc(cap[0]), (char *)malloc(cap[1]) };
-    struct pollfd fds[2] = { { outp[0], POLLIN, 0 }, { errp[0], POLLIN, 0 } };
+    int64_t fed = 0, to_feed = input ? input->len : 0;
+    if (to_feed == 0) {
+        close(inp[1]);
+        inp[1] = -1;
+    } else {
+        fcntl(inp[1], F_SETFL, fcntl(inp[1], F_GETFL, 0) | O_NONBLOCK);
+    }
+    struct pollfd fds[3] = { { outp[0], POLLIN, 0 }, { errp[0], POLLIN, 0 }, { inp[1], POLLOUT, 0 } };
     int open_fds = 2;
-    while (open_fds > 0) {
-        if (poll(fds, 2, -1) < 0) {
+    while (open_fds > 0 || inp[1] >= 0) {
+        if (poll(fds, 3, -1) < 0) {
             if (errno == EINTR) continue;
             break;
         }
@@ -502,6 +559,20 @@ static lt_err lt_process_run(lt_text *program, lt_texts *args, int64_t *status, 
                 len[i] += (size_t)n;
             }
         }
+        if (inp[1] >= 0 && (fds[2].revents & (POLLOUT | POLLERR | POLLHUP))) {
+            ssize_t n = write(inp[1], input->data + fed, (size_t)(to_feed - fed));
+            if (n > 0) fed += n;
+            if (fed >= to_feed || (n < 0 && errno != EAGAIN && errno != EINTR)) {
+                close(inp[1]);
+                inp[1] = -1;
+                fds[2].fd = -1;
+            }
+        }
+        if (open_fds == 0 && inp[1] >= 0) {
+            // it stopped reading: the rest of the input can't go anywhere
+            close(inp[1]);
+            inp[1] = -1;
+        }
     }
     int st = 0;
     while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {
@@ -514,7 +585,32 @@ static lt_err lt_process_run(lt_text *program, lt_texts *args, int64_t *status, 
     return (lt_err){ 0 };
 }
 
+static lt_err lt_process_run(lt_text *program, lt_texts *args, int64_t *status, lt_text **out, lt_text **err) {
+    return lt_process_run_ex(program, args, NULL, NULL, NULL, status, out, err);
+}
+
+// The full path of a program found on PATH, like `which`.
+static lt_text *lt_process_find(lt_text *name) {
+    if (strchr(name->data, '/')) return access(name->data, X_OK) == 0 ? (lt_text_dup(name), name) : NULL;
+    const char *path = getenv("PATH");
+    if (!path) path = "/usr/local/bin:/usr/bin:/bin";
+    char buf[4096];
+    while (*path) {
+        const char *end = strchr(path, ':');
+        size_t n = end ? (size_t)(end - path) : strlen(path);
+        if (n == 0) n = 0;
+        int w = snprintf(buf, sizeof buf, "%.*s/%s", (int)n, n ? path : ".", name->data);
+        struct stat st;
+        if (w > 0 && (size_t)w < sizeof buf && stat(buf, &st) == 0 && S_ISREG(st.st_mode) && access(buf, X_OK) == 0) return lt_text_cstr(buf);
+        if (!end) break;
+        path = end + 1;
+    }
+    return NULL;
+}
+
 // ---------------------------------------------------------------- environment
+
+static void lt_env_set(lt_text *name, lt_text *value) { setenv(name->data, value->data, 1); }
 
 static lt_text *lt_env_get(lt_text *name) {
     const char *v = getenv(name->data);
@@ -529,15 +625,49 @@ static int64_t lt_unix_now(void) {
     return (int64_t)ts.tv_sec;
 }
 
+// LOG_LEVEL (debug, info, warn, error; default info) hides the levels
+// below it; LOG_FORMAT=json writes one JSON object per line (for services
+// whose logs are collected).
+static int lt_log_rank(const char *level) {
+    if (strcasecmp(level, "DEBUG") == 0) return 0;
+    if (strcasecmp(level, "WARN") == 0) return 2;
+    if (strcasecmp(level, "ERROR") == 0) return 3;
+    return 1;
+}
+
 static void lt_log(const char *level, lt_text *msg) {
-    time_t now = time(NULL);
+    static int min_rank = -1, json = -1;
+    if (min_rank < 0) {
+        const char *l = getenv("LOG_LEVEL");
+        min_rank = l ? lt_log_rank(l) : 1;
+        const char *f = getenv("LOG_FORMAT");
+        json = f && strcasecmp(f, "json") == 0;
+    }
+    if (lt_log_rank(level) < min_rank) return;
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    time_t now = ts.tv_sec;
     struct tm tm;
     gmtime_r(&now, &tm);
-    char stamp[32];
-    strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%SZ", &tm);
+    char stamp[40];
+    size_t sl = strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S", &tm);
     fflush(stdout);
     flockfile(stderr);
-    fprintf(stderr, "%s %s %.*s\n", stamp, level, (int)msg->len, msg->data);
+    if (json) {
+        snprintf(stamp + sl, sizeof stamp - sl, ".%03ldZ", (long)(ts.tv_nsec / 1000000));
+        lt_buf b = { 0 };
+        lt_buf_put(&b, "{\"time\":\"", 9);
+        lt_buf_put(&b, stamp, (int64_t)strlen(stamp));
+        lt_buf_put(&b, "\",\"level\":\"", 11);
+        for (const char *c = level; *c; c++) lt_buf_c(&b, (char)tolower((unsigned char)*c));
+        lt_buf_put(&b, "\",\"message\":", 12);
+        lt_json_str(&b, msg->data, msg->len);
+        lt_buf_put(&b, "}\n", 2);
+        fwrite(b.d, 1, (size_t)b.len, stderr);
+        free(b.d);
+    } else {
+        fprintf(stderr, "%sZ %s %.*s\n", stamp, level, (int)msg->len, msg->data);
+    }
     funlockfile(stderr);
 }
 
@@ -752,6 +882,24 @@ static lt_text *lt_random_uuid(void) {
     memcpy(u, &a, 8);
     memcpy(u + 8, &b, 8);
     u[6] = (unsigned char)((u[6] & 0x0f) | 0x40);
+    u[8] = (unsigned char)((u[8] & 0x3f) | 0x80);
+    char s[37];
+    snprintf(s, sizeof s, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);
+    return lt_text_from(s, 36);
+}
+
+// Time-ordered: the first 48 bits are the milliseconds since 1970, so
+// ids made later sort later (good database keys).
+static lt_text *lt_random_uuid_v7(void) {
+    unsigned char u[16];
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    uint64_t ms = (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
+    for (int i = 0; i < 6; i++) u[i] = (unsigned char)(ms >> (40 - 8 * i));
+    uint64_t a = lt_random_u64(), b = lt_random_u64();
+    memcpy(u + 6, &a, 2);
+    memcpy(u + 8, &b, 8);
+    u[6] = (unsigned char)((u[6] & 0x0f) | 0x70);
     u[8] = (unsigned char)((u[8] & 0x3f) | 0x80);
     char s[37];
     snprintf(s, sizeof s, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x", u[0], u[1], u[2], u[3], u[4], u[5], u[6], u[7], u[8], u[9], u[10], u[11], u[12], u[13], u[14], u[15]);

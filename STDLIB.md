@@ -171,6 +171,26 @@ pub builtin type Process {
 // Starts a program without waiting for it (see `run` for the arguments).
 pub fn start(program: Text, args: List<Text>) throws -> Process
 
+// A program to run with more settings than `run` takes.
+pub type Command {
+  program: Text
+  args: List<Text> = []
+  // the directory to run it in; "" for the current one
+  dir: Text = ""
+  // environment variables it gets on top of this program's
+  env: Map<Text, Text> = {}
+  // given as its standard input
+  input: Text = ""
+}
+
+// Runs a `Command` to the end, like `run`:
+//   let out = try process.run_command(process.Command(program: "git", args: ["status"], dir: repo))
+pub fn run_command(command: Command) throws -> Output
+
+// Where a program is on PATH ("/usr/bin/git"), like `which`; none if it
+// isn't installed.
+pub fn find(program: Text) -> Text?
+
 // The command-line arguments, without the program's name.
 pub fn args() -> List<Text>
 
@@ -189,6 +209,12 @@ pub fn get(name: Text) -> Text?
 // from DATABASE_URL. Numbers and true/false are converted; a missing variable
 // is an error unless the field is optional or has a default.
 pub fn decode<T>() throws -> T
+
+// Reads a `.env` file: `NAME=value` lines (`export NAME=value` too; `#`
+// starts a comment; values may be in "double" quotes, with \n, or 'single'
+// quotes, as they are). Variables already set are kept: the real
+// environment wins. A missing file is fine. Call it at the start of `main`.
+pub fn load(path: Text) throws
 ```
 
 ## cli
@@ -219,6 +245,7 @@ log: messages for people running the program, on standard error, with the
 time: `2026-09-29T12:00:00Z INFO server started`.
 
 ```
+pub fn debug(message: Text)
 pub fn info(message: Text)
 pub fn warn(message: Text)
 pub fn error(message: Text)
@@ -704,6 +731,9 @@ pub fn shuffle<T>(items: List<T>) -> List<T>
 pub fn token(length: Int) -> Text
 // A random UUID (version 4): "3f0b6c5e-...".
 pub fn uuid() -> Text
+// A UUID that starts with the time (version 7): ids made later sort later,
+// which keeps database indexes compact. Use it for primary keys.
+pub fn uuid_v7() -> Text
 ```
 
 ## regex
@@ -993,6 +1023,18 @@ builtin type List<T> {
   // Sorted by a key, smallest first; equal keys keep their order (stable).
   // Largest first: `xs.sorted_by(x => x.score).reversed()`.
   fn sorted_by<K>(self, key: fn(T) throws -> K) rethrows -> List<T>
+  // Each item's list, one after another: `orders.flat_map(o => o.items)`.
+  fn flat_map<R>(self, transform: fn(T) throws -> List<R>) rethrows -> List<R>
+  // Without repeats, the first of each kept, in order.
+  fn unique(self) -> List<T>
+  // In pieces of `size` (the last may be shorter): batches.
+  fn chunks(self, size: Int) -> List<List<T>>
+  // The position of the first item equal to `item`.
+  fn index_of(self, item: T) -> Int?
+  // The position of the first item that passes `test`.
+  fn find_index(self, test: fn(T) throws -> Bool) rethrows -> Int?
+  // The items that pass `test` and the rest, in two lists.
+  fn partition(self, test: fn(T) throws -> Bool) rethrows -> Partition<T>
   fn reversed(self) -> List<T>
   fn take(self, n: Int) -> List<T>
   fn drop(self, n: Int) -> List<T>
@@ -1091,6 +1133,12 @@ type Entry<K, V> {
 type Indexed<T> {
   index: Int
   value: T
+}
+
+// What `List.partition` gives.
+type Partition<T> {
+  matching: List<T>
+  rest: List<T>
 }
 
 type Pair<A, B> {
