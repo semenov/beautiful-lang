@@ -3001,6 +3001,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "files.read_bytes" => format!("lt_files_read_bytes({}, {})", a[0], a[1]),
             "files.write_bytes" => format!("lt_files_write_bytes({}, {})", a[0], a[1]),
             "crypto.sha256" => format!("lt_crypto_sha256({})", a[0]),
+            "crypto.sha1" | "http.__sha1" => format!("lt_crypto_sha1({})", a[0]),
+            "http.__ws_mask" => format!("lt_ws_mask({}, {})", a[0], a[1]),
             "crypto.hmac_sha256" => format!("lt_crypto_hmac({}, {})", a[0], a[1]),
             "crypto.pbkdf2_sha256" => format!("lt_crypto_pbkdf2({}, {}, {}, {}, {})", a[0], a[1], a[2], a[3], line),
             "crypto.random_bytes" => format!("lt_crypto_random_bytes({}, {})", a[0], line),

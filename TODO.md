@@ -71,7 +71,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `Decimal`
 - [x] `http`: middleware (`router.use`), cookies, forms (urlencoded,
       multipart), `http.mime_type`, CORS, request logging
-- [ ] WebSockets (server and client)
+- [x] WebSockets (server and client)
 - [x] **templates** (Vlad asked too; `template` module, Handlebars syntax): user-friendly; look at what's popular
       (Handlebars/Mustache, Jinja/Nunjucks, EJS, Go templates) and pick the
       shape agents know best; HTML-escaping by default

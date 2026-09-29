@@ -291,6 +291,10 @@ router.use((req, next) => {
 })
 ```
 
+WebSockets: `router.websocket("/chat", ws => try chat(ws))`; in `chat`,
+`while try ws.receive() is some(msg) { try ws.send_text(...) }`. Client:
+`with ws = try http.websocket("wss://...") { ... }`.
+
 Forms: `try req.form()` (a Map), `try req.parts()` (multipart, with files);
 cookies: `req.cookie("session")`, `res.with_cookie(http.Cookie(name: "session", value: v))`.
 

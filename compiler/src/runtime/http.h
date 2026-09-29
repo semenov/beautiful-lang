@@ -116,6 +116,7 @@ static ssize_t lt_sock_read(int fd, char *buf, size_t cap) {
 
 static const char *lt_http_reason(int64_t s) {
     switch (s) {
+    case 101: return "Switching Protocols";
     case 200: return "OK";
     case 201: return "Created";
     case 204: return "No Content";
@@ -176,9 +177,10 @@ static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t le
             v = nl + 1;
         }
     }
-    if (!has_type && !extra) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
+    if (!has_type && !extra && length != -2) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
     if (extra) lt_buf_put(&b, extra, (int64_t)strlen(extra));
-    if (length < 0) n = snprintf(line, sizeof line, "transfer-encoding: chunked\r\nconnection: %s\r\n\r\n", keep ? "keep-alive" : "close");
+    if (length == -2) n = snprintf(line, sizeof line, "connection: Upgrade\r\n\r\n"); // 101: another protocol follows
+    else if (length < 0) n = snprintf(line, sizeof line, "transfer-encoding: chunked\r\nconnection: %s\r\n\r\n", keep ? "keep-alive" : "close");
     else n = snprintf(line, sizeof line, "content-length: %lld\r\nconnection: %s\r\n\r\n", (long long)length, keep ? "keep-alive" : "close");
     lt_buf_put(&b, line, n);
     // small bodies go in the same write
@@ -204,12 +206,14 @@ static const char *lt_http_header(const lt_http_raw *r, const char *name) {
 
 
 // http.stream: the headers, then the writer's writes as chunks.
+// A 101 answer (WebSockets) hands the writer the raw connection instead.
 static bool lt_http_send_stream(int fd, const lt_http_raw *r, lt_http_out *out, bool keep, bool head_only) {
-    if (!lt_http_send(fd, out, NULL, -1, keep, NULL)) return false;
-    if (head_only) return lt_sock_write_all(fd, "0\r\n\r\n", 5);
+    bool upgrade = out->status == 101;
+    if (!lt_http_send(fd, out, NULL, upgrade ? -2 : -1, keep, NULL)) return false;
+    if (head_only && !upgrade) return lt_sock_write_all(fd, "0\r\n\r\n", 5);
     lt_conn *c = lt_conn_new(fd);
     c->borrowed = true;
-    c->chunked = true;
+    c->chunked = !upgrade;
     // the writer takes one reference; ours ends the stream after it
     lt_handle_dup(&c->h);
     lt_task *t = lt_current();
@@ -244,6 +248,7 @@ static bool lt_http_send_stream(int fd, const lt_http_raw *r, lt_http_out *out, 
         lt_iface_drop(e);
         return false; // cut: the client sees an unfinished body
     }
+    if (upgrade) return false; // the connection ends with the other protocol
     return lt_sock_write_all(fd, "0\r\n\r\n", 5);
 }
 

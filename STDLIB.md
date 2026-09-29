@@ -723,6 +723,10 @@ pub type Router {
   pub mutating fn post(pattern: String, handler: fn(Request) throws -> Response)
   pub mutating fn put(pattern: String, handler: fn(Request) throws -> Response)
   pub mutating fn delete(pattern: String, handler: fn(Request) throws -> Response)
+  // A WebSocket endpoint: the connection is upgraded and `handler` talks
+  // over it until it returns (the connection then closes).
+  //   router.websocket("/chat", ws => try chat(ws))
+  pub mutating fn websocket(pattern: String, handler: fn(WebSocket) throws)
   // Serves the files in `dir` under `prefix`: files("/static", dir: "public")
   // answers /static/css/site.css with public/css/site.css. Paths can't leave
   // `dir`, and hidden files (".env", ".git") are not served.
@@ -808,6 +812,36 @@ pub builtin type ResponseStream {
 // The response has the status and headers and an empty body. The file is
 // written only for a 2xx status.
 pub fn download(url: String, to: String) throws -> Response
+
+// A WebSocket connection: from `Router.websocket` on a server, or
+// `http.websocket(address)` as a client. One task receives; sending from
+// another task at the same time is fine for whole messages.
+pub type WebSocket {
+  conn: io.Stream
+  // clients mask what they send (the protocol requires it)
+  client: Bool = false
+  // The next message; none when the other side has closed. Pings are
+  // answered, and messages sent in pieces are joined, along the way.
+  pub fn receive(self) throws -> WebSocketMessage?
+  pub fn send_text(self, text: String) throws
+  pub fn send(self, data: Bytes) throws
+  // Says goodbye and closes the connection.
+  pub fn close(self) throws
+}
+
+pub type WebSocketMessage {
+  data: Bytes
+  // text (UTF-8) or binary
+  is_text: Bool
+  pub fn text(self) throws -> String
+}
+
+// Connects to a WebSocket server: "ws://host:port/path" or "wss://..." (TLS).
+//   with ws = try http.websocket("wss://echo.example/socket") {
+//     try ws.send_text("hi")
+//     print(try ws.receive()?.text())
+//   }
+pub fn websocket(address: String) throws -> WebSocket
 ```
 
 ## net
@@ -962,6 +996,9 @@ crypto.verify_password(attempt, stored)           // later
 ```
 pub fn sha256(data: Bytes) -> Bytes
 // A signature of `data` with a secret `key` (webhooks, tokens).
+// SHA-1, for protocols that require it (WebSocket handshakes, git). It
+// isn't collision-safe: use sha256 for anything new.
+pub fn sha1(data: Bytes) -> Bytes
 pub fn hmac_sha256(key: Bytes, data: Bytes) -> Bytes
 // A key derived from a password (PBKDF2 with HMAC-SHA256).
 pub fn pbkdf2_sha256(password: Bytes, salt: Bytes, iterations: Int, length: Int) -> Bytes

@@ -13,9 +13,11 @@
 // 500 response (and a log line); a bug in a handler also ends only that
 // request.
 
+import crypto
 import io
 import json
 import log
+import net
 import time
 
 pub type Request {
@@ -310,6 +312,13 @@ pub type Router {
     self.routes.append(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
   }
 
+  // A WebSocket endpoint: the connection is upgraded and `handler` talks
+  // over it until it returns (the connection then closes).
+  //   router.websocket("/chat", ws => try chat(ws))
+  pub mutating fn websocket(pattern: String, handler: fn(WebSocket) throws) {
+    self.get(pattern, req => try upgrade(req, handler: handler))
+  }
+
   // Serves the files in `dir` under `prefix`: files("/static", dir: "public")
   // answers /static/css/site.css with public/css/site.css. Paths can't leave
   // `dir`, and hidden files (".env", ".git") are not served.
@@ -534,3 +543,188 @@ fn __open(method: String, url: String, headers: Map<String, String>, body: Bytes
 // The response has the status and headers and an empty body. The file is
 // written only for a 2xx status.
 pub fn download(url: String, to: String) throws -> Response
+
+// ---- WebSockets (RFC 6455)
+
+// A WebSocket connection: from `Router.websocket` on a server, or
+// `http.websocket(address)` as a client. One task receives; sending from
+// another task at the same time is fine for whole messages.
+pub type WebSocket {
+  conn: io.Stream
+  // clients mask what they send (the protocol requires it)
+  client: Bool = false
+
+  // The next message; none when the other side has closed. Pings are
+  // answered, and messages sent in pieces are joined, along the way.
+  pub fn receive(self) throws -> WebSocketMessage? {
+    var data = Bytes()
+    var is_text = true
+    var started = false
+    while true {
+      let head = try self.conn.read_exact(2) catch err {
+        if err is Cancelled {
+          throw err
+        }
+        return none
+      }
+      let b0 = head.int_at(0, size: 1)
+      let b1 = head.int_at(1, size: 1)
+      let fin = b0.bit_and(128) != 0
+      let op = b0.bit_and(15)
+      var length = b1.bit_and(127)
+      if length == 126 {
+        length = (try self.conn.read_exact(2)).int_at(0, size: 2)
+      } else if length == 127 {
+        length = (try self.conn.read_exact(8)).int_at(0, size: 8)
+      }
+      if length > 67108864 {
+        throw Failure(message: "websocket: a message over 64 MB")
+      }
+      let key = if b1.bit_and(128) != 0 { try self.conn.read_exact(4) } else { Bytes() }
+      var payload = if length > 0 { try self.conn.read_exact(length) } else { Bytes() }
+      if key.length == 4 {
+        payload = __ws_mask(payload, key: key)
+      }
+      if op == 8 {
+        // the other side is closing: answer and stop
+        try self.frame(8, data: payload.slice(from: 0, to: min(2, payload.length))) catch err {
+        }
+        return none
+      }
+      if op == 9 {
+        try self.frame(10, data: payload)
+        continue
+      }
+      if op == 10 {
+        continue
+      }
+      if op == 1 or op == 2 {
+        started = true
+        is_text = op == 1
+        data = payload
+      } else if op == 0 and started {
+        data.append_all(payload)
+      } else {
+        throw Failure(message: "websocket: an unexpected frame (opcode ${op})")
+      }
+      if fin {
+        return WebSocketMessage(data: data, is_text: is_text)
+      }
+    }
+    return none
+  }
+
+  pub fn send_text(self, text: String) throws {
+    try self.frame(1, data: text.bytes())
+  }
+
+  pub fn send(self, data: Bytes) throws {
+    try self.frame(2, data: data)
+  }
+
+  // Says goodbye and closes the connection.
+  pub fn close(self) throws {
+    try self.frame(8, data: Bytes([3, 232])) catch err {
+    }
+    try self.conn.close()
+  }
+
+  fn frame(self, op: Int, data: Bytes) throws {
+    var f = Bytes()
+    f.append(128 + op)
+    let mask = if self.client { 128 } else { 0 }
+    if data.length < 126 {
+      f.append(mask + data.length)
+    } else if data.length < 65536 {
+      f.append(mask + 126)
+      f.append_int(data.length, size: 2)
+    } else {
+      f.append(mask + 127)
+      f.append_int(data.length, size: 8)
+    }
+    if self.client {
+      let key = crypto.random_bytes(4)
+      f.append_all(key)
+      f.append_all(__ws_mask(data, key: key))
+    } else {
+      f.append_all(data)
+    }
+    try self.conn.write(f)
+  }
+}
+
+pub type WebSocketMessage {
+  data: Bytes
+  // text (UTF-8) or binary
+  is_text: Bool
+
+  pub fn text(self) throws -> String {
+    return try self.data.text()
+  }
+}
+
+fn upgrade(req: Request, handler: fn(WebSocket) throws) throws -> Response {
+  let key = req.header("sec-websocket-key") ?? ""
+  if (req.header("upgrade") ?? "").lower() != "websocket" or key.is_empty() {
+    return text(400, "this address takes WebSocket connections")
+  }
+  let accept = __sha1("${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".bytes()).base64()
+  return Response(status: 101, body: Bytes(), headers: {"upgrade": "websocket", "sec-websocket-accept": accept}, writer: stream => try run_websocket(stream, handler: handler))
+}
+
+fn run_websocket(stream: io.Stream, handler: fn(WebSocket) throws) throws {
+  with ws = WebSocket(conn: stream) {
+    try handler(ws)
+  }
+}
+
+// Connects to a WebSocket server: "ws://host:port/path" or "wss://..." (TLS).
+//   with ws = try http.websocket("wss://echo.example/socket") {
+//     try ws.send_text("hi")
+//     print(try ws.receive()?.text())
+//   }
+pub fn websocket(address: String) throws -> WebSocket {
+  let parts = address.split("://")
+  if parts.length != 2 or (parts[0] != "ws" and parts[0] != "wss") {
+    throw Failure(message: "websocket: \"${address}\" isn't a ws:// or wss:// address")
+  }
+  let secure = parts[0] == "wss"
+  let rest = parts[1]
+  let slash = rest.index_of("/") ?? rest.length
+  let authority = rest.slice(from: 0, to: slash)
+  let path = if slash < rest.length { rest.slice(from: slash, to: rest.length) } else { "/" }
+  let hp = authority.split(":")
+  let host = hp[0]
+  let port = if hp.length > 1 { try hp[1].to_int() } else if secure { 443 } else { 80 }
+  with ws = WebSocket(conn: try connect_to(host, port: port, secure: secure), client: true) {
+    let key = crypto.random_bytes(16).base64()
+    try ws.conn.write_text("GET ${path} HTTP/1.1\r\nHost: ${authority}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: ${key}\r\nSec-WebSocket-Version: 13\r\n\r\n")
+    let status = try ws.conn.read_line() ?? ""
+    if not status.contains(" 101") {
+      throw Failure(message: "websocket: ${address} answered \"${status}\" instead of switching protocols")
+    }
+    var accepted = ""
+    while try ws.conn.read_line() is some(line) {
+      if line.is_empty() {
+        break
+      }
+      if line.lower().starts_with("sec-websocket-accept:") {
+        accepted = line.slice(from: 21, to: line.length).trim()
+      }
+    }
+    if accepted != __sha1("${key}258EAFA5-E914-47DA-95CA-C5AB0DC85B11".bytes()).base64() {
+      throw Failure(message: "websocket: ${address} didn't accept the handshake")
+    }
+    return ws
+  }
+}
+
+fn connect_to(host: String, port: Int, secure: Bool) throws -> io.Stream {
+  if secure {
+    return try net.connect_tls(host, port: port)
+  }
+  return try net.connect(host, port: port)
+}
+
+fn __sha1(data: Bytes) -> Bytes
+fn __ws_mask(data: Bytes, key: Bytes) -> Bytes

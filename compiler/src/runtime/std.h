@@ -788,6 +788,51 @@ static void lt_sha256_final(lt_sha256 *s, unsigned char out[32]) {
     }
 }
 
+// SHA-1: only for protocols that require it (WebSocket handshakes, git);
+// it isn't safe against collisions: use sha256 for anything new.
+static lt_bytes *lt_crypto_sha1(lt_bytes *d) {
+    uint32_t h[5] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
+    uint64_t bits = (uint64_t)d->len * 8;
+    int64_t total = ((d->len + 9 + 63) / 64) * 64;
+    unsigned char *m = (unsigned char *)calloc((size_t)total, 1);
+    memcpy(m, d->data, (size_t)d->len);
+    m[d->len] = 0x80;
+    for (int i = 0; i < 8; i++) m[total - 1 - i] = (unsigned char)(bits >> (8 * i));
+    for (int64_t off = 0; off < total; off += 64) {
+        uint32_t w[80];
+        for (int i = 0; i < 16; i++) w[i] = (uint32_t)m[off + 4 * i] << 24 | (uint32_t)m[off + 4 * i + 1] << 16 | (uint32_t)m[off + 4 * i + 2] << 8 | m[off + 4 * i + 3];
+        for (int i = 16; i < 80; i++) {
+            uint32_t x = w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16];
+            w[i] = (x << 1) | (x >> 31);
+        }
+        uint32_t a = h[0], b = h[1], c = h[2], dd = h[3], e = h[4];
+        for (int i = 0; i < 80; i++) {
+            uint32_t f, k;
+            if (i < 20) f = (b & c) | (~b & dd), k = 0x5A827999;
+            else if (i < 40) f = b ^ c ^ dd, k = 0x6ED9EBA1;
+            else if (i < 60) f = (b & c) | (b & dd) | (c & dd), k = 0x8F1BBCDC;
+            else f = b ^ c ^ dd, k = 0xCA62C1D6;
+            uint32_t tmp = ((a << 5) | (a >> 27)) + f + e + k + w[i];
+            e = dd, dd = c, c = (b << 30) | (b >> 2), b = a, a = tmp;
+        }
+        h[0] += a, h[1] += b, h[2] += c, h[3] += dd, h[4] += e;
+    }
+    free(m);
+    lt_bytes *out = lt_bytes_new(20);
+    for (int i = 0; i < 5; i++)
+        for (int j = 0; j < 4; j++) out->data[i * 4 + j] = (unsigned char)(h[i] >> (24 - 8 * j));
+    out->len = 20;
+    return out;
+}
+
+// data XOR a repeating 4-byte key (WebSocket masking)
+static lt_bytes *lt_ws_mask(lt_bytes *d, lt_bytes *key) {
+    lt_bytes *out = lt_bytes_new(d->len);
+    for (int64_t i = 0; i < d->len; i++) out->data[i] = d->data[i] ^ (key->len >= 4 ? key->data[i & 3] : 0);
+    out->len = d->len;
+    return out;
+}
+
 static lt_bytes *lt_crypto_sha256(lt_bytes *d) {
     lt_sha256 s;
     lt_sha256_init(&s);
