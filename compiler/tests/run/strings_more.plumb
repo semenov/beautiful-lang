@@ -2,4 +2,5 @@ fn main() {
   let s = "héllo wörld"
   print("${s.index_of("wö") ?? -1} ${s.index_of("x") ?? -1} ${s.slice(from: 4, to: s.length).index_of("l") ?? -1} [${"  a  ".trim_start()}] [${"  a  ".trim_end()}]")
   print("${"123".is_digit()} ${"12a".is_digit()} ${"Привет".is_letter()} ${"日本".is_letter()} ${"a1".is_letter()} ${" \t".is_space()} ${"ABC".is_upper()} ${"Ab".is_upper()} ${"abc".is_lower()} ${"".is_digit()}")
+  print("[${"--a-b--".trim_chars("-")}] [${"xyhéy".trim_chars("xy")}] [${"---".trim_chars("-")}]")
 }

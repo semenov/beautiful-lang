@@ -67,6 +67,13 @@ for d in ../../../ports/*/; do
     fi
   done
 done
+# the packages' own tests pass
+for f in ../../../packages/*/*.plumb; do
+  grep -q '^test "' "$f" || continue
+  if ! (cd "$(dirname "$f")" && $PLUMB_BIN test "$(basename "$f")" >$T/port-err 2>&1); then
+    echo "FAIL package $f: tests"; grep -A3 FAIL $T/port-err | head -8; fail=1
+  fi
+done
 # the packages (packages/) and their examples compile
 for d in ../../../packages/*/; do
   for e in "$d"examples/*.plumb; do

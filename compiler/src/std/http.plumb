@@ -351,6 +351,9 @@ type Route {
 pub type Middleware = fn(Request, fn(Request) throws -> Response) throws -> Response
 
 pub type Router {
+  // put before every route added: `http.Router(prefix: "/api")`, then
+  // `router.get("/users", ...)` answers /api/users
+  prefix: String = ""
   routes: List<Route> = []
   middleware: List<Middleware> = []
 
@@ -424,14 +427,18 @@ pub type Router {
 
   // kept most specific first, so the first route that matches is the one
   mutating fn add_route(route: Route) {
+    var r = route
+    if not self.prefix.is_empty() {
+      r.parts = split_path(self.prefix).concat(r.parts)
+    }
     var at = self.routes.length
     for i in 0..<self.routes.length {
-      if more_specific(route.parts, than: self.routes[i].parts) {
+      if more_specific(r.parts, than: self.routes[i].parts) {
         at = i
         break
       }
     }
-    self.routes.insert(route, at: at)
+    self.routes.insert(r, at: at)
   }
 
   fn route(self, request: Request) throws -> Response {

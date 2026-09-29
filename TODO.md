@@ -203,12 +203,14 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] database errors are untyped: `sql.UniqueViolation` (SQLite and Postgres)
     - [x] `http.json` has no camelCase option; `omit_none` is all or nothing
     - [x] `time.DateTime` has no milliseconds
-    - [ ] no plain mutex (a `Shared<Int>` nobody reads); middleware can't pass
-          the signed-in user to handlers; no route groups / prefixes
+    - [x] route prefixes: `http.Router(prefix: "/api")`
+    - [ ] no plain mutex (a `Shared<Int>` nobody reads; the db pool made
+          the port's need for it go away); middleware can't pass the
+          signed-in user to handlers (ask Vlad)
     - [x] a `{` block after `??` parses as a map literal (unclear error)
     - [ ] `expect` only directly inside `test`, not in helpers
-    - [ ] slugs: no transliteration, no trimming of given characters
-    - [ ] jwt errors untyped (expired vs forged)
+    - [x] slugs: `trim_chars("-")`; transliteration left to a package
+    - [x] jwt errors: `jwt.Expired`, `jwt.Invalid`
     - [x] `plumb add --path` says "pinned in plumb.lock" but writes none
     - [x] `plumb fmt --check` exits 0 on a file that doesn't parse
     - [ ] docs: cli `T?` without `= none`; `plumb doc String` shows

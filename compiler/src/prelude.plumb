@@ -109,6 +109,21 @@ builtin type String {
   fn __rfind(self, part: String) -> Int
   fn trim_start(self) -> String
   fn trim_end(self) -> String
+  // Without any of the characters in `chars` at either end:
+  // "--a-b--".trim_chars("-") == "a-b"
+  fn trim_chars(self, chars: String) -> String {
+    let cs = self.chars()
+    let set = chars.chars()
+    var from = 0
+    while from < cs.length and set.contains(cs[from]) {
+      from += 1
+    }
+    var to = cs.length
+    while to > from and set.contains(cs[to - 1]) {
+      to -= 1
+    }
+    return self.slice(from: from, to: to)
+  }
   // Every character is 0-9 (and there is at least one).
   fn is_digit(self) -> Bool
   // Every character is a letter, of any script: the Unicode letter

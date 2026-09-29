@@ -1,0 +1,13 @@
+// A router with a prefix: every route added to it starts with it.
+
+import http
+
+fn main() throws {
+  var router = http.Router(prefix: "/api")
+  router.get("/users/:id", req => http.text(200, "user ${req.param("id") ?? ""}"))
+  router.get("/", req => http.text(200, "root"))
+  for path in ["/api/users/7", "/api", "/users/7"] {
+    let res = try router.handle(http.request("GET", path: path))
+    print("${path}: ${res.status} ${res.text()}")
+  }
+}

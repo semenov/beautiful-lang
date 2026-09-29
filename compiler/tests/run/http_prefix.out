@@ -1,0 +1,3 @@
+/api/users/7: 200 user 7
+/api: 200 root
+/users/7: 404 not found

@@ -912,6 +912,9 @@ pub fn file(path: String) -> Response
 pub type Middleware = fn(Request, fn(Request) throws -> Response) throws -> Response
 
 pub type Router {
+  // put before every route added: `http.Router(prefix: "/api")`, then
+  // `router.get("/users", ...)` answers /api/users
+  prefix: String = ""
   routes: List<Route> = []
   middleware: List<Middleware> = []
   // Adds middleware: the first added runs first (outermost).
@@ -1782,6 +1785,9 @@ builtin type String {
   fn __rfind(self, part: String) -> Int
   fn trim_start(self) -> String
   fn trim_end(self) -> String
+  // Without any of the characters in `chars` at either end:
+  // "--a-b--".trim_chars("-") == "a-b"
+  fn trim_chars(self, chars: String) -> String
   // Every character is 0-9 (and there is at least one).
   fn is_digit(self) -> Bool
   // Every character is a letter, of any script: the Unicode letter

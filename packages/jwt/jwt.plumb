@@ -6,14 +6,15 @@
 //   let claims = try jwt.verify<Claims>(token, secret: key)
 //
 //   // tokens from an identity provider (Google, Auth0, ...): its published keys
-//   let keys = try jwt.key_set(try (try http.get(jwks_url)).text())
+//   let keys = try jwt.key_set((try http.get(jwks_url)).text())
 //   let user = try jwt.verify_with_keys<GoogleClaims>(token, keys: keys)
 //
 // Verifying checks the signature, and `exp` (expired) and `nbf` (not yet
 // valid) when the token has them, allowing 60 seconds of clock difference.
 // The algorithm must match the key: HS256 for secrets, RS256 or ES256 for
 // keys (a token can't pick a weaker one). Claims decode into your record,
-// like json.decode.
+// like json.decode. A token past `exp` throws `jwt.Expired`; any other
+// bad token throws `jwt.Invalid`.
 //
 // Install: plumb add jwt https://github.com/semenov/plumb --path packages/jwt
 
@@ -28,14 +29,33 @@ pub fn sign<T>(claims: T, secret: String) -> String {
   return "${unsigned}.${part(crypto.hmac_sha256(secret.bytes(), data: unsigned.bytes()))}"
 }
 
+// A token past its `exp` time: ask for a new one ("token expired").
+pub type Expired implements Error {
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+// A token that isn't good: forged or changed (the signature doesn't
+// match), another algorithm, not yet valid (`nbf`), or not a token at all.
+pub type Invalid implements Error {
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
 pub fn verify<T>(token: String, secret: String) throws -> T {
   let t = try split(token)
   if t.alg != "HS256" {
-    throw Failure(message: "jwt: expected an HS256 token, this one is ${t.alg}")
+    throw Invalid(text: "jwt: expected an HS256 token, this one is ${t.alg}")
   }
   let expected = crypto.hmac_sha256(secret.bytes(), data: t.signed.bytes())
   if not crypto.equal(expected, b: t.signature) {
-    throw Failure(message: "jwt: the signature doesn't match")
+    throw Invalid(text: "jwt: the signature doesn't match")
   }
   return try claims<T>(t.payload)
 }
@@ -52,10 +72,10 @@ pub fn sign_with<T>(claims: T, key: crypto.PrivateKey, algorithm: String) throws
 pub fn verify_with<T>(token: String, key: crypto.PublicKey) throws -> T {
   let t = try split(token)
   if t.alg != "RS256" and t.alg != "ES256" {
-    throw Failure(message: "jwt: expected an RS256 or ES256 token, this one is ${t.alg}")
+    throw Invalid(text: "jwt: expected an RS256 or ES256 token, this one is ${t.alg}")
   }
   if not crypto.verify(key, data: t.signed.bytes(), signature: t.signature) {
-    throw Failure(message: "jwt: the signature doesn't match")
+    throw Invalid(text: "jwt: the signature doesn't match")
   }
   return try claims<T>(t.payload)
 }
@@ -86,7 +106,7 @@ pub fn key_set(jwks: String) throws -> KeySet {
 // Verifies with the key the token names (its `kid`).
 pub fn verify_with_keys<T>(token: String, keys: KeySet) throws -> T {
   let t = try split(token)
-  let key = keys.keys[t.kid] ?? throw Failure(message: "jwt: no key with id \"${t.kid}\" in the key set")
+  let key = keys.keys[t.kid] ?? throw Invalid(text: "jwt: no key with id \"${t.kid}\" in the key set")
   return try verify_with<T>(token, key: key)
 }
 
@@ -134,10 +154,10 @@ type TimeClaims {
 fn split(token: String) throws -> Parts {
   let p = token.trim().split(".")
   if p.length != 3 {
-    throw Failure(message: "jwt: not a token (expected three parts separated by dots)")
+    throw Invalid(text: "jwt: not a token (expected three parts separated by dots)")
   }
   let header = try json.decode<Header>(try (try unpart(p[0])).text()) catch err {
-    throw Failure(message: "jwt: the header can't be read", cause: err)
+    throw Invalid(text: "jwt: the header can't be read: ${err.message()}")
   }
   return Parts(alg: header.alg, kid: header.kid ?? "", signed: "${p[0]}.${p[1]}", payload: try unpart(p[1]), signature: try unpart(p[2]))
 }
@@ -148,12 +168,12 @@ fn claims<T>(payload: Bytes) throws -> T {
   let now = time.unix_now()
   if times.exp is some(exp) {
     if now > exp + 60 {
-      throw Failure(message: "jwt: the token expired")
+      throw Expired(text: "jwt: the token expired")
     }
   }
   if times.nbf is some(nbf) {
     if now + 60 < nbf {
-      throw Failure(message: "jwt: the token isn't valid yet")
+      throw Invalid(text: "jwt: the token isn't valid yet")
     }
   }
   return try json.decode<T>(text)
@@ -170,6 +190,34 @@ fn unpart(text: String) throws -> Bytes {
     s = "${s}="
   }
   return try encoding.from_base64(s) catch err {
-    throw Failure(message: "jwt: a part isn't base64url")
+    throw Invalid(text: "jwt: a part isn't base64url")
   }
+}
+
+type TestClaims {
+  sub: String
+  exp: Int
+}
+
+test "an expired token is Expired, a forged one Invalid" {
+  let old = sign(TestClaims(sub: "1", exp: time.unix_now() - 3600), secret: "k")
+  let expired = try verify<TestClaims>(old, secret: "k") catch err {
+    if err is Expired {
+      TestClaims(sub: "expired", exp: 0)
+    } else {
+      throw err
+    }
+  }
+  expect expired.sub == "expired"
+  let token = sign(TestClaims(sub: "2", exp: time.unix_now() + 3600), secret: "k")
+  let forged = try verify<TestClaims>(token, secret: "other") catch err {
+    if err is Invalid {
+      TestClaims(sub: "invalid", exp: 0)
+    } else {
+      throw err
+    }
+  }
+  expect forged.sub == "invalid"
+  let ok = try verify<TestClaims>(token, secret: "k")
+  expect ok.sub == "2"
 }
