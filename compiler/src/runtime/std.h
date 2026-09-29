@@ -58,8 +58,7 @@ static lt_err lt_files_read_now(lt_text *path, lt_text **out) {
             fseek(f, 0, SEEK_SET);
             lt_text *t = lt_text_new(n);
             size_t got = fread(t->data, 1, (size_t)n, f);
-            t->len = (int64_t)got;
-            t->data[got] = 0;
+            t = lt_text_shorten(t, (int64_t)got);
             fclose(f);
             *out = t;
             return (lt_err){ 0 };
@@ -1458,9 +1457,7 @@ static lt_text *lt_url_encode(lt_text *t) {
             *w++ = hx[c & 15];
         }
     }
-    r->len = w - r->data;
-    *w = 0;
-    return r;
+    return lt_text_shorten(r, w - r->data);
 }
 
 static lt_err lt_url_decode_text(lt_text *t, lt_text **out) {
@@ -1480,9 +1477,7 @@ static lt_err lt_url_decode_text(lt_text *t, lt_text **out) {
             r->data[w++] = c == '+' ? ' ' : c;
         }
     }
-    r->len = w;
-    r->data[w] = 0;
-    *out = lt_text_valid(r);
+    *out = lt_text_valid(lt_text_shorten(r, w));
     return (lt_err){ 0 };
 }
 
@@ -1966,7 +1961,7 @@ static lt_text *lt_url_decode(const char *s, int64_t n, bool plus) {
     if (s[i] == '%' && i + 2 < n && lt_hex(s[i + 1]) >= 0 && lt_hex(s[i + 2]) >= 0) { t->data[w++] = (char)(lt_hex(s[i + 1]) * 16 + lt_hex(s[i + 2])); i += 2; }
     else t->data[w++] = (plus && s[i] == '+') ? ' ' : s[i];
   }
-  t->len = w; t->data[w] = 0; return lt_text_valid(t);
+  return lt_text_valid(lt_text_shorten(t, w));
 }
 
 

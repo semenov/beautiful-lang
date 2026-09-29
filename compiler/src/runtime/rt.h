@@ -243,23 +243,42 @@ static void lt_report_leaks(void) {
     }
     fprintf(stderr, "debug: %lld allocations, %lld not freed\n", (long long)lt_total_objects, (long long)lt_live_objects);
 }
+// The release allocator frees by the size it's given: a small size class,
+// malloc, or a mapped big block. Freeing with a size of another kind than
+// the block was allocated with (a text made big, then shortened in place)
+// crashes there, so --debug keeps each block's size and checks.
+static int64_t lt_size_kind(size_t n) {
+    size_t c = (n + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
+    if (c < LT_CLASSES) return c ? (int64_t)c : 1;
+    return n >= LT_BIG ? -2 : -1;
+}
 LT_INLINE void *lt_alloc(size_t n) {
     __atomic_fetch_add(&lt_live_objects, 1, __ATOMIC_RELAXED);
     __atomic_fetch_add(&lt_total_objects, 1, __ATOMIC_RELAXED);
-    void *p = malloc(n);
+    size_t *p = (size_t *)malloc(n + 16);
     if (!p) lt_oom();
-    return p;
+    p[0] = n;
+    return p + 2;
 }
 LT_INLINE void lt_free(void *p, size_t n) {
-    (void)n;
     __atomic_fetch_sub(&lt_live_objects, 1, __ATOMIC_RELAXED);
-    free(p);
+    size_t *h = (size_t *)p - 2;
+    if (lt_size_kind(h[0]) != lt_size_kind(n)) {
+        fprintf(stderr, "runtime bug: a block of %zu bytes is freed as %zu bytes (another size class)\n", h[0], n);
+        abort();
+    }
+    free(h);
 }
 LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
-    (void)old;
-    void *q = realloc(p, n);
+    size_t *h = (size_t *)p - 2;
+    if (lt_size_kind(h[0]) != lt_size_kind(old)) {
+        fprintf(stderr, "runtime bug: a block of %zu bytes is resized as %zu bytes (another size class)\n", h[0], old);
+        abort();
+    }
+    size_t *q = (size_t *)realloc(h, n + 16);
     if (!q) lt_oom();
-    return q;
+    q[0] = n;
+    return q + 2;
 }
 #else
 #ifdef LT_THREADS
@@ -543,6 +562,19 @@ static lt_text *lt_text_new(int64_t len) {
     return t;
 }
 
+// A text made with room to spare (lt_text_new(most)), then filled with `n`
+// bytes: sets its length, moving it to a block of the right size if the
+// size class changes (the allocator frees by the length's size class).
+static lt_text *lt_text_shorten(lt_text *t, int64_t n) {
+    size_t old = LT_TEXT_SIZE(t->len), neu = LT_TEXT_SIZE(n);
+    if (n < t->len) t = (lt_text *)lt_realloc(t, old, neu);
+    t->len = n;
+    t->data[n] = 0;
+    t->chars = -1;
+    t->at = 0;
+    return t;
+}
+
 static lt_text *lt_text_from(const char *s, int64_t len) {
     lt_text *t = lt_text_new(len);
     memcpy(t->data, s, (size_t)len);
@@ -808,12 +840,15 @@ static lt_text *lt_text_concat_n(int n, lt_text **parts) {
 
 // the bytes the block of text `t` has room for (`size`: what its length needs)
 static size_t lt_text_room(lt_text *t, size_t size) {
-#ifndef LT_DEBUG_ALLOC
+#ifdef LT_DEBUG_ALLOC
+    (void)size;
+    return ((size_t *)t)[-2]; // the size it was allocated with
+#else
     size_t c = (size + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
     if (c < LT_CLASSES) return (c ? c : 1) * LT_CLASS_BYTES;
     if (size >= LT_BIG) return ((lt_big_hdr *)((char *)t - sizeof(lt_big_hdr)))->mapped - sizeof(lt_big_hdr);
-#endif
     return LT_USABLE(t);
+#endif
 }
 
 // `x = "${x}..."`: appends the parts to the text in *tp. A text nothing else
@@ -1113,9 +1148,7 @@ static lt_text *lt_text_quote(lt_text *t) {
         }
     }
     *w++ = '"';
-    r->len = w - r->data;
-    *w = 0;
-    return r;
+    return lt_text_shorten(r, w - r->data);
 }
 
 // `"<t>" is not <what>` and, if there is one, `: <why>` (a long text
@@ -1395,8 +1428,7 @@ static lt_text *lt_text_valid(lt_text *t) {
             i += bad;
         }
     }
-    r->len = w;
-    r->data[w] = 0;
+    r = lt_text_shorten(r, w);
     lt_text_drop(t);
     return r;
 }
@@ -1448,9 +1480,7 @@ static lt_text *lt_base64_encode(const unsigned char *s, int64_t n, bool url) {
             else if (*c == '/') *c = '_';
         }
     }
-    t->len = w - t->data;
-    *w = 0;
-    return t;
+    return lt_text_shorten(t, w - t->data);
 }
 static lt_text *lt_bytes_base64(lt_bytes *b) { return lt_base64_encode(b->data, b->len, false); }
 

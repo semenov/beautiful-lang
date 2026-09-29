@@ -1,0 +1,18 @@
+// Texts made at 1 MB or more and then shortened (URL decoding, UTF-8
+// repair, error messages) are freed correctly.
+
+import url
+
+fn main() throws {
+  let decoded = try url.decode("%41".repeat(400000))
+  print("${decoded.length}")
+  let raw = Bytes([233]).concat("a".repeat(1100000).bytes())
+  print("${raw.text_lossy().length}")
+  let spaces = try " ".repeat(600000).to_int() catch err {
+    -1
+  }
+  print("${spaces}")
+  var built = "x".repeat(1200000)
+  built = "${built}y"
+  print("${built.length}")
+}

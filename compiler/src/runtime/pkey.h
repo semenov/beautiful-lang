@@ -98,8 +98,7 @@ static lt_bytes *lt_pem_der(lt_text *pem, char *kind, size_t kcap) {
     int64_t w = 0;
     for (int64_t i = 0; i < t->len; i++)
         if (!isspace((unsigned char)t->data[i])) t->data[w++] = t->data[i];
-    t->len = w;
-    t->data[w] = 0;
+    t = lt_text_shorten(t, w);
     lt_bytes *der = NULL;
     lt_err err = lt_base64_decode(t, &der);
     lt_text_drop(t);

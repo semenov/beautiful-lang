@@ -703,9 +703,7 @@ static lt_text *lt_term_strip(lt_text *t) {
         }
         r->data[w++] = t->data[i];
     }
-    r->len = w;
-    r->data[w] = 0;
-    return r;
+    return lt_text_shorten(r, w);
 }
 
 // Columns a code point takes: 0 for combining marks, 2 for wide (CJK,
