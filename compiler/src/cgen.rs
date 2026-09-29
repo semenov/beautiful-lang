@@ -1571,14 +1571,14 @@ static void {name}_usage(FILE *f) {{
 static lt_err {name}_fail(const char *msg, const char *arg) {{
   char buf[512]; snprintf(buf, sizeof buf, "%s%s (see --help)", msg, arg); return lt_make_failure(lt_text_cstr(buf));
 }}
-static lt_err {name}({c} *out) {{
+static lt_err {name}_from(int argc_, char **argv_, {c} *out) {{
   static const char *names[] = {{ {names} }}; static const int kinds[] = {{ {kinds} }}; int nf = {nf};
   lt_arena ar = {{0}}; lt_dyn o; memset(&o, 0, sizeof o); o.kind = LT_D_OBJ;
   o.items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * {n}); o.keys = (const char **)lt_arena_alloc(&ar, sizeof(char *) * {n}); o.klens = (int64_t *)lt_arena_alloc(&ar, sizeof(int64_t) * {n});
   int slot[{n}]; for (int i = 0; i < {n}; i++) slot[i] = -1;
   int only_pos = 0;
-  for (int i = 1; i < lt_argc; i++) {{
-    const char *a = lt_argv[i];
+  for (int i = 1; i < argc_; i++) {{
+    const char *a = argv_[i];
     if (!only_pos && strcmp(a, "--") == 0) {{ only_pos = 1; continue; }}
     if (!only_pos && (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0)) {{ {name}_usage(stdout); lt_arena_free(&ar); lt_process_exit(0); }}
     int fi = -1; const char *val = NULL;
@@ -1593,7 +1593,7 @@ static lt_err {name}({c} *out) {{
       }}
       if (fi < 0) {{ lt_arena_free(&ar); return {name}_fail("unknown option ", a); }}
       if (eq) val = eq + 1;
-      else if (kinds[fi] != 1) {{ if (i + 1 >= lt_argc) {{ lt_arena_free(&ar); return {name}_fail("a value is missing after ", a); }} val = lt_argv[++i]; }}
+      else if (kinds[fi] != 1) {{ if (i + 1 >= argc_) {{ lt_arena_free(&ar); return {name}_fail("a value is missing after ", a); }} val = argv_[++i]; }}
     }} else {{
       for (int k = 0; k < nf; k++) if (kinds[k] == 2) fi = k;
       if (fi < 0) {{ lt_arena_free(&ar); return {name}_fail("unexpected argument ", a); }}
@@ -1601,7 +1601,7 @@ static lt_err {name}({c} *out) {{
     }}
     lt_dyn *node;
     if (kinds[fi] >= 2) {{
-      if (slot[fi] < 0) {{ slot[fi] = (int)o.n; memset(&o.items[o.n], 0, sizeof(lt_dyn)); o.items[o.n].kind = LT_D_ARR; o.items[o.n].items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * (size_t)lt_argc); o.keys[o.n] = names[fi]; o.klens[o.n] = (int64_t)strlen(names[fi]); o.n++; }}
+      if (slot[fi] < 0) {{ slot[fi] = (int)o.n; memset(&o.items[o.n], 0, sizeof(lt_dyn)); o.items[o.n].kind = LT_D_ARR; o.items[o.n].items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * (size_t)argc_); o.keys[o.n] = names[fi]; o.klens[o.n] = (int64_t)strlen(names[fi]); o.n++; }}
       lt_dyn *arr = &o.items[slot[fi]]; node = &arr->items[arr->n++];
     }} else {{
       if (slot[fi] < 0) {{ slot[fi] = (int)o.n; o.keys[o.n] = names[fi]; o.klens[o.n] = (int64_t)strlen(names[fi]); o.n++; }}
@@ -1612,6 +1612,7 @@ static lt_err {name}({c} *out) {{
   }}
   lt_err e = dec_{id}("cli", &o, NULL, 1, out); lt_arena_free(&ar); return e;
 }}
+static lt_err {name}({c} *out) {{ return {name}_from(lt_argc, lt_argv, out); }}
 "#,
             name = name,
             c = c,
@@ -3190,6 +3191,13 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.need(H::Dec, id);
                 let f = self.gen_args_reader(id, name == "cli.decode");
                 format!("{}({})", f, a[0])
+            }
+            "cli.decode_from" => {
+                let id = tid0.unwrap();
+                self.need(H::Dec, id);
+                let f = self.gen_args_reader(id, true);
+                // argv from the list, with the program's name first
+                format!("({{ lt_texts *l_ = {}; char **v_ = (char **)calloc((size_t)l_->len + 2, sizeof(char *)); v_[0] = lt_argc > 0 ? lt_argv[0] : (char *)\"program\"; for (int64_t i_ = 0; i_ < l_->len; i_++) v_[i_ + 1] = l_->items[i_]->data; lt_err e_ = {}_from((int)l_->len + 1, v_, {}); free(v_); e_; }})", a[0], f, a[1])
             }
             "assert" => format!("lt_assert({}, {})", a[0], line),
             "panic" => format!("lt_panic_text({}, {})", a[0], line),

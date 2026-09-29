@@ -244,6 +244,16 @@ required ones are errors that show the usage.
 
 ```
 pub fn decode<T>() throws -> T
+
+// The same, from a list of arguments instead of the program's: for
+// subcommands.
+//   let args = process.args()
+//   match args.first() ?? "" {
+//     "add" => { let opts = try cli.decode_from<AddOptions>(args.drop(1)) ... }
+//     "list" => { ... }
+//     _ => eprint("usage: tool add|list [options]")
+//   }
+pub fn decode_from<T>(args: List<String>) throws -> T
 ```
 
 ## term

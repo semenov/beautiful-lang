@@ -97,7 +97,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
 - [x] `time`: parse_duration, Duration text and arithmetic, precise timers
       (macOS: sleep(10ms) takes ~70ms), a ticker (sleep_until on a grid)
-- [x] `cli`: -n style flags and one-letter names (subcommands: still to do)
+- [x] `cli`: -n style flags, one-letter names, subcommands (decode_from)
 - [x] channels: try_receive (a timeout: time.timeout around receive); select: not yet
 - [ ] `-> Never` in user code; constants (`const`)
 - [x] signals: Ctrl-C cancels main's tasks; process.interrupted()

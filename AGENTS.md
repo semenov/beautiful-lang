@@ -257,6 +257,7 @@ let api_body = json.encode_camel(user)          // keys as createdAt
 let config = try env.decode<Config>()           // CONFIG fields from env
 let opts = try cli.decode<Options>()            // --flag or -flag (-n for a field `n`),
                                                 // --help generated
+let sub = try cli.decode_from<AddOptions>(args.drop(1)) // subcommands: match on args[0]
 let rows = try conn.query<User>("select id, name from users where age > ?", [18])
 ```
 
