@@ -359,7 +359,12 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
     let cc = std::env::var("CC").unwrap_or_else(|_| "cc".into());
     let mut cmd = Command::new(&cc);
     if opts.debug {
-        cmd.args(["-O0", "-g", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-DLT_DEBUG_ALLOC"]);
+        if cfg!(target_env = "musl") {
+            // no AddressSanitizer on musl: the leak counter and trapping UB checks only
+            cmd.args(["-O0", "-g", "-fsanitize=undefined", "-fsanitize-trap=undefined", "-DLT_DEBUG_ALLOC"]);
+        } else {
+            cmd.args(["-O0", "-g", "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined", "-DLT_DEBUG_ALLOC"]);
+        }
     } else {
         cmd.arg(if optimize { "-O2" } else { "-O1" });
     }

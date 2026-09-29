@@ -7,6 +7,7 @@
 // Every dup/drop accepts NULL (a zero-initialized or missing value).
 
 #include <stdint.h>
+#include <stddef.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

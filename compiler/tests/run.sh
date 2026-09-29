@@ -4,7 +4,7 @@
 # - a file with tests must pass them
 # - nothing may leak
 cd "$(dirname "$0")/run" || exit 1
-LANG_BIN=../../target/release/lang
+LANG_BIN=${LANG_BIN:-../../target/release/lang}
 fail=0
 for f in *.lang; do
   name=${f%.lang}

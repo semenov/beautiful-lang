@@ -760,8 +760,21 @@ static lt_err lt_regex_compile(lt_text *pat, lt_handle **out) {
     int rc = regcomp(&r->re, tr, REG_EXTENDED | (icase ? REG_ICASE : 0));
     free(tr);
     if (rc != 0) {
-        char msg[256], buf[512];
-        regerror(rc, &r->re, msg, sizeof msg);
+        // our own words: the system's messages differ between macOS and Linux
+        const char *msg;
+        switch (rc) {
+        case REG_EPAREN: msg = "parentheses not balanced"; break;
+        case REG_EBRACK: msg = "brackets not balanced"; break;
+        case REG_EBRACE: msg = "braces not balanced"; break;
+        case REG_BADBR: msg = "invalid repetition count in braces"; break;
+        case REG_ERANGE: msg = "invalid range in brackets"; break;
+        case REG_ECTYPE: msg = "unknown character class"; break;
+        case REG_EESCAPE: msg = "a trailing backslash"; break;
+        case REG_ESUBREG: msg = "a back reference to a missing group"; break;
+        case REG_BADRPT: msg = "a repetition with nothing to repeat"; break;
+        default: msg = "invalid regular expression"; break;
+        }
+        char buf[512];
         snprintf(buf, sizeof buf, "regex: %s in \"%.*s\"", msg, (int)pat->len, pat->data);
         free(r);
         return lt_make_failure(lt_text_cstr(buf));
@@ -776,10 +789,22 @@ static lt_err lt_regex_compile(lt_text *pat, lt_handle **out) {
 // a match at or after byte `from`; pm offsets are absolute
 static bool lt_regex_at(lt_handle *h, lt_text *t, int64_t from, regmatch_t *pm) {
     lt_regex *r = (lt_regex *)h;
+#ifdef REG_STARTEND
     pm[0].rm_so = (regoff_t)from;
     pm[0].rm_eo = (regoff_t)t->len;
     int flags = REG_STARTEND | (from > 0 ? REG_NOTBOL : 0);
     return regexec(&r->re, t->data, LT_RE_GROUPS, pm, flags) == 0;
+#else
+    // musl: match from the offset (texts end with a zero byte) and shift back
+    if (regexec(&r->re, t->data + from, LT_RE_GROUPS, pm, from > 0 ? REG_NOTBOL : 0) != 0) return false;
+    for (int i = 0; i < LT_RE_GROUPS; i++) {
+        if (pm[i].rm_so >= 0) {
+            pm[i].rm_so += (regoff_t)from;
+            pm[i].rm_eo += (regoff_t)from;
+        }
+    }
+    return true;
+#endif
 }
 
 static int64_t lt_char_index(lt_text *t, int64_t byte) {

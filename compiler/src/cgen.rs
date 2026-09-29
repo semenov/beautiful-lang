@@ -2994,20 +2994,25 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                     Kind::Set(k) => (*k, None),
                     _ => unreachable!(),
                 };
+                // the element types as written (ty_of can't tell a new type from its base)
+                let (k_ty, v_ty) = match tys.first() {
+                    Some(Ty::Adt(_, a)) if !a.is_empty() => (a[0].clone(), a.get(1).cloned()),
+                    _ => (self.ty_of(k), v.map(|v| self.ty_of(v))),
+                };
                 let (elem_ty, build): (Ty, String) = match name {
                     "Map.keys" | "Set.to_list" => {
-                        let kt = self.ty_of(k);
+                        let kt = k_ty;
                         let d = self.dup(k, "x_");
                         (kt, format!("x_ = m_->e[i_].k; {}", d))
                     }
                     "Map.values" => {
-                        let vt = self.ty_of(v.unwrap());
+                        let vt = v_ty.unwrap();
                         let d = self.dup(v.unwrap(), "x_");
                         (vt, format!("x_ = m_->e[i_].v; {}", d))
                     }
                     _ => {
-                        let kt = self.ty_of(k);
-                        let vt = self.ty_of(v.unwrap());
+                        let kt = k_ty;
+                        let vt = v_ty.unwrap();
                         let et = Ty::Adt(self.prog.b.entry, vec![kt, vt]);
                         let eid = self.tid(&et);
                         let dk = self.dup(k, "x_.f0");
