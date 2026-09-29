@@ -15,7 +15,6 @@ fn slow() throws -> Int {
 }
 
 fn ticker(stop: Shared<Bool>) throws -> Int {
-  var ticks = 0
   var worst = 0
   while true {
     with s = stop.lock() {
@@ -29,7 +28,6 @@ fn ticker(stop: Shared<Bool>) throws -> Int {
     if ms > worst {
       worst = ms
     }
-    ticks += 1
   }
   return worst
 }
@@ -38,7 +36,6 @@ fn main() throws {
   let stop = Shared<Bool>(false)
   let tick = spawn ticker(stop)
   var tasks: List<Task<Int>> = []
-  let _ = time.now()
   for i in 0..<24 {
     tasks.append(spawn slow())
   }

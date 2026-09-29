@@ -61,6 +61,9 @@ struct FnCtx {
     // each local: looked up anywhere; the `let`/`var` statements
     used: Vec<bool>,
     lets: Vec<(LocalId, Span)>,
+    // read as a value (not only changed); for-loop variables
+    read: Vec<bool>,
+    loop_vars: Vec<LocalId>,
 }
 
 pub struct ModScope {
@@ -909,6 +912,8 @@ impl Checker {
             writes: vec![],
             used: vec![],
             lets: vec![],
+            read: vec![],
+            loop_vars: vec![],
         });
     }
 
@@ -918,7 +923,7 @@ impl Checker {
     // unless the `var` is declared inside that loop.
     fn check_stale_captures(&mut self) {
         let caps = std::mem::take(&mut self.fcx().var_captures);
-        let writes = std::mem::take(&mut self.fcx().writes);
+        let writes = self.fc().writes.clone();
         let mut reported = std::collections::HashSet::new();
         for (id, lam, loops) in &caps {
             let decl = self.fc().decl_at.get(*id).copied().unwrap_or(0);
@@ -950,6 +955,17 @@ impl Checker {
         // a value computed and never used is a forgotten result
         let md = self.fc().module;
         if !self.modules[md].privileged {
+            // a `var` changed but never read: the change went to a copy
+            let writes = self.fc().writes.clone();
+            for (id, _) in self.fc().lets.clone() {
+                if !self.fc().locals[id].mutable || self.fc().read[id] || !self.fc().used[id] {
+                    continue;
+                }
+                if let Some((_, at)) = writes.iter().rev().find(|(w, _)| *w == id) {
+                    let name = self.fc().locals[id].name.clone();
+                    self.err_help(*at, format!("this changes `{}`, but `{}` is never read: the change is lost", name, name), format!("if `{}` is a copy of a value in a list or map, change it there (`list[i].field = ...`, `m[key].field = ...`); if nothing needs it, remove it", name));
+                }
+            }
             for (id, span) in self.fc().lets.clone() {
                 if !self.fc().used[id] {
                     let name = self.fc().locals[id].name.clone();
@@ -1128,6 +1144,7 @@ impl Checker {
         fc.level.push(level);
         fc.decl_at.push(span.lo);
         fc.used.push(false);
+        fc.read.push(false);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1142,6 +1159,7 @@ impl Checker {
         fc.level.push(level);
         fc.decl_at.push(0);
         fc.used.push(true);
+        fc.read.push(true);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1753,6 +1771,7 @@ impl Checker {
                 };
                 self.fcx().scopes.push(HashMap::new());
                 let v = self.declare(*span, var, elem, false);
+                self.fcx().loop_vars.push(v);
                 let lvl = self.fc().lambdas.len();
                 self.fcx().loops.push(lvl);
                 self.fcx().loop_spans.push(*span);
@@ -1867,6 +1886,10 @@ impl Checker {
                     }
                     if !l.mutable && name.starts_with("?.") {
                         self.err_help(e.span, "`?.` can't change the value inside an optional", "take it out, change it and put it back: `var v = x ?? ...`, change `v`, then `x = v`");
+                        return None;
+                    }
+                    if !l.mutable && self.fc().loop_vars.contains(&id) {
+                        self.err_help(e.span, format!("can't change `{}`: it's a copy of an element", name), format!("change the list itself: `for i in 0..<list.length {{ list[i].field = ... }}`, or build a new one with `map`"));
                         return None;
                     }
                     if !l.mutable {
@@ -2367,6 +2390,7 @@ impl Checker {
     fn ident(&mut self, name: &str, span: Span, expected: Option<&Ty>) -> TExpr {
         let mk = |kind, ty| TExpr { kind, ty, span };
         if let Some(id) = self.lookup_local(name) {
+            self.fcx().read[id] = true;
             let ty = self.fc().locals[id].ty.clone();
             return mk(TK::Local(id), ty);
         }
