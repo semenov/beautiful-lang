@@ -48,7 +48,7 @@ fn main() throws {
   print(json.encode_pretty(Address(city: "Paris", zip: "75001")))
 
   let minimal = try json.decode<User>("{\"id\": 7, \"name\": \"Bob\"}")
-  print("${minimal.name}: role ${minimal.role}, ${minimal.tags.length} tags, address ${minimal.address}")
+  print("${minimal.name}: role ${minimal.role}, ${minimal.tags.length} tags, address given: ${minimal.address is some(_)}")
 
   let shapes = try json.decode<List<Shape>>("[{\"type\": \"Circle\", \"radius\": 1.5}, {\"type\": \"Square\", \"side\": 2}]")
   print("${shapes}")

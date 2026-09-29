@@ -30,8 +30,8 @@ fn main() {
     let city = u?.address?.city ?? "?"
     let zip = u?.address?.zip ?? "-"
     let upper = u?.name.upper()
-    print("${id}: ${city} ${zip} ${upper} ${u?.greeting()} ${u?.name.length}")
+    print("${id}: ${city} ${zip} ${upper ?? "none"} ${u?.greeting() ?? "none"} ${u?.name.length ?? -1}")
   }
   let names: Map<Int, String> = {1: "one"}
-  print("${names[1]?.upper()} ${names[2]?.upper()}")
+  print("${names[1]?.upper() ?? "none"} ${names[2]?.upper() ?? "none"}")
 }

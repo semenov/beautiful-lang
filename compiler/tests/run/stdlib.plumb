@@ -35,7 +35,7 @@ fn main() throws {
   print("status ${r.status}: ${r.stdout.trim()}")
   let bad = try process.run("sh", ["-c", "echo oops >&2; exit 3"])
   print("status ${bad.status}: ${bad.stderr.trim()}")
-  print("HOME set: ${env.get("HOME") != none}, NOPE: ${env.get("NO_SUCH_VARIABLE_X")}")
+  print("HOME set: ${env.get("HOME") != none}, NOPE: ${env.get("NO_SUCH_VARIABLE_X") ?? "none"}")
   let dice = random.between(1, 6)
   print("dice ok: ${dice >= 1 and dice <= 6}, token length ${random.token(16).length}")
   print("shuffled keeps items: ${random.shuffle([1, 2, 3]).sorted() == [1, 2, 3]}")

@@ -159,6 +159,8 @@ let user = users[id] ?? throw NotFound(id: id)
 `user?.address?.city` is none if `user` or its `address` is none (a
 `String?`); combine with `??`: `u?.name ?? "anonymous"`. It reads and calls
 (`u?.greeting()`), but can't change what's inside: unwrap for that.
+An optional can't go into text as it is (`"${email}"` is an error: it
+would print `none`): write `"${email ?? ""}"`.
 `m[key]` gives `V?`; `xs[i]` out of range is a bug (it stops the task).
 Change a value inside a map or list in place: `m[key].append(x)`,
 `accounts[id].balance -= 5`. Reading it out and writing it back

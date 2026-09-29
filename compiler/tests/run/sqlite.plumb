@@ -24,7 +24,7 @@ fn main() throws {
     print("ada is #${ada}")
     let adults = try conn.query<User>("select id, name, age, active, email from users where age > ? order by age", [40])
     for u in adults {
-      print("${u.id.value} ${u.name} ${u.age} active=${u.active} email=${u.email}")
+      print("${u.id.value} ${u.name} ${u.age} active=${u.active} email=${u.email ?? "none"}")
     }
     let changed = try conn.execute_counting("update users set email = ? where id = ?", ["ada@example.com", UserId(1)])
     print("changed ${changed}")

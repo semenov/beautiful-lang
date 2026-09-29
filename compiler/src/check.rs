@@ -1991,6 +1991,16 @@ impl Checker {
                                     let s = self.prog.show(&t);
                                     self.err(x.span, format!("a `{}` can't be put into text", s));
                                 }
+                                // "Hello none" would reach a user
+                                Ty::Opt(inner) => {
+                                    let shown = self.prog.show(&Ty::Opt(inner.clone()));
+                                    let fallback = match *inner {
+                                        Ty::Text => "\"\"".to_string(),
+                                        Ty::Int => "0".to_string(),
+                                        _ => "...".to_string(),
+                                    };
+                                    self.err_help(x.span, format!("this `{}` may be missing: it would print as `none`", shown), format!("say what to print then: `${{x ?? {}}}`, or check it first: `if x is some(v) {{ ... }}`", fallback));
+                                }
                                 _ => {
                                     let sp = te.span;
                                     parts.push(TExpr { kind: TK::ToText(Box::new(te)), ty: Ty::Text, span: sp });

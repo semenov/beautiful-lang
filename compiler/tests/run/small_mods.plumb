@@ -20,7 +20,7 @@ fn main() throws {
     []
   }
   let u = try url.parse("https://Example.com:8443/a/b?q=hello%20world&page=2#top")
-  print("${u.scheme} ${u.host} ${u.port} ${u.path} ${u.query} ${u.fragment}")
+  print("${u.scheme} ${u.host} ${u.port ?? -1} ${u.path} ${u.query} ${u.fragment ?? "none"}")
   print(url.encode("a b&c/d"))
   print(url.query_text({"q": "a b", "page": "2"}))
   print("${math.pi().format(4)} ${math.sin(0.0)} ${math.log10(1000.0)} ${math.atan2(1.0, 1.0).format(3)} ${2.0.pow(0.5).format(6)}")
