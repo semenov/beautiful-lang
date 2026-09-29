@@ -506,8 +506,10 @@ static void *lt_timer_thread(void *arg) {
             if (d->at <= now) {
                 *p = d->next;
                 d->fired = 1;
-                __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
+                // wake first, then stop counting: in between, the deadlock
+                // check must still see a reason to wait
                 lt_task_cancel(d->task);
+                __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
                 continue;
             }
             if (d->at < next) next = d->at;
@@ -520,9 +522,9 @@ static void *lt_timer_thread(void *arg) {
             if (t->wake_at <= now) {
                 lt_wq_remove(&lt_timer_q, t);
                 __atomic_store_n(&t->parked_on, NULL, __ATOMIC_RELEASE);
-                __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
                 t->timed_out = 1;
                 lt_ready(t);
+                __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
             } else if (t->wake_at < next) {
                 next = t->wake_at;
             }
@@ -882,8 +884,10 @@ static void lt_io_wake(lt_task *t) {
     // the task is fully parked once its io_spin is free
     lt_spin_lock(&t->io_spin);
     lt_spin_unlock(&t->io_spin);
-    __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+    // queued before it stops counting as waiting (see lt_next_task's
+    // deadlock check); `t` isn't touched after lt_ready
     lt_ready(t);
+    __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
 }
 
 static void *lt_poll_thread(void *arg) {

@@ -1273,6 +1273,9 @@ impl<'a> Lowerer<'a> {
         match callee {
             Callee::Fn(id, targs) => {
                 let f = &self.prog.fns[*id];
+                // a call that never returns keeps that, even where the checker
+                // gave it the type of its surroundings (`catch err { process.exit(2) }`)
+                let ty = if f.ret == Ty::Never { Ty::Never } else { ty };
                 let targs: Vec<Ty> = targs.iter().map(|t| self.ty(t)).collect();
                 let mut argv = vec![];
                 let mut arg_tys = vec![];
