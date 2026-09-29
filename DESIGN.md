@@ -463,7 +463,10 @@ used result is always a mutation or an action. The rule also catches the
   rule for invalid ones; Rust, Swift, Java and JS guarantee valid text.
 - **JSON keys in any case:** decoding matches a field by its exact name,
   then ignoring case and `_`/`-` (`createdAt` fills `created_at`), so
-  camelCase APIs need no options; `json.encode_camel` writes them.
+  camelCase APIs need no options; `json.encode_camel` writes them. A key
+  written twice, or two keys that would fill the same field (`name` and
+  `NAME`), is an error: parsers disagree on which one wins (first or
+  last), and a proxy and a service that disagree are a security hole.
 - **Templates are Handlebars-style** (`{{name}}`, `{{#each}}`, `{{#if}}`,
   partials): the most widely known template language that isn't a
   programming language itself. Values are HTML-escaped in HTML templates,
