@@ -83,7 +83,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] signals: Ctrl-C cancels `main` so `with` blocks close
 - [x] `crypto`: RSA and ECDSA P-256 sign/verify, keys from PEM or JWK (Ed25519: not yet)
 - [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)
-- [ ] packages: jwt, smtp, s3, mysql, semver, yaml (maybe stdlib)
+- [x] jwt package
+- [ ] packages: smtp, s3, mysql, semver, yaml (maybe stdlib)
 
 ## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)
 
