@@ -1,0 +1,20 @@
+// Flow typing through `or`: `x is none or x.is_empty()`, and after an `if`
+// that leaves.
+
+fn g(e: String?) -> String {
+  if e is none or e.is_empty() {
+    return "no"
+  }
+  return e
+}
+
+fn h(a: String?, b: Int?) -> Int {
+  if a is none or a.is_empty() or b is none or b < 0 {
+    return -1
+  }
+  return a.length + b
+}
+
+fn main() {
+  print("${g(none)} ${g("")} ${g("x")} ${h("ab", b: 3)} ${h(none, b: 1)} ${h("a", b: -5)}")
+}

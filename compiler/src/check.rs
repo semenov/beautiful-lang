@@ -1465,14 +1465,18 @@ impl Checker {
                 diverges = true;
             }
             // flow typing: `if x is none { <diverges> }` makes `x` a `T` below
+            // (also `if x is none or ... { <diverges> }`)
             if let (Stmt::Expr(e), TStmt::Expr(te)) = (s, &ts) {
-                if let Some((name, id, inner)) = self.narrowing(e, te) {
+                let found = self.narrowing(e, te);
+                if !found.is_empty() {
                     stmts.push(ts);
-                    let new_id = self.rebind(&name, inner.clone());
-                    let sp = e.span;
-                    let src = TExpr { kind: TK::Local(id), ty: Ty::opt(inner.clone()), span: sp };
-                    let un = TExpr { kind: TK::Unwrap(Box::new(src)), ty: inner, span: sp };
-                    stmts.push(TStmt::Let(new_id, un));
+                    for (name, id, inner) in found {
+                        let new_id = self.rebind(&name, inner.clone());
+                        let sp = e.span;
+                        let src = TExpr { kind: TK::Local(id), ty: Ty::opt(inner.clone()), span: sp };
+                        let un = TExpr { kind: TK::Unwrap(Box::new(src)), ty: inner, span: sp };
+                        stmts.push(TStmt::Let(new_id, un));
+                    }
                     continue;
                 }
             }
@@ -1497,7 +1501,27 @@ impl Checker {
         TBlock { stmts, tail, ty }
     }
 
-    fn narrowing(&mut self, e: &Expr, te: &TExpr) -> Option<(String, LocalId, Ty)> {
+    fn narrowing(&mut self, e: &Expr, te: &TExpr) -> Vec<(String, LocalId, Ty)> {
+        let mut out = vec![];
+        if let (ExprKind::If { cond, els: None, .. }, TK::If { then, .. }) = (&e.kind, &te.kind) {
+            if matches!(cond.kind, ExprKind::Binary(BinOp::Or, ..)) && then.ty == Ty::Never {
+                for name in none_tests(cond) {
+                    if let Some(id) = self.lookup_local(&name) {
+                        if let Ty::Opt(inner) = self.resolve(&self.fc().locals[id].ty) {
+                            out.push((name, id, *inner));
+                        }
+                    }
+                }
+                return out;
+            }
+        }
+        if let Some(n) = self.narrowing_one(e, te) {
+            out.push(n);
+        }
+        out
+    }
+
+    fn narrowing_one(&mut self, e: &Expr, te: &TExpr) -> Option<(String, LocalId, Ty)> {
         if let ExprKind::If { cond, els: None, .. } = &e.kind {
             if let ExprKind::Is(scrut, Pattern::None(_)) = &cond.kind {
                 if let ExprKind::Ident(name) = &scrut.kind {
@@ -2230,6 +2254,27 @@ impl Checker {
                     mk(TK::Unary(UnOp::Neg, Box::new(t)), ty)
                 }
             },
+            // `x is none or x.is_empty()`: on the right, `x` isn't none
+            ExprKind::Binary(BinOp::Or, l, r) if !none_tests(l).is_empty() => {
+                let lt = self.expr(l, None);
+                self.fcx().scopes.push(HashMap::new());
+                let mut stmts = vec![];
+                for name in none_tests(l) {
+                    if let Some(id) = self.lookup_local(&name) {
+                        if let Ty::Opt(inner) = self.resolve(&self.fc().locals[id].ty) {
+                            let new_id = self.rebind(&name, (*inner).clone());
+                            let src = TExpr { kind: TK::Local(id), ty: Ty::Opt(inner.clone()), span: l.span };
+                            stmts.push(TStmt::Let(new_id, TExpr { kind: TK::Unwrap(Box::new(src)), ty: *inner, span: l.span }));
+                        }
+                    }
+                }
+                let rt = self.expr(r, Some(&Ty::Bool));
+                self.fcx().scopes.pop();
+                let rty = rt.ty.clone();
+                let rspan = rt.span;
+                let rt = if stmts.is_empty() { rt } else { TExpr { kind: TK::Block(TBlock { stmts, tail: Some(Box::new(rt)), ty: rty.clone() }), ty: rty, span: rspan } };
+                self.binary(BinOp::Or, lt, rt, span, expected)
+            }
             ExprKind::Binary(op, l, r) => {
                 let arith_op = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem);
                 let (lt, rt) = if is_literal(l) && !is_literal(r) {
@@ -4247,6 +4292,22 @@ fn stmt_span(s: &Stmt) -> Span {
         Stmt::Let { span, .. } | Stmt::Assign { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::With { span, .. } | Stmt::Expect { span, .. } => *span,
         Stmt::Return(_, s) | Stmt::Break(s) | Stmt::Continue(s) | Stmt::Throw(_, s) => *s,
         Stmt::Expr(e) => e.span,
+    }
+}
+
+// The names `x` in an `or` chain's parts of the form `x is none`.
+fn none_tests(e: &Expr) -> Vec<String> {
+    match &e.kind {
+        ExprKind::Binary(BinOp::Or, l, r) => {
+            let mut v = none_tests(l);
+            v.extend(none_tests(r));
+            v
+        }
+        ExprKind::Is(scrut, Pattern::None(_)) => match &scrut.kind {
+            ExprKind::Ident(n) => vec![n.clone()],
+            _ => vec![],
+        },
+        _ => vec![],
     }
 }
 

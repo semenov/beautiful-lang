@@ -152,7 +152,8 @@ interface Describable {
 let email: String? = user.email
 let shown = email ?? "(none)"                 // a fallback
 if email is some(e) { send(e) }               // unwrap
-if email is none { return }
+if email is none { return }                   // below: `email` is a String
+if name is none or name.is_empty() { return } // on the right of `or` too
 let user = users[id] ?? throw NotFound(id: id)
 ```
 
