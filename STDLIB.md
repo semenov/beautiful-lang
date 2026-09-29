@@ -809,6 +809,8 @@ pub type Cookie {
   same_site: String = "Lax"
   // also for subdomains of this one: "example.com"; empty: only this host
   domain: String = ""
+  // when it expires (older browsers ignore max_age); none: see max_age
+  expires: time.DateTime? = none
 }
 
 // How long a client request took, each from its start. Connections are

@@ -141,7 +141,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] status reason texts for every code, `http.status_text`
     - [x] 204/304 without content-length or content-type; Content-Length on a stream
     - [x] test helper `http.request` splits off the query
-    - [ ] repeated headers; trailers; cookie Domain/Expires
+    - [x] cookie Domain/Expires (and no `SameSite=;` when empty)
+    - [ ] repeated request headers (they're joined with ", "; a
+          `header_all` needs a field on Request); trailers -- when a
+          program needs them
     - [x] server options: bind address, body size limit (`http.serve_with`)
     - [x] server timeouts (slow clients, idle keep-alive): `ServerOptions`
           idle_timeout / read_timeout / write_timeout (60 s each); each

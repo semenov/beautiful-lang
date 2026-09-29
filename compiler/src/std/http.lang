@@ -182,6 +182,8 @@ pub type Cookie {
   same_site: String = "Lax"
   // also for subdomains of this one: "example.com"; empty: only this host
   domain: String = ""
+  // when it expires (older browsers ignore max_age); none: see max_age
+  expires: time.DateTime? = none
 }
 
 // What a cookie's name, value or attribute may hold: characters that would
@@ -238,7 +240,13 @@ pub type Response {
 
   // A copy that sets a cookie (several can be set).
   pub fn with_cookie(self, cookie: Cookie) -> Response {
-    var line = "${cookie_safe(cookie.name).replace("=", "")}=${cookie_safe(cookie.value)}; Path=${cookie_safe(cookie.path)}; SameSite=${cookie_safe(cookie.same_site)}"
+    var line = "${cookie_safe(cookie.name).replace("=", "")}=${cookie_safe(cookie.value)}; Path=${cookie_safe(cookie.path)}"
+    if not cookie.same_site.is_empty() {
+      line = "${line}; SameSite=${cookie_safe(cookie.same_site)}"
+    }
+    if cookie.expires is some(at) {
+      line = "${line}; Expires=${at.format("%a, %d %b %Y %H:%M:%S GMT")}"
+    }
     if not cookie.domain.is_empty() {
       line = "${line}; Domain=${cookie_safe(cookie.domain)}"
     }
