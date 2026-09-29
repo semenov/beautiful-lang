@@ -24,6 +24,55 @@ pub fn shuffle<T>(items: List<T>) -> List<T> {
   }
   return out
 }
+// A generator that gives the same numbers for the same seed: tests,
+// simulations, reproducible data (not for secrets). SplitMix64.
+//   var r = random.seeded(42)
+//   let dice = r.between(1, 6)
+pub fn seeded(seed: Int) -> Generator {
+  return Generator(state: seed)
+}
+
+pub type Generator {
+  state: Int
+
+  // The next 64 random bits.
+  pub mutating fn next() -> Int {
+    self.state = self.state.wrapping_add(0x9E37_79B9_7F4A_7C15)
+    var z = self.state
+    z = z.bit_xor(z.shift_right(30)).wrapping_mul(0xBF58_476D_1CE4_E5B9)
+    z = z.bit_xor(z.shift_right(27)).wrapping_mul(0x94D0_49BB_1331_11EB)
+    return z.bit_xor(z.shift_right(31))
+  }
+
+  // A whole number from `low` to `high`, both included.
+  pub mutating fn between(low: Int, high: Int) -> Int {
+    let span = high - low + 1
+    if span <= 0 {
+      panic("random: `high` is below `low`")
+    }
+    return low + self.next().shift_right(1) % span
+  }
+
+  // A number from 0.0 (included) to 1.0 (not included).
+  pub mutating fn fraction() -> Float {
+    return self.next().shift_right(11).to_float() / 9007199254740992.0
+  }
+
+  // The items in a random order.
+  pub mutating fn shuffle<T>(items: List<T>) -> List<T> {
+    var out = items
+    var i = out.length - 1
+    while i > 0 {
+      let j = self.between(0, high: i)
+      let tmp = out[i]
+      out[i] = out[j]
+      out[j] = tmp
+      i -= 1
+    }
+    return out
+  }
+}
+
 // Random letters and digits, for ids and secrets.
 pub fn token(length: Int) -> String
 // A random UUID (version 4): "3f0b6c5e-...".

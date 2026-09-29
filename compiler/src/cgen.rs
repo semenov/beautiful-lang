@@ -2948,6 +2948,11 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             }
             "time.__monotonic_nanos" => "lt_monotonic_nanos()".to_string(),
             "time.unix_now" => "lt_unix_now()".to_string(),
+            "time.unix_millis" => "lt_unix_millis()".to_string(),
+            "env.__environ" => "lt_environ()".to_string(),
+            "Int.wrapping_add" => format!("((int64_t)((uint64_t){} + (uint64_t){}))", a[0], a[1]),
+            "Int.wrapping_sub" => format!("((int64_t)((uint64_t){} - (uint64_t){}))", a[0], a[1]),
+            "Int.wrapping_mul" => format!("((int64_t)((uint64_t){} * (uint64_t){}))", a[0], a[1]),
             "files.read" => format!("lt_files_read({}, {})", a[0], a[1]),
             "files.write" => format!("lt_files_write_mode({}, {}, \"wb\")", a[0], a[1]),
             "files.append" => format!("lt_files_write_mode({}, {}, \"ab\")", a[0], a[1]),

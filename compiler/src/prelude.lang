@@ -15,6 +15,11 @@ builtin type Int {
   fn bit_xor(self, other: Int) -> Int
   fn shift_left(self, bits: Int) -> Int
   fn shift_right(self, bits: Int) -> Int
+  // Arithmetic that wraps around at 64 bits instead of stopping the
+  // program: for hashes and random generators.
+  fn wrapping_add(self, other: Int) -> Int
+  fn wrapping_sub(self, other: Int) -> Int
+  fn wrapping_mul(self, other: Int) -> Int
 }
 
 builtin type Float {

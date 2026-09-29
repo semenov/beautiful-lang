@@ -61,8 +61,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] language: hex literals, `\u{...}` escapes, calling a stored
           function `r.handler(x)`, `if a is some(x) or ...` message, named
           function types take plain functions
-    - [ ] stdlib: seeded random, wall-clock ms, relative `url.parse`,
-          JSON field renames/omit-empty, env listing, Duration compare/divide
+    - [x] stdlib: seeded random (`random.seeded`), wall-clock ms
+          (`time.unix_millis`), env listing (`env.all`), Duration
+          `divided_by` / `is_shorter_than`, `Int.wrapping_*`
+    - [ ] stdlib: relative `url.parse`, JSON field renames / omit-empty
     - [x] docs: `http.bytes` example, query/path decoding, middleware order
     - [x] tests over real connections (compiler/tests/wire, curl)
 

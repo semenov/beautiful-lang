@@ -637,6 +637,20 @@ static lt_text *lt_env_get(lt_text *name) {
 
 // ---------------------------------------------------------------- time and log
 
+static int64_t lt_unix_millis(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+extern char **environ;
+// "NAME=value" for every environment variable
+static lt_texts *lt_environ(void) {
+    lt_texts *l = lt_texts_new(32);
+    for (char **e = environ; e && *e; e++) lt_texts_push(&l, lt_text_cstr(*e));
+    return l;
+}
+
 static int64_t lt_unix_now(void) {
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);

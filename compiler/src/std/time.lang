@@ -27,6 +27,15 @@ pub type Duration {
     return self.nanos > other.nanos
   }
 
+  pub fn is_shorter_than(self, other: Duration) -> Bool {
+    return self.nanos < other.nanos
+  }
+
+  // A part of it: `total.divided_by(count)` is the average.
+  pub fn divided_by(self, n: Int) -> Duration {
+    return Duration(nanos: self.nanos.div(n))
+  }
+
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
   pub fn text(self) -> String {
     let n = self.nanos
@@ -388,6 +397,10 @@ pub fn utc_now() -> DateTime {
 
 // Seconds since 1970-01-01 UTC.
 pub fn unix_now() -> Int
+
+// Milliseconds since 1970-01-01 UTC (the wall clock; for measuring how long
+// something takes, `time.now()` is steady).
+pub fn unix_millis() -> Int
 
 // The date and time of a Unix timestamp.
 pub fn from_unix(seconds: Int) -> DateTime {

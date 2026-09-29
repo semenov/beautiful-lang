@@ -252,6 +252,9 @@ env: environment variables.
 ```
 pub fn get(name: String) -> String?
 
+// Every environment variable.
+pub fn all() -> Map<String, String>
+
 // Reads environment variables into a record: the field `database_url` comes
 // from DATABASE_URL. Numbers and true/false are converted; a missing variable
 // is an error unless the field is optional or has a default.
@@ -407,6 +410,9 @@ pub type Duration {
   pub fn minus(self, other: Duration) -> Duration
   pub fn times(self, n: Int) -> Duration
   pub fn is_longer_than(self, other: Duration) -> Bool
+  pub fn is_shorter_than(self, other: Duration) -> Bool
+  // A part of it: `total.divided_by(count)` is the average.
+  pub fn divided_by(self, n: Int) -> Duration
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
   pub fn text(self) -> String
 }
@@ -503,6 +509,10 @@ pub fn utc_now() -> DateTime
 
 // Seconds since 1970-01-01 UTC.
 pub fn unix_now() -> Int
+
+// Milliseconds since 1970-01-01 UTC (the wall clock; for measuring how long
+// something takes, `time.now()` is steady).
+pub fn unix_millis() -> Int
 
 // The date and time of a Unix timestamp.
 pub fn from_unix(seconds: Int) -> DateTime
@@ -1162,6 +1172,24 @@ pub fn fraction() -> Float
 pub fn pick<T>(items: List<T>) -> T?
 // The items in a random order.
 pub fn shuffle<T>(items: List<T>) -> List<T>
+// A generator that gives the same numbers for the same seed: tests,
+// simulations, reproducible data (not for secrets). SplitMix64.
+//   var r = random.seeded(42)
+//   let dice = r.between(1, 6)
+pub fn seeded(seed: Int) -> Generator
+
+pub type Generator {
+  state: Int
+  // The next 64 random bits.
+  pub mutating fn next() -> Int
+  // A whole number from `low` to `high`, both included.
+  pub mutating fn between(low: Int, high: Int) -> Int
+  // A number from 0.0 (included) to 1.0 (not included).
+  pub mutating fn fraction() -> Float
+  // The items in a random order.
+  pub mutating fn shuffle<T>(items: List<T>) -> List<T>
+}
+
 // Random letters and digits, for ids and secrets.
 pub fn token(length: Int) -> String
 // A random UUID (version 4): "3f0b6c5e-...".
@@ -1503,6 +1531,11 @@ builtin type Int {
   fn bit_xor(self, other: Int) -> Int
   fn shift_left(self, bits: Int) -> Int
   fn shift_right(self, bits: Int) -> Int
+  // Arithmetic that wraps around at 64 bits instead of stopping the
+  // program: for hashes and random generators.
+  fn wrapping_add(self, other: Int) -> Int
+  fn wrapping_sub(self, other: Int) -> Int
+  fn wrapping_mul(self, other: Int) -> Int
 }
 
 builtin type Float {
