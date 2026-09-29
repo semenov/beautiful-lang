@@ -566,10 +566,11 @@ wrong thing; Vlad chose (see `research/critique-response.md`):
   look). List parameters (`in (?)` expanding to `?, ?, ?`) and choosing
   between whole literals were considered; optional filters use
   `(?1 = '' or col = ?1)`.
-- **Name every argument after the first**, whenever there are two or more
-  parameters (the 3+ rule for all): one way to call, and calls explain
-  themselves; stdlib parameter names are chosen to read well
-  (`max(a, or: b)`).
+- **Argument names stay as they are** (Vlad, after a second look): named
+  after the first with 3 or more parameters, optional with 2. "Always
+  name" would have put `body:`, `params:`, `handler:` on the most common
+  lines of a backend (`http.text(200, "ok")`, `conn.query(sql, [id])`),
+  where a swap is already a type error.
 - **No nested functions**: functions live at the top level; the error for
   `fn` inside a function shows a typed lambda for small local helpers.
 - **Ranges stay as they are** (only in `for`, counting up by one). Vlad

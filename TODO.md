@@ -23,7 +23,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] private fields: not added (Vlad, after a second look)
   - [ ] `is` through `cause`
   - [x] SQL pieces / list parameters: not now (Vlad, after a second look)
-  - [ ] name every argument after the first (2+ parameters)
+  - [x] argument names: left as they are (Vlad, after a second look)
   - [x] ranges: left as they are (Vlad, after a second look)
   - [ ] fixes: changed-a-copy error, pattern names, flow typing through
         `or`, `with` captured by an escaping lambda, Shared-in-Shared,

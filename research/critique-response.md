@@ -21,7 +21,7 @@ answer: does it keep the language simple and fast?
 | 10 | no private fields | **explain**: asked; fields stay visible (most types are data) |
 | 11 | wrapping an error hides its type | **ask** (`is` looks through `cause`) |
 | 12 | lambdas capture a snapshot silently | **ask** (an error when the captured `var` changes later) |
-| 13 | two ways to call a 2-parameter function | **ask** |
+| 13 | two ways to call a 2-parameter function | **explain**: asked; left as is (naming would add noise where a swap is a type error) |
 | 14 | floored `div` and `%` undocumented | **fix** the docs (floored is right: `(-1) % 7 == 6`) |
 | 15 | `is none or ...` doesn't narrow | **fix**: flow typing through `or`/`and`, as DESIGN.md promises |
 | 16 | sorting keys | **fix**: a new type over an ordered type is ordered (`UserId`); no `to_string` hint in a sort key; the rest later |
