@@ -1,192 +1,262 @@
-# Linen cheat sheet for agents
+# Writing lang: a guide for agents
 
-Linen is a statically typed language with indentation blocks, similar to
-Python/TypeScript/Kotlin/Swift. It compiles to native binaries. This page is
-enough to write correct code. Details are in `README.md` and `STDLIB.md`.
+Everything needed to write correct code on the first try. The standard
+library reference is [`STDLIB.md`](STDLIB.md); the reasons behind the rules
+are in [`DESIGN.md`](DESIGN.md).
 
-## Shape of a program
+## Files and programs
+
+- A file is a module. A program is a file with `fn main()` (or
+  `fn main() throws`). Run it: `lang run app.lang`. Tests: `lang test app.lang`.
+- `import json`, `import store.users` (the file `store/users.lang` from the
+  project root). Use names with the module prefix: `json.decode<T>(text)`,
+  `users.find(id)`. No `from`, no `*`, no relative paths.
+- Without `pub`, a function or type is private to its file.
+- A local variable can't have the name of an imported module (`let path = ...`
+  with `import path` is an error).
+
+## Syntax at a glance
 
 ```
-import files                                 # standard modules need an import too:
-import json                                  # files, web, json, time, env, random
+// comments with //
+let x = 5                      // constant
+var total = 0                  // variable
+total += x
+let name: Text = "Ada"         // types: Int, Float, Bool, Text, Bytes,
+                               // List<T>, Map<K, V>, Set<T>, T?
+let greeting = "Hi ${name}!"   // interpolation is ${...}
+let ok = a > 0 and not done or b // and / or / not, never && || !
 
-type User                                    # record (a value, never shared)
+if x > 3 {
+  ...
+} else if x == 3 {
+  ...
+} else {
+  ...
+}
+
+for item in items { ... }
+for i in 0..<10 { ... }        // 0..<n excludes n, 1..=n includes it
+while running { ... }
+for entry in map { print("${entry.key}: ${entry.value}") }
+for item in list.indexed() { print("${item.index}: ${item.value}") }
+
+let size = if n > 100 { "big" } else { "small" }   // if and match give values
+let label = match shape {
+  Circle(radius) => "circle ${radius}"
+  Rect(width, height) => "rect"
+}
+```
+
+No semicolons. Braces always. `if` conditions have no parentheses.
+
+## Types
+
+```
+type User {                    // a record: a value, copied on assignment
+  id: Int
   name: Text
-  age: Int
-  email: Text? = none                        # optional field with a default
+  email: Text? = none          // optional, with a default
+  active: Bool = true          // default: may be left out when building
+}
+let u = User(id: 1, name: "Ada")   // fields are always named
 
-enum Shape                                   # variants
-  Circle(radius: Float)
-  Rectangle(width: Float, height: Float)
+enum Status {                  // variants, with or without data
+  Draft
+  Published(at: Text)
+}
+let s = Published(at: "today")     // variants of your own enums: bare names
+let v = json.Value.Null            // from another module: module.Enum.Variant
 
-type Rule = fn(Decimal) -> Decimal           # type alias
+type UserId = Int              // a NEW type, not an alias: UserId(5), id.value
 
-resource Cache                               # shared state (a handle)
-  var data: Map<Text, Text> = {}
+type User implements Describable { ... }   // interfaces are explicit
 
-interface Describable                        # satisfied automatically
-  fn describe(self) -> Text                  # self = the value itself, always first
-
-fn describe(user: User) -> Text = "{user.name} ({user.age})"   # now User is Describable
-
-fn area(shape: Shape) -> Float
-  return match shape
-    case Circle(r) => PI * r ^ 2
-    case Rectangle(w, h) => w * h
-
-fn load(path: Text) throws -> User           # throws goes BEFORE ->
-  let text = try files.read(path)            # every call that can fail starts with try
-  return try json.decode<User>(text)
-
-fn first_or<T>(xs: List<T>, fallback: T) -> T = xs.first() ?? fallback
-
-test "areas"
-  expect area(Rectangle(3, 4)) == 12
-
-test "load fails on a missing file"
-  let err = expect throws load("nope.json")
-  expect err.message.contains("nope")
-
-print("hello")                               # top-level code runs as the program
+interface Describable {
+  fn describe(self) -> Text
+}
 ```
 
-## Rules that are easy to get wrong
+- Methods go inside the type: `fn describe(self) -> Text { ... }`. A method
+  that changes the value is `mutating fn add(x: Int) { self.items.append(x) }`
+  and needs a `var`.
+- No classes, inheritance, overloading, operator overloading, tuples or
+  default parameter values. Several results make a record. Many options
+  make an options record with defaults.
+- Generics: `fn first<T>(xs: List<T>) -> T?`. No bounds.
 
-1. **Blocks.** No `:` after `if`/`for`/`fn`, no braces, 2-space indent.
-   Write `else if`, not `elif`.
-2. **Imports.** `files`, `web`, `json`, `time`, `env` and `random` need
-   `import`. The prelude (`print`, `parse_int`, `min`, `max`, `PI`, `Error`)
-   doesn't.
-3. **Arguments.** With 1–2 parameters, call positionally. With 3 or more,
-   name every argument after the first: `move(book, from: shelf, to: box)`.
-   The receiver in `x.f(...)` counts as the first argument:
-   `store.put(key: k, value: v)`. `linen fmt` adds missing names, but write
-   them yourself.
-4. **Method syntax.** `x.f(y)` means `f(x, y)` for any function. `x.name`
-   without parentheses is always a field.
-5. **Ranges.** `1..=n` includes `n`. `0..<n` excludes `n`. A bare `..` doesn't
-   exist. For indices, use `for (i, x) in xs.indexed()`.
-6. **Missing values.** A value that may be missing has type `T?`. The empty
-   value is `none`. Write `return user`, not `return some(user)`. Use
-   `some(x)` only in patterns: `if x is some(v)`. Other tools: `x ?? fallback`,
-   `x?.field`.
-7. **Errors.** `fn f() throws -> T` or `throws MyError`, always **before**
-   `->`. **Every** call to such a function starts with `try`:
-   - `try f()` passes the error up.
-   - `try f() catch 0` gives a fallback value.
-   - `try f() catch continue` / `catch break` / `catch return none` changes
-     control flow.
-   - `try f() catch err => throw MyError(err.message)` translates the error.
-   - `try f() catch err` followed by an indented block, whose last line is the
-     value.
-   - A `try` … `catch err` block handles a whole section.
-   - Raise an error with `throw Error("message")`.
-8. **Contracts are for bugs only.** `require cond` and `ensure cond` (where
-   `result` is the returned value) come first in a function body. A failed
-   contract stops the program, and code can't catch it. Anything a correct
-   caller could cause (bad input, not enough money, a network error) uses
-   `throw`.
-9. **Tests.** `expect cond`. To check a failure, use
-   `let err = expect throws f(x)`. That also catches a failed `require`. Then
-   `expect err.message.contains("…")` or `expect err is NotFound(_)`.
-10. **Immutability.** `let` can't change, `var` can. No shadowing. A record is
-    changed by making a copy: `user.with(age: 37)`. A list is changed in
-    place only through a `var`: `xs.append(x)` or `xs += [x]`.
-11. **Tuples.** `(A, B)` holds two or three values and is only unpacked:
-    `let (a, b) = f()`. There's no `t.0` or `t[0]`.
-12. **Lambdas.** `x => expr` or `(a, b) => expr`. A lambda that receives a
-    tuple unpacks it: `entries().map((k, v) => …)`. For a multi-line lambda,
-    indent the lines. The last line is the result.
-13. **Interfaces vs generics.** Use the interface as a type directly:
-    - `items: List<Describable>` can hold different types:
-      `let items: List<Describable> = [user, point]`.
-    - Several interfaces at once: `from: Storage + Listable, to: Storage`.
-      Here `from` and `to` can have different types.
+## Missing values
 
-    Use `<T: Describable>` **only** when the types must be the same.
-14. **`if` as a value.** Short form: `if c then a else b`. Long form: `if c` /
-    `else` with indented blocks, where the last line of each block is the
-    value.
-15. **Numbers.** `Int / Int` gives a `Float`. Whole-number division is
-    `a.div(b)`. An `Int` widens to `Float`/`Decimal` automatically.
-    `Float` and `Decimal` don't mix. Text uses double quotes only.
-16. **Parallel work.**
-    - Every `let` inside `parallel` runs at the same time.
-    - For a list, use `xs.parallel_map(x => …)`.
-    - Handle an error in one branch locally with `try f() catch none`.
-    - Don't use `return`, `break` or `continue` inside `parallel`.
-17. **No `await`, `async`, `new`, `null`, `this` or classes.**
+```
+let email: Text? = user.email
+let shown = email ?? "(none)"                 // a fallback
+if email is some(e) { send(e) }               // unwrap
+if email is none { return }
+let user = users[id] ?? throw NotFound(id: id)
+```
 
-## Not this → this
+**There is no `?.`**. Unwrap first with `if x is some(v)`, or use `??`.
+`m[key]` gives `V?`; `xs[i]` out of range is a bug (it stops the task).
 
-| Not this | This |
+## Errors
+
+```
+fn load(path: Text) throws -> Config {          // can fail: `throws`
+  let text = try files.read(path)               // every failing call: `try`
+  return try json.decode<Config>(text)
+}
+
+let text = try files.read(path) catch err {     // handle it here
+  if err is NotFound { return none }            // flow typing after `is`
+  throw Failure(message: "can't load ${path}", cause: err)
+}
+```
+
+- `catch` always follows `try`: `try f() catch err { ... }`. Never
+  `f() catch ...`.
+- A `catch` block ends with a value, or with `return`, `throw`, `break` or
+  `continue`.
+- `try` covers the whole expression after it: `try (try f()).text()` is
+  needless; `try f().text()` checks both calls.
+- Your own errors: `type NotFound implements Error { id: Int  fn message(self)
+  -> Text { return "no ${self.id}" } }`, or `Failure(message: "...")` from
+  the prelude.
+- Bugs (`panic("...")`, `assert`, overflow, a bad index) can't be caught.
+
+## Functions
+
+```
+fn price(item: Item, count: Int) -> Float { ... }
+price(item, count: 3)            // with 3+ parameters, name every argument
+                                 // after the first: f(a, b: 1, c: 2)
+xs.map(x => x * 2)               // lambdas: x => expr, or x => { ... }
+xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
+                                 // and the call is `try xs.map(...)`
+```
+
+- **A function never changes its arguments.** Return the new value and
+  assign it: `items = add_item(items, item: x)`.
+- **Results must be used.** A call whose result you don't need is written
+  `let _ = f()`. `list.sort()` changes the list in place; `list.sorted()`
+  returns a new one.
+- No `return` inside a lambda: its last line is its value.
+
+## Numbers
+
+- `Int` is 64-bit and `Float` is 64-bit. There are no implicit conversions:
+  `n.to_float()`, `f.round()`, `f.floor()`, `f.ceil()`.
+- **`/` on two `Int`s is an error.** Write `a.div(b)` (whole numbers) or
+  `a.to_float() / b.to_float()`.
+- Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`.
+- Text to numbers: `try text.to_int()`, `try text.to_float()`.
+
+## Resources: `with`
+
+Files, connections, processes and anything else with a `close()` must be
+opened with `with`. It's closed at the end of the block, even on an error.
+
+```
+with f = try files.create("out.txt") {
+  try f.write_text("hello\n")
+}
+
+with conn = try postgres.connect(url) catch err {     // handle failure to open
+  log.error(err.message())
+  return
+} {
+  ...
+}
+```
+
+- `let f = try files.open(p)` is an error: use `with`.
+- A record with a `close(self)` method is a resource too. Its fields may
+  take other resources: `Client(conn: try net.connect(host, port))`.
+- A function may return a new resource (`fn open_db() throws -> db.Connection`).
+  To set it up first and close it only on failure, return the `with`
+  variable itself:
+
+  ```
+  with c = Client(conn: try net.connect(host, port)) {
+    try login(c)          // an error closes it
+    return c              // success gives it to the caller, open
+  }
+  ```
+
+## Concurrency
+
+```
+let a = spawn fetch(url1)                 // a Task<T>, running in parallel
+let b = spawn fetch(url2)
+let pages = [try a.wait(), try b.wait()]
+let sizes = try urls.parallel_map(limit: 8, transform: u => try fetch(u).length)
+
+let counter = Shared<Int>(0)              // shared state: only through a lock
+with n = counter.lock() {
+  n += 1
+}
+let jobs = Channel<Text>(capacity: 100)   // passing data between tasks
+```
+
+A task can't be returned, stored or captured. A function waits for its tasks
+before it returns. No `async`/`await`: waiting code is written sequentially.
+
+## Data in and out: `decode<T>`
+
+```
+let user = try json.decode<User>(body)          // missing fields: an error
+                                                // naming the field
+let text = json.encode(user)
+let config = try env.decode<Config>()           // CONFIG fields from env
+let opts = try cli.decode<Options>()            // --flags, --help generated
+let rows = try conn.query<User>("select id, name from users where age > ?", [18])
+```
+
+SQL is always written right in the call, with `?` (SQLite) or `$1`
+(Postgres) for values. Building SQL from text is a compile error. Parameters
+are plain values: `[name, 36, true]`.
+
+## HTTP
+
+```
+fn get_note(req: http.Request) throws -> http.Response {
+  let id = try (req.param("id") ?? "").to_int()
+  return http.json(200, try load_note(id))
+}
+
+var router = http.Router()
+router.get("/notes/:id", get_note)
+router.files("/static", dir: "public")
+try http.serve(router, port: 8080)
+
+let res = try http.get("https://example.com")               // client
+let api = try http.send(http.ClientRequest(url: u, method: "POST",
+  headers: {"authorization": "Bearer ${key}"}, body: json.encode(x).bytes()))
+```
+
+Bodies are `Bytes`: `try req.text()`, `try res.text()`. A handler's error
+becomes a 500 and a log line.
+
+## Tests
+
+```
+test "discount never goes below zero" {
+  expect apply(Fixed(50.0), total: 30.0) == 0.0
+}
+```
+
+`expect` prints both sides on failure. Tests go in the same file and can
+see private functions.
+
+## Common compiler errors and their fixes
+
+| error | fix |
 |---|---|
-| `if x > 0:` / `elif` | `if x > 0` / `else if` |
-| `None`, `null`, `nil` | `none` |
-| `const x =`, `let mut x` | `let x =` / `var x =` |
-| `x === y`, `&&`, `\|\|`, `!x` | `x == y`, `and`, `or`, `not x` |
-| `function f() {}`, `def f():` | `fn f()` + an indented block |
-| `fn f() -> T throws` | `fn f() throws -> T` |
-| `parse_int(t) catch 0` (without `try`) | `try parse_int(t) catch 0` |
-| `f()?` (Rust), `f()!` | `try f()` |
-| `await fetch(url)` | `try web.get(url)` |
-| `new Date()` | `time.now()` |
-| `{ it.age }` | `u => u.age` |
-| `some(x)` as a value | `x` |
-| `t.0`, `pair[1]` | `let (a, b) = t` |
-| `for i in 0..n` | `for i in 0..<n` |
-| `len(xs)`, `xs.size()` | `xs.length` |
-| `push`, `add` on a list | `append` (only on a `var`) |
-| `skip` | `drop` |
-| `str(x)`, `toString()` | `x.to_text()` or `"{x}"` |
-| `int(x)`, `Int(x)` | `try parse_int(x)` |
-| `reduce` | `fold(start:, step:)` |
-| `includes` | `contains` |
-| `'single quotes'` | `"double quotes"` |
-| `fn f<T: A>(a: T, b: T)` for different types | `fn f(a: A, b: A)` |
-
-## The most useful standard library functions
-
-**Text:** `length` (a field), `is_empty()`, `lower()`, `upper()`, `trim()`,
-`split(sep)`, `split_words()`, `lines()`, `contains()`, `starts_with()`,
-`replace(old:, new:)`, `slice(from:, to:)`, `pad_start(width:, fill:)`,
-`bytes()`.
-
-**List:**
-- Reading: `length` (a field), `is_empty()`, `first()`, `last()`, `get(i)`,
-  `[i]`, `contains()`, `find()`, `any()`, `all()`, `count()`.
-- Transforming: `map`, `filter`, `parallel_map`, `sort()`, `sort_by(key)`
-  (ascending; add `.reverse()` for descending), `take(n)`, `drop(n)`,
-  `indexed()`, `zip()`.
-- Summarizing: `sum()`, `min()`, `max()`, `max_by()`, `average()`,
-  `fold(start:, step:)`, `group_by(key) -> Map<K, List<T>>`,
-  `count_each() -> Map<T, Int>`, `join(sep)`.
-- Changing a `var` in place: `append`, `insert(item:, at:)`, `remove_at`,
-  `pop`, `clear`.
-
-**Map:** `m[key] -> V?`, `contains_key()`, `keys()`, `values()`,
-`entries() -> List<(K, V)>`, `for (k, v) in m`, `m[key] = v` (on a `var` or
-a resource field), `remove(key)`.
-
-**Optional values:** `??`, `?.`, `is some(v)`, `is none`,
-`try x.or_throw("message")`.
-
-**Modules:**
-- `files`: `read`, `write`, `read_bytes`, `write_bytes`, `exists`, `list`,
-  `delete`.
-- `web`: `get(url)`, `post(url, body)`.
-- `json`: `decode<T>(text)`, `encode(v)`.
-- `time`: `now()`, `today()`, `t.format("yyyy-MM-dd")`.
-- `env`: `get(name)`.
-
-**Interop:**
-- **C:** an `extern c "lib"` block declares functions whose names match the C
-  names **exactly**. `opaque T closed by f` declares a C pointer, and `out`
-  marks an output parameter. C calls don't throw. Wrap them in a small module
-  with an ordinary Linen API.
-- **JavaScript (only with `--target js`):**
-  - `import js "pkg"` makes the package available under its name, with `-`
-    replaced by `_`.
-  - `extern js "pkg"` declares functions under their exact JavaScript names.
-  - Foreign calls need `try`, and `any` arrives as `Dynamic`, which you turn
-    into a type with `try decode<T>(raw)`.
+| `a \`Stream\` must be closed: get it with \`with\`` | `with f = try ... { }` |
+| `/` on two `Int`s is not allowed | `a.div(b)` or `a.to_float() / b.to_float()` |
+| there is no `?.` | `if x is some(v) { v.field }` or `??` |
+| `catch` needs `try` before the call | `try f(x) catch err { ... }` |
+| this call can fail | put `try` in front |
+| the result is not used | `let _ = f()` |
+| `f` has 3 or more parameters: name every argument after the first | `f(a, b: 1, c: 2)` |
+| the SQL must be written right here | put values in the parameter list |
+| expected `Text`, found `Int` | `"${n}"` or `n.to_text()` |

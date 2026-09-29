@@ -1,7 +1,7 @@
 # Design from scratch
 
-A clean-slate redesign, started 2026-09-29. Linen (`README.md`, `AGENTS.md`)
-is the previous attempt. None of its features carry over by default: each one
+A clean-slate redesign, started 2026-09-29. Linen (`drafts/linen/`) is the
+previous attempt. None of its features carry over by default: each one
 has to be justified again.
 
 ## Goal
@@ -58,15 +58,25 @@ contain another `Shared` in its value (a compile error).
 ### Resources: `with`, enforced by the compiler
 
 ```
-with conn = try db.connect(url)
-  let users = try conn.query("select …")
-# conn is closed here, even if an error was thrown
+with conn = try db.open(path) {
+  let users = try conn.query<User>("select …", [])
+}
+// conn is closed here, even if an error was thrown
 ```
 
 A type that needs closing (files, connections, sockets) can only be received
-through `with`. `let conn = db.connect(...)` is a compile error with the
+through `with`. `let conn = db.open(...)` is a compile error with the
 suggestion "use `with`". A long-lived resource (a pool for the whole server)
 goes in a `with` around all of `main`.
+
+- **Your own resources:** a record with a `close(self)` method is a resource
+  like a file (the Redis and Postgres clients are such records). Building
+  one may take other resources into its fields; it owns them.
+- **Handing a resource over:** a function may return a new resource, and
+  its caller then needs `with`. To set one up and close it only if the
+  setup fails, return the `with` variable itself: `with c = Client(...) {
+  try login(c); return c }`. An error closes it; the `return` moves it out
+  open. No new keyword, and the reader sees both paths.
 
 ### Data: mutable values (Swift-style)
 
@@ -124,7 +134,7 @@ Changing a value in place is done by a `mutating` method on your own type:
 - **`type UserId = Int` creates a distinct type**, not an alias. Mixing up
   `UserId` and `OrderId` is a compile error. There are no plain aliases.
 - **Missing values:** `T?`, `none`, `??`, `if x is some(v)`, `match`. No
-  `?.`.
+  `?.` (under review: agents keep writing it, see `TODO.md`).
 - **Removed:** inheritance, overloading, operator overloading, tuples
   (multiple results are a record; iterating a `Map` gives `entry.key` /
   `entry.value`), default parameter values (record fields keep their
@@ -212,6 +222,10 @@ used result is always a mutation or an action. The rule also catches the
   [dependencies]
   router = { git = "https://github.com/someone/router", version = "v1.2.0" }
   ```
+
+  A package may also be a directory inside a repository (`path =
+  "packages/redis"`), so one repository holds several, or a directory on
+  this disk (`path` without `git`) while developing it.
 
   `lang add <name> <git-url> --version <tag>` adds one; `lang.lock` pins the
   exact commit of every package (including the packages' own
@@ -357,7 +371,15 @@ used result is always a mutation or an action. The rule also catches the
   is a decode option (`keys: CamelCase`). Anything unusual is decoded by hand
   through `json.Value`.
 - **SQL:** the query text must be a string literal, and parameters are passed
-  separately. Concatenation or interpolation is a compile error.
+  separately. Concatenation or interpolation is a compile error. The rule
+  lives in the `sql` module (`sql.Query` accepts only a literal; `sql.Value`
+  takes plain values), so database packages get it too, not only the
+  built-in SQLite `db`.
+- **Streams:** everything read or written piece by piece is one type,
+  `io.Stream`: files, sockets, standard input/output, gzip files, HTTP
+  bodies. Same methods everywhere (`read`, `read_line`, `read_all`,
+  `write`, `write_text`), so there's nothing to learn per source. There is
+  no stream framework (pipes, transforms): `io.copy` and a loop cover it.
 - **Designed for "results must be used":** `conn.execute(sql, params)`
   returns nothing (`execute_counting` returns the row count), `map.remove(k)`
   returns nothing (`map.take(k) -> V?` removes and returns). A result is
@@ -379,14 +401,22 @@ used result is always a mutation or an action. The rule also catches the
   arguments, not a shell string.
 - **Time:** `Instant` and `Date` are different types. Time zones are always
   explicit.
-- **Modules:** `json`, `cli`, `env`, `files`, `process`, `http` (client and
-  server), `db` (Postgres, SQLite), `time`, `log` (structured), `text`,
-  `crypto`.
+- **Modules:** `files`, `path`, `io`, `process`, `env`, `cli`, `log`,
+  `time`, `json`, `http` (client and server), `net` (TCP, UDP, TLS), `sql`,
+  `db` (SQLite), `crypto`, `encoding`, `random`, `regex`, `csv`, `xml`,
+  `url`, `zlib`, `math` (reference: `STDLIB.md`).
+- **What goes in the standard library:** what most CLI tools and services
+  need, and protocols that have one obvious API (HTTP, JSON, TLS, gzip).
+  Clients for particular servers (Postgres, Redis, LLM APIs) are packages:
+  each has many ways to be used, changes with its server, and is written
+  in the language on top of `net`, `crypto` and `sql`. SQLite is the
+  exception, being a file format rather than a server.
+- **Static programs:** `lang build --static` (Linux) links everything into
+  one file that runs anywhere, like Go. On macOS the system libraries are
+  always present, so it isn't needed.
 - **HTTP server:** a handler is `fn(Request) throws -> Response`. An error or
   a bug becomes a 500. Handlers can be tested without a network.
-- **Third-party packages** are postponed. When they come, they work like Go's:
-  versions in a single file plus a lock file, no central registry at the
-  start.
+- **Third-party packages** work like Go's (see Modules and packages).
 
 ### Syntax: C family
 
@@ -436,9 +466,9 @@ cgen (C) → clang`.
   operators. The prelude marks higher-order functions `rethrows`, so
   `xs.map(x => try f(x))` throws only when the lambda can.
 
-**Not implemented yet:** `with`, modules and `import`, `decode<T>`,
-`Decimal`, concurrency (`spawn`, `Shared`, `Channel`), the standard library
-modules (files, http, db, …), converting between interface combinations.
+**Not implemented yet:** `Decimal`, `lang fmt`, `lang doc`, `time.timeout`,
+decode key naming, converting between interface combinations (see
+`TODO.md`).
 
 ## Open questions
 

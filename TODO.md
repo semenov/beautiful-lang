@@ -19,7 +19,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       embeddings; look at popular npm packages (openai, ai-sdk) for the API
 - [x] **zlib on streams** (`zlib.open_gzip` / `create_gzip`): gzip/gunzip a `Stream` piece by piece (big files,
       `content-encoding: gzip` responses)
-- [ ] **Docs**: README for the new language, AGENTS.md (cheat sheet for
+- [x] **Docs**: README for the new language, AGENTS.md (cheat sheet for
       agents), STDLIB.md (reference), DESIGN.md (stdlib decisions: why
       Postgres/Redis are packages, streams, static builds)
 
@@ -32,6 +32,21 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [ ] **Top npm packages by downloads**: go through them, decide what
       belongs in the stdlib, what should be a package, what we don't need
+
+- [ ] **The `lang` CLI teaches the language**: tell an agent that knows
+      nothing about it "run `lang help`", and it can learn the syntax and
+      look up any stdlib module or function from the command line
+      (`lang guide`, `lang doc http`, `lang doc http.Router`), built from the
+      sources so it's never out of date
+- [ ] **Designed but never built** (DESIGN.md promises them):
+  - [ ] `lang fmt`: the formatter the design calls mandatory
+  - [ ] `Decimal` for money
+  - [ ] `time.timeout(duration, work)`
+  - [ ] `lang doc`
+  - [ ] a `Date` type (calendar dates apart from instants)
+  - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
+  - [ ] test doubles: a fixed clock, calling handlers without a network (done
+        for http), temporary directories (done)
 
 ## Then: my own review of what's missing or weak
 
