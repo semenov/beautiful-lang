@@ -14,7 +14,7 @@ answer: does it keep the language simple and fast?
 | 3 | string indexing quadratic for non-ASCII | **fix**: a string remembers its last (character, byte) position, so walking it is linear |
 | 4 | copy-on-write makes some loops quadratic | **explain** the rule (a change to a value someone else still holds copies it) + the idioms that avoid it; a compiler note later |
 | 5 | `Shared` is one mutex | **fix**: `with v = s.read() { }` for readers (a readers-writer lock) |
-| 6 | generics without bounds | **ask** |
+| 6 | generics without bounds | **explain**: asked; they stay without bounds (pass a function) |
 | 7 | SQL only as one literal | **ask** |
 | 8 | an optional prints as `none` in text | **ask** (make it an error) |
 | 9 | `counts[w] += 1` compiles, then panics | **ask** (make it an error) |

@@ -19,7 +19,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       "After the critic's review"):
   - [ ] new errors: optional in text; `m[k] op=`; lambda + later-assigned
         var; unused let/import
-  - [ ] generic bounds (`<T: Ordered>`, interface bounds)
+  - [x] generic bounds: not added (Vlad, after a second look)
   - [ ] fields private unless `pub`
   - [ ] `is` through `cause`
   - [ ] SQL from literal pieces; list parameters

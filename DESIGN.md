@@ -551,10 +551,10 @@ wrong thing; Vlad chose (see `research/critique-response.md`):
   (write `m[k] = (m[k] ?? 0) + v`); a lambda using a `var` that is
   assigned after the lambda is made (it would see the old value); an
   unused `let` or import (as in Go: they hide forgotten results).
-- **Generic bounds:** `fn largest<T: Ordered>(xs: List<T>)` and an
-  interface as a bound (`fn total<T: Shape>(xs: List<T>)`), monomorphized.
-  The prelude's `max`, `sum`, `sorted` use them too: no powers users
-  don't have.
+- **Generics stay without bounds** (Vlad, after a second look). Generic
+  code is mostly library code; a helper that needs ordering or a method
+  takes a function (`largest(xs, key: x => x.score)`) or an interface-typed
+  list. `max`, `sum`, `sorted` keep their built-in knowledge of numbers.
 - **Fields are private unless `pub`**, like functions: a field without
   `pub` is visible only in its file, so a type can guard its values
   (`email.parse` is the only way to make an `Email`).
