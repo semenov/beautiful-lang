@@ -153,6 +153,8 @@ This repository has several, all written in the language itself:
 - [`packages/redis`](packages/redis): commands, pipelines, pub/sub;
 - [`packages/yaml`](packages/yaml): YAML configs into records (checked
   against PyYAML), and writing YAML;
+- [`packages/s3`](packages/s3): Amazon S3 and compatible storage (R2,
+  MinIO, ...), SigV4 signing, presigned links;
 - [`packages/smtp`](packages/smtp): sending email (STARTTLS, attachments);
 - [`packages/semver`](packages/semver): versions and npm-style ranges;
 - [`packages/jwt`](packages/jwt): JSON Web Tokens (HS256, RS256, ES256,

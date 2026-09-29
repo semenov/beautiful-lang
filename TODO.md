@@ -86,7 +86,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] jwt package
 - [x] semver, smtp packages
 - [x] yaml package
-- [ ] packages: s3, mysql
+- [x] s3 package
+- [ ] packages: mysql
 
 ## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)
 

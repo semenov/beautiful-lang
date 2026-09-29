@@ -1,0 +1,190 @@
+// s3: Amazon S3 and compatible object storage (Cloudflare R2, MinIO,
+// Backblaze B2, DigitalOcean Spaces...), written in the language itself.
+//
+//   let store = s3.aws("eu-central-1", access_key: id, secret_key: secret)
+//   try store.put("my-bucket", key: "reports/2026.pdf", data: pdf, content_type: "application/pdf")
+//   let data = try store.get("my-bucket", key: "reports/2026.pdf") ?? Bytes()
+//   let url = store.presign_get("my-bucket", key: "reports/2026.pdf", expires: time.hours(1))
+//
+// Requests are signed with AWS Signature Version 4.
+//
+// Install: lang add s3 https://github.com/semenov/beautiful-lang --path packages/s3
+
+import crypto
+import http
+import time
+import xml
+
+pub type Client {
+  // "https://s3.eu-central-1.amazonaws.com", "https://<account>.r2.cloudflarestorage.com",
+  // "http://localhost:9000" (MinIO)
+  endpoint: String
+  region: String = "us-east-1"
+  access_key: String
+  secret_key: String
+
+  pub fn put(self, bucket: String, key: String, data: Bytes, content_type: String) throws {
+    let res = try self.call("PUT", path: "/${bucket}/${escape_path(key)}", query: {}, body: data, headers: {"content-type": content_type})
+    try check(res, what: "put ${bucket}/${key}")
+  }
+
+  // The object's data; none if there's no such key.
+  pub fn get(self, bucket: String, key: String) throws -> Bytes? {
+    let res = try self.call("GET", path: "/${bucket}/${escape_path(key)}", query: {}, body: Bytes(), headers: {})
+    if res.status == 404 {
+      return none
+    }
+    try check(res, what: "get ${bucket}/${key}")
+    return res.body
+  }
+
+  // Deleting a key that isn't there is fine.
+  pub fn delete(self, bucket: String, key: String) throws {
+    let res = try self.call("DELETE", path: "/${bucket}/${escape_path(key)}", query: {}, body: Bytes(), headers: {})
+    try check(res, what: "delete ${bucket}/${key}")
+  }
+
+  // The keys starting with `prefix` ("" for all), all of them (page by page).
+  pub fn list(self, bucket: String, prefix: String) throws -> List<Object> {
+    var out: List<Object> = []
+    var token = ""
+    while true {
+      var query: Map<String, String> = {"list-type": "2", "prefix": prefix}
+      if not token.is_empty() {
+        query["continuation-token"] = token
+      }
+      let res = try self.call("GET", path: "/${bucket}", query: query, body: Bytes(), headers: {})
+      try check(res, what: "list ${bucket}")
+      let doc = try xml.parse(try res.text())
+      for c in doc.elements_named("Contents") {
+        out.append(Object(key: c.child_text("Key") ?? "", size: try (c.child_text("Size") ?? "0").to_int(), modified: c.child_text("LastModified") ?? "", etag: (c.child_text("ETag") ?? "").replace("\"", "")))
+      }
+      if (doc.child_text("IsTruncated") ?? "false") != "true" {
+        break
+      }
+      token = doc.child_text("NextContinuationToken") ?? ""
+      if token.is_empty() {
+        break
+      }
+    }
+    return out
+  }
+
+  pub fn create_bucket(self, bucket: String) throws {
+    let body = if self.region == "us-east-1" { "" } else { "<CreateBucketConfiguration><LocationConstraint>${self.region}</LocationConstraint></CreateBucketConfiguration>" }
+    let res = try self.call("PUT", path: "/${bucket}", query: {}, body: body.bytes(), headers: {})
+    if res.status == 409 {
+      // it exists already (and is ours)
+      return
+    }
+    try check(res, what: "create bucket ${bucket}")
+  }
+
+  // A URL anyone can GET the object with until it expires (at most 7 days).
+  pub fn presign_get(self, bucket: String, key: String, expires: time.Duration) -> String {
+    let now = time.utc_now()
+    let stamp = now.format("%Y%m%dT%H%M%SZ")
+    let day = now.format("%Y%m%d")
+    let scope = "${day}/${self.region}/s3/aws4_request"
+    let host = host_of(self.endpoint)
+    let path = "/${bucket}/${escape_path(key)}"
+    let query: Map<String, String> = {
+      "X-Amz-Algorithm": "AWS4-HMAC-SHA256",
+      "X-Amz-Credential": "${self.access_key}/${scope}",
+      "X-Amz-Date": stamp,
+      "X-Amz-Expires": "${max(1, min(expires.millis().div(1000), 604800))}",
+      "X-Amz-SignedHeaders": "host",
+    }
+    let canonical = "GET\n${path}\n${canonical_query(query)}\nhost:${host}\n\nhost\nUNSIGNED-PAYLOAD"
+    let signature = self.signature(canonical, stamp: stamp, scope: scope)
+    return "${self.endpoint}${path}?${canonical_query(query)}&X-Amz-Signature=${signature}"
+  }
+
+  fn call(self, method: String, path: String, query: Map<String, String>, body: Bytes, headers: Map<String, String>) throws -> http.Response {
+    let now = time.utc_now()
+    let stamp = now.format("%Y%m%dT%H%M%SZ")
+    let day = now.format("%Y%m%d")
+    let scope = "${day}/${self.region}/s3/aws4_request"
+    let payload = crypto.sha256(body).hex()
+    var all = headers
+    all["host"] = host_of(self.endpoint)
+    all["x-amz-date"] = stamp
+    all["x-amz-content-sha256"] = payload
+    let names = all.keys().map(k => k.lower()).sorted()
+    var lower: Map<String, String> = {}
+    for entry in all.entries() {
+      lower[entry.key.lower()] = entry.value.trim()
+    }
+    let canonical_headers = names.map(n => "${n}:${lower[n] ?? ""}\n").join("")
+    let signed = names.join(";")
+    let canonical = "${method}\n${path}\n${canonical_query(query)}\n${canonical_headers}\n${signed}\n${payload}"
+    let signature = self.signature(canonical, stamp: stamp, scope: scope)
+    var send_headers = lower
+    send_headers.remove("host")
+    send_headers["authorization"] = "AWS4-HMAC-SHA256 Credential=${self.access_key}/${scope}, SignedHeaders=${signed}, Signature=${signature}"
+    let qs = canonical_query(query)
+    let url = "${self.endpoint}${path}${if qs.is_empty() { "" } else { "?${qs}" }}"
+    return try http.send(http.ClientRequest(url: url, method: method, headers: send_headers, body: body, follow_redirects: false))
+  }
+
+  fn signature(self, canonical: String, stamp: String, scope: String) -> String {
+    let to_sign = "AWS4-HMAC-SHA256\n${stamp}\n${scope}\n${crypto.sha256(canonical.bytes()).hex()}"
+    let parts = scope.split("/")
+    var key = crypto.hmac_sha256("AWS4${self.secret_key}".bytes(), data: parts[0].bytes())
+    key = crypto.hmac_sha256(key, data: parts[1].bytes())
+    key = crypto.hmac_sha256(key, data: "s3".bytes())
+    key = crypto.hmac_sha256(key, data: "aws4_request".bytes())
+    return crypto.hmac_sha256(key, data: to_sign.bytes()).hex()
+  }
+}
+
+pub type Object {
+  key: String
+  size: Int
+  // "2026-09-29T12:00:00.000Z"
+  modified: String
+  etag: String
+}
+
+// Amazon S3 in a region.
+pub fn aws(region: String, access_key: String, secret_key: String) -> Client {
+  return Client(endpoint: "https://s3.${region}.amazonaws.com", region: region, access_key: access_key, secret_key: secret_key)
+}
+
+fn check(res: http.Response, what: String) throws {
+  if res.status >= 300 {
+    var detail = ""
+    let doc = try xml.parse(try res.text()) catch err {
+      throw Failure(message: "s3: ${what}: HTTP ${res.status}")
+    }
+    detail = "${doc.child_text("Code") ?? ""}: ${doc.child_text("Message") ?? ""}"
+    throw Failure(message: "s3: ${what}: HTTP ${res.status} ${detail}")
+  }
+}
+
+fn host_of(endpoint: String) -> String {
+  let rest = endpoint.split("://").last() ?? endpoint
+  return rest.split("/")[0]
+}
+
+// AWS's URI encoding: everything except A-Z a-z 0-9 - _ . ~
+fn uri_escape(text: String, keep_slash: Bool) -> String {
+  var out: List<String> = []
+  for b in text.bytes().to_list() {
+    let c = Bytes([b])
+    let ch = try c.text() catch err {
+      ""
+    }
+    let safe = (b >= 65 and b <= 90) or (b >= 97 and b <= 122) or (b >= 48 and b <= 57) or ch == "-" or ch == "_" or ch == "." or ch == "~" or (keep_slash and ch == "/")
+    out.append(if safe { ch } else { "%${c.hex().upper()}" })
+  }
+  return out.join("")
+}
+
+fn escape_path(key: String) -> String {
+  return uri_escape(key, keep_slash: true)
+}
+
+fn canonical_query(query: Map<String, String>) -> String {
+  return query.keys().sorted().map(k => "${uri_escape(k, keep_slash: false)}=${uri_escape(query[k] ?? "", keep_slash: false)}").join("&")
+}
