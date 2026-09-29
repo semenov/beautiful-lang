@@ -24,6 +24,32 @@ short version: what's in flight, what waits for Vlad, and what to do next.
   (see `git log`).
 - `plumb fmt` must pass: the test suite checks it.
 
+## Latest (2026-09-29, night)
+
+Done and pushed: db.Connection is a pool (transactions are the task's own;
+RealWorld #1, #2); most specific route wins (#3); `T?` SQL parameters (#6);
+`http.json_with` (#9); DateTime milliseconds (#10); fmt reports files that
+don't parse (#20); `??` block hint (#14); `plumb add --path` message (#19);
+`plumb init` replaces `plumb new`; a build cache (unchanged program: 12 ms);
+workers and the db pool follow the container's CPU limit (PLUMB_WORKERS);
+benchmarks/backend/docker.sh (one CPU: Plumb ~= tuned Go, half the memory).
+
+Next:
+- **Compile time** (Vlad asked): `plumb build` of the backend is 1.03 s vs
+  Go's 127 ms (warm). The C compiler is ~all of it. Measured: a runtime
+  compiled once per configuration and cached would cut the program's C to
+  ~510 ms at -O1; the rest is generated code (much of it stdlib Plumb code
+  like Router.route), which could be split into TUs compiled in parallel.
+  Plan: runtime functions non-static behind a macro, runtime TU cached by
+  hash + flags, generated code in N TUs.
+- RealWorld gaps left that need Vlad: #4 missing vs null in decode, #7 SQL
+  shared between queries, #11 omit one field, #13 per-request values from
+  middleware, #15 `expect` in helpers. Without a decision: #5 PBKDF2 speed,
+  #8 typed db errors, #12 mutex, #16 route groups, #17 trim_matches /
+  transliteration, #18 jwt errors, the docs items.
+- A panic inside `transaction` leaves its handle pinned (the task is gone):
+  release pins when a task ends.
+
 ## Next, in this order
 
 State at the end of 2026-09-29 (all pushed unless noted):
