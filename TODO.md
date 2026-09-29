@@ -23,6 +23,17 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         parser's containers grew by copying inside the arena, and big buffers
         freed to macOS malloc stay resident; now a scratch stack and the
         runtime's allocator for big buffers)
+  - [x] benchmarks against Go (benchmarks/, `ONLY=Go,Lang python3 run.py`):
+        maps, csv, nbody, lines, channels, spawn added. Fixed from them:
+        nbody 4x slower (copy-on-write check at every list store: now a
+        dataflow pass knows which lists are unique), spawn 5x slower and
+        69 MB (one global run queue behind a mutex: now per-worker queues
+        with stealing; waited tasks stayed in their function's scope list
+        until it returned)
+  - [ ] channels: 4.8x slower than Go (0.63 s vs 0.13 s)
+  - [ ] spawn: 2.8x slower than Go (0.17 s vs 0.06 s)
+  - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), json 332 vs
+        247 MB (80-byte lt_dyn nodes), maps 59 vs 43 MB
   - [ ] other runtime buffers that grow with realloc and are freed to malloc
         (lt_grow for HTTP bodies, readers): same treatment where big
   - [ ] lt_dyn is 80 bytes per JSON node: a union would halve it

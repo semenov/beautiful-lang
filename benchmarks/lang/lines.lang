@@ -1,0 +1,23 @@
+import env
+import files
+
+fn main() throws {
+  let path = "${env.get("TMPDIR") ?? "/tmp"}/bench-lines.txt"
+  var total = 0
+  for round in 0..<3 {
+    with f = try files.create(path) {
+      for i in 0..<2_000_000 {
+        try f.write_text("line ${i} of the file, with some text after it\n")
+      }
+    }
+    var n = 0
+    with r = try files.open(path) {
+      while try r.read_line() is some(line) {
+        n += line.byte_length()
+      }
+    }
+    total += n
+  }
+  try files.delete(path)
+  print("${total}")
+}

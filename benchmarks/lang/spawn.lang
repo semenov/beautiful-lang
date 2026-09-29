@@ -1,0 +1,21 @@
+fn work(i: Int) -> Int {
+  var s = 0
+  for k in 0..<100 {
+    s += (i * k) % 7
+  }
+  return s
+}
+
+fn main() throws {
+  var total = 0
+  for round in 0..<200 {
+    var tasks: List<Task<Int>> = []
+    for i in 0..<1000 {
+      tasks.append(spawn work(i + round))
+    }
+    for t in tasks {
+      total += try t.wait()
+    }
+  }
+  print("${total}")
+}

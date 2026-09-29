@@ -1,0 +1,39 @@
+type Rng {
+  state: Int
+
+  mutating fn next() -> Int {
+    var x = self.state
+    x = x.bit_xor(x.shift_left(13).bit_and(4294967295))
+    x = x.bit_xor(x.shift_right(17))
+    x = x.bit_xor(x.shift_left(5).bit_and(4294967295))
+    self.state = x
+    return x
+  }
+}
+
+fn main() throws {
+  var rng = Rng(state: 2463534242)
+  var total = 0
+  var out_len = 0
+  for round in 0..<3 {
+    var lines: List<String> = []
+    for i in 0..<1_000_000 {
+      let user = rng.next() % 10000
+      let whole = rng.next() % 1000
+      let frac = (rng.next() % 100).to_string().pad_start(2, fill: "0")
+      lines.append("${i},user${user},${whole}.${frac}\n")
+    }
+    let text = lines.join("")
+    var out: List<String> = []
+    for line in text.trim().split("\n") {
+      let f = line.split(",")
+      let id = try f[0].to_int()
+      let parts = f[2].split(".")
+      let amount = (try parts[0].to_int()) * 100 + (try parts[1].to_int())
+      total += amount + id % 3
+      out.append("${f[1].upper()}=${amount}")
+    }
+    out_len += out.join(";").byte_length()
+  }
+  print("${total} ${out_len}")
+}

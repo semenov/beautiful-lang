@@ -15,25 +15,27 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(ROOT, "bin")
-BENCHES = ["records", "trees", "sort", "words", "json"]
-RUNTIMES = ["Node", "Deno", "Bun", "Go", "Rust", "C", "Lang"]
+BENCHES = ["records", "trees", "sort", "words", "json", "maps", "csv", "nbody", "lines", "channels", "spawn"]
+# ONLY=Go,Lang python3 run.py   to compare just those
+RUNTIMES = [r for r in ["Node", "Deno", "Bun", "Go", "Rust", "C", "Lang"] if not os.environ.get("ONLY") or r in os.environ["ONLY"].split(",")]
 RUNS = int(os.environ.get("RUNS", "3"))
 BUN = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
 
 
-def build():
+def build(selected):
     os.makedirs(BIN, exist_ok=True)
-    for bench in BENCHES:
+    for bench in selected:
         source = os.path.join(ROOT, "c", f"{bench}.c")
         if os.path.exists(source):
             subprocess.run(["clang", "-O2", "-o", os.path.join(BIN, f"c_{bench}"), source], check=True)
         subprocess.run(["go", "build", "-o", os.path.join(BIN, f"go_{bench}"), f"./{bench}"],
                        cwd=os.path.join(ROOT, "go"), check=True)
-    subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=os.path.join(ROOT, "rust"), check=True)
+    if "Rust" in RUNTIMES:
+        subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=os.path.join(ROOT, "rust"), check=True)
     compiler = os.path.join(ROOT, "..", "compiler")
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=compiler, check=True)
     lang = os.path.join(compiler, "target", "release", "lang")
-    for bench in BENCHES:
+    for bench in selected:
         source = os.path.join(ROOT, "lang", f"{bench}.lang")
         if os.path.exists(source):
             subprocess.run([lang, "build", source, "-o", os.path.join(BIN, f"lang_{bench}")], check=True)
@@ -41,13 +43,13 @@ def build():
 
 def commands(bench):
     script = os.path.join(ROOT, "js", f"{bench}.js")
-    found = {
-        "Node": ["node", script],
-        "Deno": ["deno", "run", "-q", script],
-        "Bun": [BUN, script],
-        "Go": [os.path.join(BIN, f"go_{bench}")],
-        "Rust": [os.path.join(ROOT, "rust", "target", "release", bench)],
-    }
+    found = {}
+    if os.path.exists(script):
+        found.update({"Node": ["node", script], "Deno": ["deno", "run", "-q", script], "Bun": [BUN, script]})
+    found["Go"] = [os.path.join(BIN, f"go_{bench}")]
+    rust = os.path.join(ROOT, "rust", "target", "release", bench)
+    if os.path.exists(rust):
+        found["Rust"] = [rust]
     lang = os.path.join(BIN, f"lang_{bench}")
     if os.path.exists(os.path.join(ROOT, "lang", f"{bench}.lang")):
         found["Lang"] = [lang]
@@ -68,11 +70,13 @@ def measure(command):
 
 def main():
     selected = sys.argv[1:] or BENCHES
-    build()
+    build(selected)
     results = {}
     for bench in selected:
         reference = None
         for runtime, command in commands(bench).items():
+            if runtime not in RUNTIMES:
+                continue
             times, peaks = [], []
             for _ in range(RUNS):
                 seconds, peak, output = measure(command)

@@ -984,7 +984,7 @@ static void {l}_msort({ec} *a, int64_t n, {ec} *tmp) {{
   while (i < h && j < n) {{ if ({l}_cmp(a[j], tmp[i]) < 0) a[k++] = a[j++]; else a[k++] = tmp[i++]; }}
   while (i < h) a[k++] = tmp[i++];
 }}
-static void {l}_sort({l} *p) {{ {l}_unique(p); {l} l = *p; if (l->len < 2) return; {ec} *tmp = ({ec} *)malloc(sizeof({ec}) * (size_t)(l->len / 2 + 1)); {l}_msort(l->items, l->len, tmp); free(tmp); }}
+static void {l}_sort({l} *p) {{ {l}_unique(p); {l} l = *p; if (l->len < 2) return; size_t tn_ = sizeof({ec}) * (size_t)(l->len / 2 + 1); {ec} *tmp = ({ec} *)lt_alloc(tn_); {l}_msort(l->items, l->len, tmp); lt_free(tmp, tn_); }}
 "#,
             l = l,
             ec = ec,
@@ -1128,7 +1128,7 @@ static void {m}_clear({m} *p) {{ drop_{id}(*p); *p = {m}_new(4); }}
         let name = format!("{}_sort_by_{}{}", l, key, if throws { "t" } else { "" });
         let pair = format!("{}_kp{}", l, key);
         let call = if throws {
-            format!("{kc} kv; lt_err err = ((lt_err (*)(lt_env *, {ec}, {kc} *))f.fn)(f.env, x, &kv); if (err.obj) {{ for (int64_t i = 0; i < k; i++) {{ {drop_k} }} free(a); return err; }} a[k].k = kv;", kc = kc, ec = ec, drop_k = drop_k)
+            format!("{kc} kv; lt_err err = ((lt_err (*)(lt_env *, {ec}, {kc} *))f.fn)(f.env, x, &kv); if (err.obj) {{ for (int64_t i = 0; i < k; i++) {{ {drop_k} }} lt_free(a, an_); return err; }} a[k].k = kv;", kc = kc, ec = ec, drop_k = drop_k)
         } else {
             format!("a[k].k = (({kc} (*)(lt_env *, {ec}))f.fn)(f.env, x);", kc = kc, ec = ec)
         };
@@ -1161,13 +1161,14 @@ static void {pair}_msort({pair} *a, int64_t n, {pair} *tmp) {{
             r#"
 static {ret_t} {name}({l} *p, lt_fn f) {{
   {l}_unique(p); {l} l = *p; int64_t n = l->len; if (n < 2) {ret_ok}
-  {pair} *a = ({pair} *)malloc(sizeof({pair}) * (size_t)n);
+  size_t an_ = sizeof({pair}) * (size_t)n, tn_ = sizeof({pair}) * (size_t)(n / 2 + 1);
+  {pair} *a = ({pair} *)lt_alloc(an_);
   for (int64_t k = 0; k < n; k++) {{ {ec} x = l->items[k]; {dup_x} {call} a[k].e = l->items[k]; }}
-  {pair} *tmp = ({pair} *)malloc(sizeof({pair}) * (size_t)(n / 2 + 1));
+  {pair} *tmp = ({pair} *)lt_alloc(tn_);
   {pair}_msort(a, n, tmp);
   for (int64_t k = 0; k < n; k++) l->items[k] = a[k].e;
   for (int64_t i = 0; i < n; i++) {{ {drop_k} }}
-  free(a); free(tmp); {ret_ok}
+  lt_free(a, an_); lt_free(tmp, tn_); {ret_ok}
 }}
 "#,
             ret_t = ret_t,

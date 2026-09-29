@@ -128,6 +128,8 @@ typedef struct lt_task {
     lt_spin lock;                          // protects `done_q`
     lt_waitq done_q;                       // tasks waiting for this one
     struct lt_task *scope_next;            // in the parent's scope list
+    struct lt_task *scope_prev;
+    lt_scope *scope;                       // that list, until waited for
     lt_scope *own_scope;                   // the scope of the function running in it
     int64_t wake_at;                       // sleeping: deadline (ns)
     int timed_out;
@@ -137,6 +139,7 @@ typedef struct lt_task {
     void *panic_jmp;                       // a jmp_buf: a panic ends this request only
     struct lt_lock *held[8];               // locks held, released after such a panic
     int nheld;
+    int deep;                              // its stack was opened past the top part
     char result[] __attribute__((aligned(16)));
 } lt_task;
 
@@ -144,15 +147,37 @@ typedef struct lt_task {
 // touches take memory.
 #define LT_STACK_SIZE ((size_t)8 << 20)
 #define LT_GUARD ((size_t)16384)
-// A stack back in the pool gives its deep pages back to the system if the
-// task went deeper than this (a marker word there was overwritten).
+// Only the top LT_STACK_KEEP of a stack is open at first; the rest can't be
+// touched. A task that goes deeper faults once, and the fault handler opens
+// the rest (lt_task_grow). When such a stack goes back to the pool, its deep
+// pages go back to the system and are closed again. (Under the sanitizers,
+// which own the fault handler, stacks are open from the start.)
 #define LT_STACK_KEEP ((size_t)256 << 10)
-#define LT_STACK_MARK 0x5ac4ed5ac4ed5ac4ULL
 
-static pthread_mutex_t lt_q_mu = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t lt_q_cv = PTHREAD_COND_INITIALIZER;
+// Run queues. Each worker (OS thread) has its own: a task made ready on a
+// worker goes there, and the worker takes from it without contention. Other
+// threads (timers, I/O) use the global queue. A worker with nothing to do
+// takes from the global queue, then steals half of another worker's queue,
+// spins a little, and then sleeps. Only one sleeper is woken per new task,
+// and none while a worker is already looking for work.
+#define LT_LOCALQ 256
+typedef struct lt_worker {
+    lt_spin lock;
+    uint32_t head, tail; // take at head, add at tail
+    lt_task *q[LT_LOCALQ];
+    uint32_t tick;       // schedules, to look at the global queue now and then
+    uint32_t seed;       // for picking whom to steal from
+} lt_worker;
+static lt_worker *lt_ws;
+static __thread lt_worker *lt_self;
+
+static lt_spin lt_gq_lock;
 static lt_task *lt_q_head, *lt_q_tail;
-static int lt_workers, lt_idle, lt_shutdown, lt_sleepers, lt_io_waiters;
+static int64_t lt_gq_n;
+
+static pthread_mutex_t lt_park_mu = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t lt_park_cv = PTHREAD_COND_INITIALIZER;
+static int lt_workers, lt_idle, lt_spinning, lt_shutdown, lt_sleepers, lt_io_waiters;
 static __thread lt_task *lt_cur;
 static __thread lt_ctx lt_worker_ctx;
 static __thread lt_spin *lt_release_after;
@@ -193,17 +218,23 @@ static char *lt_stack_get(void) {
 #ifdef MAP_NORESERVE
     flags |= MAP_NORESERVE;
 #endif
+#if defined(LT_ASAN) || defined(LT_TSAN)
     char *s = (char *)mmap(NULL, LT_STACK_SIZE, PROT_READ | PROT_WRITE, flags, -1, 0);
     if (s == MAP_FAILED) lt_oom();
     mprotect(s, LT_GUARD, PROT_NONE); // overflow hits the guard page
-    *(uint64_t *)(s + LT_STACK_SIZE - LT_STACK_KEEP) = LT_STACK_MARK;
+#else
+    char *s = (char *)mmap(NULL, LT_STACK_SIZE, PROT_NONE, flags, -1, 0);
+    if (s == MAP_FAILED) lt_oom();
+    mprotect(s + LT_STACK_SIZE - LT_STACK_KEEP, LT_STACK_KEEP, PROT_READ | PROT_WRITE);
+#endif
     return s;
 }
-static void lt_stack_put(char *s) {
-    uint64_t *mark = (uint64_t *)(s + LT_STACK_SIZE - LT_STACK_KEEP);
-    if (*mark != LT_STACK_MARK) {
+static void lt_stack_put(char *s, bool deep) {
+    if (deep) {
         madvise(s + LT_GUARD, LT_STACK_SIZE - LT_STACK_KEEP - LT_GUARD, MADV_DONTNEED);
-        *mark = LT_STACK_MARK;
+#if !defined(LT_ASAN) && !defined(LT_TSAN)
+        mprotect(s + LT_GUARD, LT_STACK_SIZE - LT_STACK_KEEP - LT_GUARD, PROT_NONE);
+#endif
     }
     lt_spin_lock(&lt_stack_lock);
     if (lt_stack_count < 64) {
@@ -216,6 +247,18 @@ static void lt_stack_put(char *s) {
 }
 
 __attribute__((noinline)) static lt_task *lt_current(void) { return lt_cur; }
+
+// For the fault handler: a fault below the open top of the running task's
+// stack opens the rest (true: go on).
+static bool lt_task_grow(char *addr) {
+    lt_task *t = lt_cur;
+    if (!t || !t->stack || t->deep) return false;
+    char *lo = t->stack + LT_GUARD, *hi = t->stack + LT_STACK_SIZE - LT_STACK_KEEP;
+    if (addr < lo || addr >= hi) return false;
+    if (mprotect(lo, (size_t)(hi - lo), PROT_READ | PROT_WRITE) != 0) return false;
+    t->deep = 1;
+    return true;
+}
 
 // For the fault handler: is `addr` in the guard page of the running task?
 static bool lt_task_overflowed(char *addr) {
@@ -235,15 +278,166 @@ LT_INLINE void lt_task_drop(lt_task *t) {
     if (t && __atomic_sub_fetch(&t->rc, 1, __ATOMIC_ACQ_REL) == 0) lt_task_free(t);
 }
 
+// (called from task code, which may have moved to another thread: the
+// compiler must not reuse an earlier thread's `lt_self`)
+__attribute__((noinline)) static lt_worker *lt_self_worker(void) {
+    lt_worker *w = lt_self;
+    __asm__ volatile("" : "+r"(w) : : "memory");
+    return w;
+}
+
+static void lt_gq_push_list(lt_task *first, lt_task *last, int64_t n) {
+    lt_spin_lock(&lt_gq_lock);
+    last->next = NULL;
+    if (lt_q_tail) lt_q_tail->next = first;
+    else lt_q_head = first;
+    lt_q_tail = last;
+    __atomic_add_fetch(&lt_gq_n, n, __ATOMIC_SEQ_CST);
+    lt_spin_unlock(&lt_gq_lock);
+}
+
+// Wakes a sleeping worker if there is one and nobody is looking for work.
+static void lt_wake_one(void) {
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    if (__atomic_load_n(&lt_idle, __ATOMIC_SEQ_CST) == 0 || __atomic_load_n(&lt_spinning, __ATOMIC_SEQ_CST) > 0) return;
+    pthread_mutex_lock(&lt_park_mu);
+    if (lt_idle > 0) pthread_cond_signal(&lt_park_cv);
+    pthread_mutex_unlock(&lt_park_mu);
+}
+
 static void lt_ready(lt_task *t) {
-    pthread_mutex_lock(&lt_q_mu);
     __atomic_store_n(&t->state, LT_READY, __ATOMIC_RELAXED);
     t->next = NULL;
-    if (lt_q_tail) lt_q_tail->next = t;
-    else lt_q_head = t;
-    lt_q_tail = t;
-    if (lt_idle) pthread_cond_signal(&lt_q_cv);
-    pthread_mutex_unlock(&lt_q_mu);
+    lt_worker *w = lt_self_worker();
+    if (w) {
+        lt_spin_lock(&w->lock);
+        if (w->tail - w->head < LT_LOCALQ) {
+            w->q[w->tail % LT_LOCALQ] = t;
+            __atomic_store_n(&w->tail, w->tail + 1, __ATOMIC_SEQ_CST);
+            lt_spin_unlock(&w->lock);
+        } else {
+            // full: half of it, and this one, to the global queue
+            uint32_t n = (w->tail - w->head) / 2;
+            lt_task *first = w->q[w->head % LT_LOCALQ], *last = first;
+            for (uint32_t i = 1; i < n; i++) {
+                lt_task *x = w->q[(w->head + i) % LT_LOCALQ];
+                last->next = x;
+                last = x;
+            }
+            last->next = t;
+            w->head += n;
+            lt_spin_unlock(&w->lock);
+            lt_gq_push_list(first, t, (int64_t)n + 1);
+        }
+    } else {
+        lt_gq_push_list(t, t, 1);
+    }
+    lt_wake_one();
+}
+
+static lt_task *lt_local_pop(lt_worker *w) {
+    if (__atomic_load_n(&w->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&w->tail, __ATOMIC_SEQ_CST)) return NULL;
+    lt_spin_lock(&w->lock);
+    lt_task *t = NULL;
+    if (w->head != w->tail) t = w->q[w->head++ % LT_LOCALQ];
+    lt_spin_unlock(&w->lock);
+    return t;
+}
+
+// Takes a batch from the global queue: one to run, some more for later.
+static lt_task *lt_global_take(lt_worker *w) {
+    if (__atomic_load_n(&lt_gq_n, __ATOMIC_SEQ_CST) == 0) return NULL;
+    lt_spin_lock(&lt_gq_lock);
+    lt_task *t = lt_q_head;
+    if (!t) {
+        lt_spin_unlock(&lt_gq_lock);
+        return NULL;
+    }
+    int64_t n = lt_gq_n / lt_workers + 1;
+    if (n > LT_LOCALQ / 2) n = LT_LOCALQ / 2;
+    // only this worker adds to its queue (others only take), so the room
+    // seen now is there when the batch goes in
+    int64_t room = LT_LOCALQ - (int64_t)(__atomic_load_n(&w->tail, __ATOMIC_SEQ_CST) - __atomic_load_n(&w->head, __ATOMIC_SEQ_CST));
+    if (n > room + 1) n = room + 1;
+    lt_q_head = t->next;
+    int64_t took = 1;
+    lt_task *more = NULL, *more_last = NULL; // (kept in order)
+    while (took < n && lt_q_head) {
+        lt_task *x = lt_q_head;
+        lt_q_head = x->next;
+        x->next = NULL;
+        if (more_last) more_last->next = x;
+        else more = x;
+        more_last = x;
+        took++;
+    }
+    if (!lt_q_head) lt_q_tail = NULL;
+    __atomic_sub_fetch(&lt_gq_n, took, __ATOMIC_SEQ_CST);
+    lt_spin_unlock(&lt_gq_lock);
+    t->next = NULL;
+    if (more) {
+        lt_spin_lock(&w->lock);
+        while (more) {
+            lt_task *x = more;
+            more = x->next;
+            x->next = NULL;
+            w->q[w->tail % LT_LOCALQ] = x;
+            w->tail++;
+        }
+        lt_spin_unlock(&w->lock);
+    }
+    return t;
+}
+
+// Steals half of another worker's queue; returns one to run.
+static lt_task *lt_steal(lt_worker *w) {
+    int n = lt_workers;
+    w->seed = w->seed * 1103515245u + 12345u;
+    int start = (int)((w->seed >> 8) % (uint32_t)n);
+    for (int k = 0; k < n; k++) {
+        lt_worker *v = &lt_ws[(start + k) % n];
+        if (v == w) continue;
+        if (__atomic_load_n(&v->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&v->tail, __ATOMIC_SEQ_CST)) continue;
+        lt_task *got[LT_LOCALQ / 2];
+        uint32_t m = 0;
+        lt_spin_lock(&v->lock);
+        uint32_t avail = v->tail - v->head;
+        m = (avail + 1) / 2;
+        for (uint32_t i = 0; i < m; i++) got[i] = v->q[(v->head + i) % LT_LOCALQ];
+        v->head += m;
+        lt_spin_unlock(&v->lock);
+        if (m == 0) continue;
+        if (m > 1) {
+            lt_spin_lock(&w->lock);
+            for (uint32_t i = 1; i < m; i++) {
+                w->q[w->tail % LT_LOCALQ] = got[i];
+                w->tail++;
+            }
+            lt_spin_unlock(&w->lock);
+        }
+        return got[0];
+    }
+    return NULL;
+}
+
+static bool lt_any_work(void) {
+    if (__atomic_load_n(&lt_gq_n, __ATOMIC_SEQ_CST) > 0) return true;
+    for (int i = 0; i < lt_workers; i++)
+        if (__atomic_load_n(&lt_ws[i].head, __ATOMIC_SEQ_CST) != __atomic_load_n(&lt_ws[i].tail, __ATOMIC_SEQ_CST)) return true;
+    return false;
+}
+
+static lt_task *lt_find_work(lt_worker *w) {
+    // now and then the global queue first, so it isn't starved
+    if (++w->tick % 61 == 0) {
+        lt_task *t = lt_global_take(w);
+        if (t) return t;
+    }
+    lt_task *t = lt_local_pop(w);
+    if (t) return t;
+    t = lt_global_take(w);
+    if (t) return t;
+    return lt_steal(w);
 }
 
 // wait queues (caller holds q->lock)
@@ -404,26 +598,45 @@ static void lt_deadlock(void) {
 }
 
 static lt_task *lt_next_task(void) {
-    pthread_mutex_lock(&lt_q_mu);
-    while (!lt_q_head) {
+    lt_worker *w = lt_self;
+    for (;;) {
+        lt_task *t = lt_find_work(w);
+        if (t) return t;
+        // look a little longer before sleeping (work often comes right away)
+        __atomic_add_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
+        for (int i = 0; i < 64 && !t; i++) {
+#if defined(__aarch64__)
+            __asm__ volatile("yield");
+#else
+            __asm__ volatile("pause");
+#endif
+            t = lt_find_work(w);
+        }
+        __atomic_sub_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
+        if (t) {
+            // this worker stops looking: another may need to start
+            if (lt_any_work()) lt_wake_one();
+            return t;
+        }
+        pthread_mutex_lock(&lt_park_mu);
         if (lt_shutdown) {
-            pthread_mutex_unlock(&lt_q_mu);
+            pthread_mutex_unlock(&lt_park_mu);
             return NULL;
         }
-        lt_idle++;
+        __atomic_add_fetch(&lt_idle, 1, __ATOMIC_SEQ_CST);
+        if (lt_any_work()) {
+            __atomic_sub_fetch(&lt_idle, 1, __ATOMIC_SEQ_CST);
+            pthread_mutex_unlock(&lt_park_mu);
+            continue;
+        }
         if (lt_idle == lt_workers && __atomic_load_n(&lt_sleepers, __ATOMIC_ACQUIRE) == 0 && __atomic_load_n(&lt_io_waiters, __ATOMIC_ACQUIRE) == 0) {
-            pthread_mutex_unlock(&lt_q_mu);
+            pthread_mutex_unlock(&lt_park_mu);
             lt_deadlock();
         }
-        pthread_cond_wait(&lt_q_cv, &lt_q_mu);
-        lt_idle--;
+        pthread_cond_wait(&lt_park_cv, &lt_park_mu);
+        __atomic_sub_fetch(&lt_idle, 1, __ATOMIC_SEQ_CST);
+        pthread_mutex_unlock(&lt_park_mu);
     }
-    lt_task *t = lt_q_head;
-    lt_q_head = t->next;
-    if (!lt_q_head) lt_q_tail = NULL;
-    t->next = NULL;
-    pthread_mutex_unlock(&lt_q_mu);
-    return t;
 }
 
 static lt_task *lt_main_task;
@@ -444,7 +657,7 @@ static void lt_worker_loop(void) {
         if (lt_finished) {
             lt_task *f = lt_finished;
             lt_finished = NULL;
-            lt_stack_put(f->stack);
+            lt_stack_put(f->stack, f->deep);
             f->stack = NULL;
 #ifdef LT_TSAN
             __tsan_destroy_fiber(f->fiber);
@@ -452,10 +665,10 @@ static void lt_worker_loop(void) {
             bool is_main = f == lt_main_task;
             lt_task_drop(f); // the reference held while running
             if (is_main) {
-                pthread_mutex_lock(&lt_q_mu);
+                pthread_mutex_lock(&lt_park_mu);
                 lt_shutdown = 1;
-                pthread_cond_broadcast(&lt_q_cv);
-                pthread_mutex_unlock(&lt_q_mu);
+                pthread_cond_broadcast(&lt_park_cv);
+                pthread_mutex_unlock(&lt_park_mu);
                 return;
             }
         }
@@ -463,7 +676,7 @@ static void lt_worker_loop(void) {
 }
 
 static void *lt_worker_thread(void *arg) {
-    (void)arg;
+    lt_self = &lt_ws[(intptr_t)arg];
     lt_alt_stack();
     lt_worker_loop();
     return NULL;
@@ -648,7 +861,10 @@ static lt_task *lt_spawn(lt_scope *s, lt_fn fn, size_t result_size, void (*run)(
     t->rc = 3; // the Task value, the scope, the running task
     lt_task *me = lt_current();
     if (me) lt_spin_lock(&me->lock);
+    t->scope = s;
+    t->scope_prev = NULL;
     t->scope_next = s->tasks;
+    if (s->tasks) s->tasks->scope_prev = t;
     s->tasks = t;
     if (me) lt_spin_unlock(&me->lock);
     if (me && __atomic_load_n(&me->cancelled, __ATOMIC_ACQUIRE)) lt_task_cancel(t);
@@ -668,9 +884,27 @@ static void lt_join(lt_task *t) {
 }
 
 // the error of a finished task (a new reference), or none
+// A task that was waited for leaves its function's scope (the scope keeps
+// only what it must still wait for): a loop that spawns and waits doesn't
+// pile up finished tasks until the function returns.
+static void lt_scope_forget(lt_task *t) {
+    lt_scope *s = t->scope;
+    if (!s) return;
+    lt_task *me = lt_current();
+    if (me) lt_spin_lock(&me->lock);
+    if (t->scope_prev) t->scope_prev->scope_next = t->scope_next;
+    else s->tasks = t->scope_next;
+    if (t->scope_next) t->scope_next->scope_prev = t->scope_prev;
+    t->scope = NULL;
+    t->scope_next = t->scope_prev = NULL;
+    if (me) lt_spin_unlock(&me->lock);
+    lt_task_drop(t); // the scope's reference
+}
+
 static lt_err lt_task_outcome(lt_task *t) {
     lt_join(t);
     t->observed = 1;
+    lt_scope_forget(t);
     if (t->error.obj) {
         lt_iface_dup(t->error);
         return t->error;
@@ -1069,6 +1303,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     lt_main_task = m;
     lt_panic_hook = lt_task_panic_hook;
     lt_overflow_hook = lt_task_overflowed;
+    lt_grow_hook = lt_task_grow;
     if (pipe(lt_interrupt_pipe) == 0) {
         pthread_t it;
         pthread_create(&it, NULL, lt_interrupt_thread, NULL);
@@ -1076,6 +1311,9 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
         lt_catch_interrupts();
     }
     lt_workers = lt_ncpu();
+    lt_ws = (lt_worker *)calloc((size_t)lt_workers, sizeof(lt_worker));
+    for (int i = 0; i < lt_workers; i++) lt_ws[i].seed = (uint32_t)i * 2654435761u + 1;
+    lt_self = &lt_ws[0];
     lt_timer_setup();
     pthread_t timer;
     pthread_create(&timer, NULL, lt_timer_thread, NULL);
@@ -1086,7 +1324,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
         pthread_attr_t a;
         pthread_attr_init(&a);
         pthread_attr_setstacksize(&a, 1 << 20);
-        pthread_create(&threads[i], &a, lt_worker_thread, NULL);
+        pthread_create(&threads[i], &a, lt_worker_thread, (void *)(intptr_t)i);
     }
     // the main thread is a worker too
     lt_worker_loop();

@@ -1,0 +1,21 @@
+fn consume(ch: Channel<Int>) throws -> Int {
+  var s = 0
+  while try ch.receive() is some(v) {
+    s += v
+  }
+  return s
+}
+
+fn main() throws {
+  var total = 0
+  for round in 0..<5 {
+    let ch = Channel<Int>(capacity: 100)
+    let t = spawn consume(ch)
+    for i in 0..<1_000_000 {
+      try ch.send(i)
+    }
+    ch.close()
+    total += try t.wait()
+  }
+  print("${total}")
+}

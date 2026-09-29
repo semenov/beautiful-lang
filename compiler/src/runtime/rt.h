@@ -1273,6 +1273,7 @@ static void lt_signals_restore(struct sigaction old[2]) {
 
 static char *lt_main_stack_lo; // the lowest address of the main thread's stack
 static bool (*lt_overflow_hook)(char *addr); // with tasks: in a task's guard?
+static bool (*lt_grow_hook)(char *addr); // with tasks: open more of the stack?
 
 static void lt_write_err(const char *s) {
     ssize_t r = write(2, s, strlen(s));
@@ -1282,6 +1283,7 @@ static void lt_write_err(const char *s) {
 static void lt_on_fault(int sig, siginfo_t *info, void *uc) {
     (void)uc;
     char *addr = (char *)info->si_addr;
+    if (lt_grow_hook && lt_grow_hook(addr)) return; // a task's stack got deeper
     static int reported;
     if (__atomic_exchange_n(&reported, 1, __ATOMIC_ACQ_REL)) {
         for (;;) pause(); // another thread is reporting its fault and exiting
