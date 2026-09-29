@@ -1,0 +1,59 @@
+// Changing a list never changes a copy of it, however the copy was made;
+// the compiler skips repeated copy checks only when nothing can share it.
+type Holder {
+  xs: List<Int>
+}
+
+fn keep(xs: List<Int>) -> List<Int> {
+  return xs
+}
+
+fn total(xs: List<Int>) -> Int {
+  return xs.sum()
+}
+
+fn pick(xs: List<Int>, other: List<Int>) -> Int {
+  return xs[0] + other[0]
+}
+
+fn main() {
+  var a = [1, 2, 3]
+  var copies: List<List<Int>> = []
+  for i in 0..<3 {
+    a[0] = i
+    let b = a
+    a[1] = 10 + i
+    copies.append(b)
+    a[2] = 20 + i
+  }
+  print("${a} ${copies}")
+
+  var c = [1, 2]
+  c[0] = 5
+  let h = Holder(xs: c)
+  c[1] = 6
+  print("${c} ${h.xs}")
+
+  var d = [1, 2]
+  d[0] = 7
+  let kept = keep(d)
+  d[1] = 8
+  print("${d} ${kept}")
+
+  var e = [1, 2]
+  e[0] = 3
+  let t = total(e)
+  e[1] = 4
+  let p = pick(e, other: e)
+  e[0] = 9
+  print("${e} ${t} ${p}")
+
+  var f = [0, 0]
+  var g: List<List<Int>> = []
+  for i in 0..<2 {
+    f[i] = i + 1
+    g.append(f)
+    f[0] = 100
+  }
+  print("${f} ${g}")
+}

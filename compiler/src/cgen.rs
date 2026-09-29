@@ -74,6 +74,11 @@ enum H {
 }
 
 pub struct CGen<'a> {
+    // locals whose list (or boxed record) is known to be unique in the
+    // current block: stores into them skip the copy-on-write check
+    uniq: HashSet<usize>,
+    // (block, statement) being generated or analyzed
+    cur_pos: (usize, usize),
     prog: &'a Program,
     m: &'a Module,
     tys: Vec<TInfo>,
@@ -166,6 +171,8 @@ impl<'a> CGen<'a> {
             lits: HashMap::new(),
             lit_defs: String::new(),
             cur_line: 0,
+            uniq: HashSet::new(),
+            cur_pos: (0, 0),
             cur_fn: 0,
             vt_index,
             file,
@@ -2106,13 +2113,16 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             let _ = writeln!(body, "  {} l{} = {};", c, l, z);
         }
         let nblocks = self.m.funcs[fi].blocks.len();
+        let entry = self.uniq_entry(fi);
         for bi in 0..nblocks {
             let blk = &self.m.funcs[fi].blocks[bi];
             self.cur_line = blk.line;
             let _ = writeln!(body, "b{}:;", bi);
+            self.uniq = entry[bi].clone();
             let stmts = blk.stmts.clone();
             let term = blk.term.clone();
-            for s in &stmts {
+            for (si, s) in stmts.iter().enumerate() {
+                self.cur_pos = (bi, si);
                 self.stmt(fi, s, &mut body);
             }
             self.term(fi, &term, &mut body);
@@ -2196,10 +2206,12 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
     // A pointer to the place, making every step unique (copy-on-write).
     fn place_ptr(&mut self, fi: usize, p: &Place, out: &mut String) -> (String, Ty) {
         let root = &self.m.funcs[fi].locals[p.root];
+        let root_ptr = root.self_ptr;
         let mut e = if root.self_ptr { format!("l{}", p.root) } else { format!("(&l{})", p.root) };
         let mut ty = root.ty.clone();
         let line = self.line();
-        for (proj, next) in &p.path {
+        for (step, (proj, next)) in p.path.iter().enumerate() {
+            let first = step == 0;
             let tid = self.tid(&ty);
             let c = self.tys[tid].c.clone();
             e = match proj {
@@ -2214,7 +2226,14 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 Proj::Index(o) => {
                     let o = self.op(o);
                     self.need(H::Ops, tid);
-                    let _ = writeln!(out, "  {}_at(*{}, {}, {}); {}_unique({});", c, e, o, line, c, e);
+                    // the root list, already made unique in this block: no check
+                    let known = !root_ptr && first && self.uniq.contains(&p.root);
+                    if !known {
+                        let _ = writeln!(out, "  {}_at(*{}, {}, {}); {}_unique({});", c, e, o, line, c, e);
+                        if !root_ptr && first {
+                            self.uniq.insert(p.root);
+                        }
+                    }
                     format!("{}_at(*{}, {}, {})", c, e, o, line)
                 }
                 Proj::MapKey(o, insert) => {
@@ -2238,7 +2257,182 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
         (e, ty)
     }
 
+    // Uniqueness facts a statement ends: what may share a local's value from
+    // here on is a new reference (Dup), a new value, or a call that sees it
+    // (it could keep a copy).
+    fn uniq_kill(&mut self, fi: usize, s: &Stmt, u: &mut HashSet<usize>) {
+        if !u.is_empty() {
+            let mut gone: Vec<usize> = vec![];
+            let args_of = |args: &[Op], gone: &mut Vec<usize>| {
+                for a in args {
+                    if let Op::Local(l) = a {
+                        gone.push(*l);
+                    }
+                }
+            };
+        match s {
+                Stmt::Dup(l) => {
+                    if !self.dup_given_back(fi, *l) {
+                        gone.push(*l);
+                    }
+                }
+                Stmt::Assign(d, rv) => {
+                    gone.push(*d);
+                    // (a built-in read whose result holds no references,
+                    // like `xs[i].x`, can't keep a copy)
+                    // (also any call whose result holds no references and
+                    // that gets at most one argument with references)
+                    let plain_read = match rv {
+                        Rv::Call(Callee::Intrinsic(..) | Callee::Fn(_), args) => {
+                            let t = self.m.funcs[fi].locals[*d].ty.clone();
+                            let tid = self.tid(&t);
+                            let mut with_refs = 0;
+                            for a in args {
+                                if let Op::Local(x) = a {
+                                    let at = self.m.funcs[fi].locals[*x].ty.clone();
+                                    let aid = self.tid(&at);
+                                    if self.tys[aid].rc {
+                                        with_refs += 1;
+                                    }
+                                }
+                            }
+                            !self.tys[tid].rc && (with_refs <= 1 || matches!(rv, Rv::Call(Callee::Intrinsic(..), _)))
+                        }
+                        _ => false,
+                    };
+                    if let Rv::Call(_, args) = rv {
+                        if !plain_read {
+                            args_of(args, &mut gone);
+                        }
+                    }
+                }
+                Stmt::CallT { dst, err, args, .. } => {
+                    gone.extend(dst.iter().copied());
+                    gone.push(*err);
+                    args_of(args, &mut gone);
+                }
+                Stmt::MutCall { dst, err, place, args, .. } => {
+                    gone.extend(dst.iter().copied());
+                    gone.extend(err.iter().copied());
+                    gone.push(place.root);
+                    args_of(args, &mut gone);
+                }
+                Stmt::Store(_, Op::Local(l)) => gone.push(*l),
+                _ => {}
+            }
+            for g in gone {
+                u.remove(&g);
+            }
+        }
+    }
+
+    // `Dup(l)` right before a call `f(l, ...)` whose result and other
+    // arguments hold no references: the callee can't keep `l` (there are no
+    // globals, and its tasks end before it returns), so when the call returns
+    // the count is back where it was.
+    fn dup_given_back(&mut self, fi: usize, l: usize) -> bool {
+        let (b, si) = self.cur_pos;
+        let stmts = &self.m.funcs[fi].blocks[b].stmts;
+        let next = stmts.iter().skip(si + 1).find(|s| !matches!(s, Stmt::Line(_)));
+        let Some(Stmt::Assign(d, Rv::Call(Callee::Fn(_), args))) = next else { return false };
+        let (d, args) = (*d, args.clone());
+        if !args.iter().any(|a| matches!(a, Op::Local(x) if *x == l)) {
+            return false;
+        }
+        let no_refs = |g: &mut Self, t: Ty| {
+            let tid = g.tid(&t);
+            !g.tys[tid].rc
+        };
+        let dt = self.m.funcs[fi].locals[d].ty.clone();
+        if !no_refs(self, dt) {
+            return false;
+        }
+        for a in &args {
+            match a {
+                Op::Local(x) if *x == l => {}
+                Op::Local(x) => {
+                    let t = self.m.funcs[fi].locals[*x].ty.clone();
+                    if !no_refs(self, t) {
+                        return false;
+                    }
+                }
+                _ => {}
+            }
+        }
+        true
+    }
+
+    // A store or mutating call through `root[i]...` makes `root` unique.
+    fn uniq_gen(&self, fi: usize, s: &Stmt, u: &mut HashSet<usize>) {
+        let p = match s {
+            Stmt::Store(p, _) => p,
+            Stmt::MutCall { place, .. } => place,
+            _ => return,
+        };
+        if !self.m.funcs[fi].locals[p.root].self_ptr && matches!(p.path.first(), Some((Proj::Index(_), _))) {
+            u.insert(p.root);
+        }
+    }
+
+    // For each block, the locals known unique when it starts: unique at the
+    // end of every block that jumps to it.
+    fn uniq_entry(&mut self, fi: usize) -> Vec<HashSet<usize>> {
+        let n = self.m.funcs[fi].blocks.len();
+        let mut preds: Vec<Vec<usize>> = vec![vec![]; n];
+        for b in 0..n {
+            let succ: Vec<usize> = match &self.m.funcs[fi].blocks[b].term {
+                Term::Goto(t) => vec![*t],
+                Term::If(_, a, c) | Term::IfErr(_, a, c) => vec![*a, *c],
+                Term::Switch(_, cases, d) => cases.iter().map(|x| x.1).chain(std::iter::once(*d)).collect(),
+                _ => vec![],
+            };
+            for t in succ {
+                preds[t].push(b);
+            }
+        }
+        // start from "everything" (None) except the entry, and narrow
+        let mut out: Vec<Option<HashSet<usize>>> = vec![None; n];
+        let mut entry: Vec<HashSet<usize>> = vec![HashSet::new(); n];
+        let mut changed = true;
+        let mut rounds = 0;
+        while changed && rounds < 50 {
+            changed = false;
+            rounds += 1;
+            for b in 0..n {
+                let mut inn: Option<HashSet<usize>> = if b == 0 { Some(HashSet::new()) } else { None };
+                for &pb in &preds[b] {
+                    if let Some(o) = &out[pb] {
+                        inn = Some(match inn {
+                            None => o.clone(),
+                            Some(i) => i.intersection(o).copied().collect(),
+                        });
+                    }
+                }
+                // not reached yet: stays "anything" until a predecessor is known
+                let Some(mut u) = inn.clone() else { continue };
+                let stmts = self.m.funcs[fi].blocks[b].stmts.clone();
+                for (si, st) in stmts.iter().enumerate() {
+                    self.cur_pos = (b, si);
+                    self.uniq_kill(fi, st, &mut u);
+                    self.uniq_gen(fi, st, &mut u);
+                }
+                entry[b] = inn.unwrap_or_default();
+                if out[b].as_ref() != Some(&u) {
+                    out[b] = Some(u);
+                    changed = true;
+                }
+            }
+        }
+        if changed {
+            return vec![HashSet::new(); n];
+        }
+        entry
+    }
+
     fn stmt(&mut self, fi: usize, s: &Stmt, out: &mut String) {
+        let mut u = std::mem::take(&mut self.uniq);
+        self.uniq_kill(fi, s, &mut u);
+        self.uniq = u;
         match s {
             Stmt::Line(n) => self.cur_line = *n,
             Stmt::Dup(l) => {
