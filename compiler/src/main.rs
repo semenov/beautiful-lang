@@ -67,6 +67,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "random" => include_str!("std/random.lang"),
         "json" => include_str!("std/json.lang"),
         "cli" => include_str!("std/cli.lang"),
+        "http" => include_str!("std/http.lang"),
         _ => return None,
     })
 }
@@ -349,11 +350,14 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
     } else {
         cmd.arg(if optimize { "-O2" } else { "-O1" });
     }
+    // libraries the program needs, from `// link:` lines
+    let libs: Vec<String> = c.lines().take(5).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
     let status = cmd
         .args(["-std=gnu11", "-w", "-fwrapv", "-o"])
         .arg(exe)
         .arg(&c_path)
         .arg("-lm")
+        .args(&libs)
         .status();
     match status {
         Ok(s) if s.success() => true,

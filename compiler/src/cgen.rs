@@ -88,6 +88,8 @@ pub struct CGen<'a> {
     file: String,
     // the program uses tasks: atomic reference counts and the scheduler
     threads: bool,
+    http_glue: bool,
+    curl: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -156,6 +158,8 @@ impl<'a> CGen<'a> {
             vt_index,
             file,
             threads: false,
+            http_glue: false,
+            curl: false,
         }
     }
 
@@ -1523,6 +1527,97 @@ static lt_err {name}({c} *out) {{
         name
     }
 
+    fn http_def(&self, name: &str) -> Ty {
+        for (d, def) in self.prog.defs.iter().enumerate() {
+            if def.name == name && self.prog.module_names.get(def.module).map(|m| m == "http").unwrap_or(false) {
+                return Ty::Adt(d, vec![]);
+            }
+        }
+        panic!("http.{} missing", name)
+    }
+
+    // Converts between the runtime's raw HTTP parts and `http.Request` /
+    // `http.Response` records.
+    fn gen_http_glue(&mut self) {
+        if self.http_glue {
+            return;
+        }
+        self.http_glue = true;
+        let req = self.http_def("Request");
+        let resp = self.http_def("Response");
+        let (rq, rs) = (self.tid(&req), self.tid(&resp));
+        let map = self.tid(&Ty::Adt(self.prog.b.map, vec![Ty::Text, Ty::Text]));
+        self.need(H::Ops, map);
+        self.need(H::Drop, rs);
+        self.need(H::Drop, map);
+        let (rqc, rsc, mc) = (self.tys[rq].c.clone(), self.tys[rs].c.clone(), self.tys[map].c.clone());
+        let _ = write!(
+            self.helpers,
+            r#"
+static {rsc} lt_http_response_from(lt_http_out *o) {{
+  {mc} h = {mc}_new(8);
+  for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) {mc}_put(&h, o->headers->items[i], o->headers->items[i + 1]);
+  if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
+  return ({rsc}){{ o->status, o->body, h }};
+}}
+static lt_text *lt_url_decode(const char *s, int64_t n) {{
+  lt_text *t = lt_text_new(n); int64_t w = 0;
+  for (int64_t i = 0; i < n; i++) {{
+    if (s[i] == '%' && i + 2 < n && lt_hex(s[i + 1]) >= 0 && lt_hex(s[i + 2]) >= 0) {{ t->data[w++] = (char)(lt_hex(s[i + 1]) * 16 + lt_hex(s[i + 2])); i += 2; }}
+    else t->data[w++] = s[i] == '+' ? ' ' : s[i];
+  }}
+  t->len = w; t->data[w] = 0; return t;
+}}
+#ifdef LT_THREADS
+static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *out) {{
+  {mc} headers = {mc}_new(r->nheaders);
+  for (int64_t i = 0; i < r->nheaders; i++) {mc}_put(&headers, lt_text_from(r->hname[i], r->hname_len[i]), lt_text_from(r->hvalue[i], r->hvalue_len[i]));
+  {mc} query = {mc}_new(4);
+  for (int64_t i = 0; i < r->query_len;) {{
+    int64_t j = i; while (j < r->query_len && r->query[j] != '&') j++;
+    int64_t eq = i; while (eq < j && r->query[eq] != '=') eq++;
+    if (j > i) {mc}_put(&query, lt_url_decode(r->query + i, eq - i), eq < j ? lt_url_decode(r->query + eq + 1, j - eq - 1) : lt_text_from("", 0));
+    i = j + 1;
+  }}
+  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len), headers, lt_text_from(r->body, r->body_len), {mc}_new(0), query }};
+  {rsc} resp;
+  lt_err e = lt_http_call(handler, &req, &resp);
+  if (e.obj) {{
+    lt_text *m = lt_error_message(e);
+    char buf[64]; snprintf(buf, sizeof buf, "%.*s %.*s: ", (int)r->method_len, r->method, (int)(r->path_len > 40 ? 40 : r->path_len), r->path);
+    lt_text *pre = lt_text_cstr(buf); lt_text *parts[2] = {{ pre, m }}; lt_text *line = lt_text_concat_n(2, parts);
+    lt_log("ERROR", line); lt_text_drop(line); lt_text_drop(pre); lt_text_drop(m); lt_iface_drop(e);
+    out->status = 500; out->body = lt_text_cstr("internal server error"); out->headers = NULL;
+    return;
+  }}
+  out->status = resp.f0; out->body = resp.f1; lt_text_dup(resp.f1);
+  lt_texts *hs = lt_texts_new(8);
+  for (int64_t i = 0; i < resp.f2->n; i++) {{ if (!resp.f2->e[i].h) continue; lt_text_dup(resp.f2->e[i].k); lt_text_dup(resp.f2->e[i].v); lt_texts_push(&hs, resp.f2->e[i].k); lt_texts_push(&hs, resp.f2->e[i].v); }}
+  out->headers = hs;
+  drop_{rs}(resp);
+}}
+// calls the handler; a panic inside it ends only this request
+static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
+  lt_task *t = lt_current();
+  jmp_buf jb; t->panic_jmp = &jb;
+  if (setjmp(jb) != 0) {{ t->panic_jmp = NULL; return lt_make_failure(lt_text_cstr("the handler panicked")); }}
+  lt_err e = ((lt_err (*)(lt_env *, {rqc}, {rsc} *))handler.fn)(handler.env, *req, resp);
+  t->panic_jmp = NULL;
+  return e;
+}}
+#endif
+"#,
+            rsc = rsc,
+            rqc = rqc,
+            mc = mc,
+            rs = rs
+        );
+        let _ = writeln!(self.protos, "static {} lt_http_response_from(lt_http_out *o);", rsc);
+        if self.threads {
+            let _ = writeln!(self.protos, "#ifdef LT_THREADS\nstatic lt_err lt_http_call(lt_fn handler, {} *req, {} *resp);\n#endif", rqc, rsc);
+        }
+    }
+
     fn ty_of(&self, id: usize) -> Ty {
         for (t, i) in &self.ty_ids {
             if *i == id {
@@ -2515,6 +2610,16 @@ static lt_err {name}({c} *out) {{
             "random.between" => format!("lt_random_between({}, {}, {})", a[0], a[1], line),
             "random.fraction" => "lt_random_fraction()".to_string(),
             "random.token" => format!("lt_random_token({})", a[0]),
+            "http.__serve" => {
+                self.threads = true;
+                self.gen_http_glue();
+                format!("lt_http_serve({}, {})", a[0], a[1])
+            }
+            "http.__fetch" => {
+                self.curl = true;
+                self.gen_http_glue();
+                format!("({{ lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_fetch({}, {}, {}, &o_); if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[2], a[3])
+            }
             "json.encode" | "json.encode_pretty" => {
                 let id = tid0.unwrap();
                 self.need(H::Enc, id);
@@ -2893,6 +2998,12 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         }
         out += include_str!("runtime/std.h");
         out += include_str!("runtime/json.h");
+        if self.http_glue {
+            if self.curl {
+                out = format!("#define LT_CURL 1\n// link: -lcurl\n{}", out);
+            }
+            out += include_str!("runtime/http.h");
+        }
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";
         out += "static void lt_panic_error(lt_err e, int line);\n";

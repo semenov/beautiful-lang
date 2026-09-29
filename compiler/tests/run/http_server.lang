@@ -1,0 +1,77 @@
+import http
+import json
+import log
+
+type Note {
+  id: Int
+  title: Text
+  text: Text
+}
+
+type NewNote {
+  title: Text
+  text: Text
+}
+
+type Store {
+  notes: Map<Int, Note> = {}
+  next_id: Int = 1
+}
+
+fn create(store: Shared<Store>, req: http.Request) throws -> http.Response {
+  let input = try json.decode<NewNote>(req.body)
+  var note = Note(id: 0, title: input.title, text: input.text)
+  with s = store.lock() {
+    note.id = s.next_id
+    s.next_id += 1
+    s.notes[note.id] = note
+  }
+  return http.json(201, note)
+}
+
+fn get(store: Shared<Store>, req: http.Request) throws -> http.Response {
+  let id = try (req.param("id") ?? "").to_int()
+  var found: Note? = none
+  with s = store.lock() {
+    found = s.notes[id]
+  }
+  if found is some(note) {
+    return http.json(200, note)
+  }
+  return http.text(404, "no note ${id}")
+}
+
+fn crash(req: http.Request) -> http.Response {
+  let items: List<Int> = []
+  return http.text(200, "${items[5]}")
+}
+
+fn router(store: Shared<Store>) -> http.Router {
+  var r = http.Router()
+  r.post("/notes", req => try create(store, req))
+  r.get("/notes/:id", req => try get(store, req))
+  r.get("/crash", crash)
+  r.get("/hello", req => http.text(200, "hello ${req.query("name") ?? "you"}"))
+  return r
+}
+
+test "a note that doesn't exist is a 404" {
+  let r = router(Shared(Store()))
+  let res = try r.handle(http.request("GET", "/notes/9"))
+  expect res.status == 404
+}
+
+test "created notes can be read back" {
+  let r = router(Shared(Store()))
+  var req = http.request("POST", "/notes")
+  req.body = "{\"title\": \"a\", \"text\": \"b\"}"
+  let created = try r.handle(req)
+  expect created.status == 201
+  let res = try r.handle(http.request("GET", "/notes/1"))
+  expect res.body == "{\"id\":1,\"title\":\"a\",\"text\":\"b\"}"
+}
+
+fn main() throws {
+  try http.serve(router(Shared(Store())), port: 18080)
+  log.info("bye")
+}

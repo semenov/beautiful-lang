@@ -1,0 +1,176 @@
+// http: a server and a client.
+//
+//   fn get_note(req: http.Request) throws -> http.Response {
+//     let id = try (req.param("id") ?? "").to_int()
+//     return http.json(200, note)
+//   }
+//
+//   var router = http.Router()
+//   router.get("/notes/:id", get_note)
+//   try http.serve(router, port: 8080)
+//
+// Every request runs in its own task. An error thrown by a handler becomes a
+// 500 response (and a log line); a bug in a handler also ends only that
+// request.
+
+import json
+
+pub type Request {
+  method: Text
+  // without the query: "/notes/7"
+  path: Text
+  // header names in lower case
+  headers: Map<Text, Text>
+  body: Text
+  // from the route pattern: "/notes/:id" gives "id"
+  params: Map<Text, Text> = {}
+  // from "?q=word&page=2"
+  query_params: Map<Text, Text> = {}
+
+  // A part of the path matched by `:name` in the route.
+  pub fn param(self, name: Text) -> Text? {
+    return self.params[name]
+  }
+
+  // A value from the query: `?page=2` gives query("page") == "2".
+  pub fn query(self, name: Text) -> Text? {
+    return self.query_params[name]
+  }
+
+  // A header, by its name in any case.
+  pub fn header(self, name: Text) -> Text? {
+    return self.headers[name.lower()]
+  }
+}
+
+pub type Response {
+  status: Int
+  body: Text
+  headers: Map<Text, Text> = {}
+
+  // A copy with one more header.
+  pub fn with_header(self, name: Text, value: Text) -> Response {
+    var r = self
+    r.headers[name] = value
+    return r
+  }
+}
+
+pub fn text(status: Int, body: Text) -> Response {
+  return Response(status: status, body: body, headers: {"content-type": "text/plain; charset=utf-8"})
+}
+
+pub fn html(status: Int, body: Text) -> Response {
+  return Response(status: status, body: body, headers: {"content-type": "text/html; charset=utf-8"})
+}
+
+// The value as JSON (see the `json` module).
+pub fn json<T>(status: Int, value: T) -> Response {
+  return Response(status: status, body: json.encode(value), headers: {"content-type": "application/json"})
+}
+
+pub fn redirect(to: Text) -> Response {
+  return Response(status: 302, body: "", headers: {"location": to})
+}
+
+type Route {
+  method: Text
+  parts: List<Text>
+  handler: fn(Request) throws -> Response
+}
+
+pub type Router {
+  routes: List<Route> = []
+
+  pub mutating fn get(pattern: Text, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "GET", parts: split_path(pattern), handler: handler))
+  }
+
+  pub mutating fn post(pattern: Text, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "POST", parts: split_path(pattern), handler: handler))
+  }
+
+  pub mutating fn put(pattern: Text, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "PUT", parts: split_path(pattern), handler: handler))
+  }
+
+  pub mutating fn delete(pattern: Text, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
+  }
+
+  // Finds the route for a request and runs its handler: 404 when no route
+  // has this path, 405 when one has it for another method.
+  pub fn handle(self, request: Request) throws -> Response {
+    let parts = split_path(request.path)
+    var path_found = false
+    for route in self.routes {
+      if route.parts.length != parts.length {
+        continue
+      }
+      var params: Map<Text, Text> = {}
+      var same = true
+      for i in 0..<parts.length {
+        let p = route.parts[i]
+        if p.starts_with(":") {
+          params[p.slice(from: 1, to: p.length)] = parts[i]
+        } else if p != parts[i] {
+          same = false
+          break
+        }
+      }
+      if not same {
+        continue
+      }
+      path_found = true
+      if route.method != request.method {
+        continue
+      }
+      var req = request
+      req.params = params
+      let handler = route.handler
+      return try handler(req)
+    }
+    if path_found {
+      return text(405, "method not allowed")
+    }
+    return text(404, "not found")
+  }
+}
+
+fn split_path(path: Text) -> List<Text> {
+  return path.split("/").filter(p => not p.is_empty())
+}
+
+// A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
+pub fn request(method: Text, path: Text) -> Request {
+  return Request(method: method, path: path, headers: {}, body: "")
+}
+
+// Serves the router until the program is stopped (Ctrl-C), then returns.
+pub fn serve(router: Router, port: Int) throws {
+  try __serve(port, req => try router.handle(req))
+}
+
+fn __serve(port: Int, handler: fn(Request) throws -> Response) throws
+
+// ---- client (HTTPS works) ----
+// A response with any status is not an error: check `response.status`.
+// Errors are for failures to talk to the server at all.
+
+pub fn get(url: Text) throws -> Response {
+  return try __fetch("GET", url: url, body: "")
+}
+
+pub fn post(url: Text, body: Text) throws -> Response {
+  return try __fetch("POST", url: url, body: body)
+}
+
+pub fn put(url: Text, body: Text) throws -> Response {
+  return try __fetch("PUT", url: url, body: body)
+}
+
+pub fn delete(url: Text) throws -> Response {
+  return try __fetch("DELETE", url: url, body: "")
+}
+
+fn __fetch(method: Text, url: Text, body: Text) throws -> Response

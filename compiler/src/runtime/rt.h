@@ -124,6 +124,42 @@ LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
     if (!q) lt_oom();
     return q;
 }
+#elif defined(LT_THREADS)
+// With tasks, a task can move to another OS thread at any wait, and C
+// compilers may keep the address of a thread-local variable across such a
+// point; so the small-object free lists (which are per thread) are not used:
+// the system allocator is thread-safe by itself.
+LT_INLINE void *lt_alloc(size_t n) {
+    if (n >= LT_BIG) return lt_big_alloc(n);
+    void *p = malloc(n);
+    if (!p) lt_oom();
+    return p;
+}
+LT_INLINE void lt_free(void *p, size_t n) {
+    if (n >= LT_BIG) {
+        lt_big_free(p, n);
+        return;
+    }
+    free(p);
+}
+LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
+    if (old >= LT_BIG && n >= LT_BIG) return lt_big_realloc(p, old, n);
+    if (old < LT_BIG && n >= LT_BIG) {
+        void *q = lt_big_map(2 * n);
+        memcpy(q, p, old);
+        free(p);
+        return q;
+    }
+    if (old >= LT_BIG) {
+        void *q = malloc(n);
+        memcpy(q, p, n);
+        lt_big_free(p, old);
+        return q;
+    }
+    void *q = realloc(p, n);
+    if (!q) lt_oom();
+    return q;
+}
 #else
 LT_INLINE void *lt_alloc(size_t n) {
     size_t c = (n + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
@@ -188,7 +224,10 @@ LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
 
 // ---------------------------------------------------------------- panics
 
+static void (*lt_panic_hook)(const char *msg, int line);
+
 LT_NOINLINE _Noreturn void lt_panic_at(const char *msg, int line) {
+    if (lt_panic_hook) lt_panic_hook(msg, line); // returns if it can't handle it
     fflush(stdout);
     if (line > 0) {
         fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);

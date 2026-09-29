@@ -13,6 +13,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <signal.h>
+#include <setjmp.h>
 
 // ---------------------------------------------------------------- context switch
 
@@ -147,6 +148,10 @@ typedef struct lt_task {
     int64_t wake_at;                       // sleeping: deadline (ns)
     int timed_out;
     void *fiber;                           // ThreadSanitizer's view of the task
+    lt_spin io_spin;                       // held while registering for I/O
+    void *panic_jmp;                       // a jmp_buf: a panic ends this request only
+    struct lt_lock *held[8];               // locks held, released after such a panic
+    int nheld;
     char result[] __attribute__((aligned(16)));
 } lt_task;
 
@@ -156,7 +161,7 @@ typedef struct lt_task {
 static pthread_mutex_t lt_q_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t lt_q_cv = PTHREAD_COND_INITIALIZER;
 static lt_task *lt_q_head, *lt_q_tail;
-static int lt_workers, lt_idle, lt_shutdown, lt_sleepers;
+static int lt_workers, lt_idle, lt_shutdown, lt_sleepers, lt_io_waiters;
 static __thread lt_task *lt_cur;
 static __thread lt_ctx lt_worker_ctx;
 static __thread lt_spin *lt_release_after;
@@ -332,8 +337,16 @@ static lt_err lt_make_cancelled(void);
 static lt_err lt_make_channel_closed(void);
 
 // The body of every task (called from the assembly trampoline).
+static void lt_task_finish(lt_task *t);
+
 __attribute__((used, noinline)) void lt_task_main(lt_task *t) {
     t->run(t);
+    // the task may be on another OS thread now: finish in a fresh call, so
+    // that no thread-local address from before `run` is reused
+    lt_task_finish(t);
+}
+
+__attribute__((noinline)) static void lt_task_finish(lt_task *t) {
     lt_fn_drop(t->fn);
     t->fn = (lt_fn){ 0 };
     lt_spin_lock(&t->lock);
@@ -397,7 +410,7 @@ static lt_task *lt_next_task(void) {
             return NULL;
         }
         lt_idle++;
-        if (lt_idle == lt_workers && __atomic_load_n(&lt_sleepers, __ATOMIC_ACQUIRE) == 0) {
+        if (lt_idle == lt_workers && __atomic_load_n(&lt_sleepers, __ATOMIC_ACQUIRE) == 0 && __atomic_load_n(&lt_io_waiters, __ATOMIC_ACQUIRE) == 0) {
             pthread_mutex_unlock(&lt_q_mu);
             lt_deadlock();
         }
@@ -612,6 +625,20 @@ typedef struct lt_lock {
     lt_waitq q;
 } lt_lock;
 
+static void lt_lock_held(lt_lock *l, bool add) {
+    lt_task *t = lt_current();
+    if (!t) return;
+    if (add) {
+        if (t->nheld < 8) t->held[t->nheld++] = l;
+    } else {
+        for (int i = t->nheld - 1; i >= 0; i--)
+            if (t->held[i] == l) {
+                t->held[i] = t->held[--t->nheld];
+                break;
+            }
+    }
+}
+
 static void lt_lock_init(lt_lock *l) {
     memset(l, 0, sizeof *l);
     l->q.lock = &l->spin;
@@ -621,12 +648,15 @@ static void lt_lock_acquire(lt_lock *l) {
     if (!l->locked) {
         l->locked = 1;
         lt_spin_unlock(&l->spin);
+        lt_lock_held(l, true);
         return;
     }
     // the releaser hands the lock over directly
     lt_park_on(&l->q, false);
+    lt_lock_held(l, true);
 }
 static void lt_lock_release(lt_lock *l) {
+    lt_lock_held(l, false);
     lt_spin_lock(&l->spin);
     lt_task *t = lt_wq_pop(&l->q);
     if (!t) l->locked = 0;
@@ -727,6 +757,95 @@ static void lt_chan_close(lt_chan *c) {
     lt_spin_unlock(&c->spin);
 }
 
+// ---------------------------------------------------------------- waiting for sockets
+
+#if defined(__APPLE__) || defined(__FreeBSD__)
+#include <sys/event.h>
+#define LT_KQUEUE 1
+#else
+#include <sys/epoll.h>
+#endif
+
+static int lt_poll_fd = -1;
+static pthread_once_t lt_poll_once = PTHREAD_ONCE_INIT;
+
+static void *lt_poll_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+#ifdef LT_KQUEUE
+        struct kevent evs[64];
+        int n = kevent(lt_poll_fd, NULL, 0, evs, 64, NULL);
+        for (int i = 0; i < n; i++) {
+            lt_task *t = (lt_task *)evs[i].udata;
+#else
+        struct epoll_event evs[64];
+        int n = epoll_wait(lt_poll_fd, evs, 64, -1);
+        for (int i = 0; i < n; i++) {
+            lt_task *t = (lt_task *)evs[i].data.ptr;
+#endif
+            if (!t) continue;
+            // the task is fully parked once its io_spin is free
+            lt_spin_lock(&t->io_spin);
+            lt_spin_unlock(&t->io_spin);
+            __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+            lt_ready(t);
+        }
+    }
+    return NULL;
+}
+
+static void lt_poll_start(void) {
+#ifdef LT_KQUEUE
+    lt_poll_fd = kqueue();
+#else
+    lt_poll_fd = epoll_create1(0);
+#endif
+    pthread_t th;
+    pthread_create(&th, NULL, lt_poll_thread, NULL);
+    pthread_detach(th);
+}
+
+// Parks the current task until `fd` can be read (or written).
+__attribute__((noinline)) static void lt_io_wait(int fd, bool write) {
+    pthread_once(&lt_poll_once, lt_poll_start);
+    lt_task *t = lt_current();
+    lt_spin_lock(&t->io_spin);
+    __atomic_fetch_add(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+#ifdef LT_KQUEUE
+    struct kevent ev;
+    EV_SET(&ev, fd, write ? EVFILT_WRITE : EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, t);
+    kevent(lt_poll_fd, &ev, 1, NULL, 0, NULL);
+#else
+    struct epoll_event ev;
+    ev.events = (write ? EPOLLOUT : EPOLLIN) | EPOLLONESHOT;
+    ev.data.ptr = t;
+    if (epoll_ctl(lt_poll_fd, EPOLL_CTL_MOD, fd, &ev) != 0) epoll_ctl(lt_poll_fd, EPOLL_CTL_ADD, fd, &ev);
+#endif
+    __atomic_store_n(&t->state, LT_PARKED, __ATOMIC_RELAXED);
+    lt_release_after = &t->io_spin;
+    lt_to_worker(t);
+}
+
+// A task that nobody waits for (a connection of a server).
+static void lt_spawn_detached(void (*run)(lt_task *), const void *arg, size_t arg_size) {
+    lt_task *t = lt_task_new((lt_fn){ 0 }, arg_size, run, NULL);
+    memcpy(t->result, arg, arg_size);
+    t->rc = 1; // only the running reference
+    lt_ready(t);
+}
+
+// A panic in a task that set panic_jmp (an HTTP handler) ends only that task's
+// current request: its locks are released and control returns to the setjmp.
+static void lt_task_panic_hook(const char *msg, int line) {
+    lt_task *t = lt_current();
+    if (!t || !t->panic_jmp) return;
+    fflush(stdout);
+    if (line > 0) fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);
+    else fprintf(stderr, "panic: %s\n", msg);
+    while (t->nheld > 0) lt_lock_release(t->held[t->nheld - 1]);
+    longjmp(*(jmp_buf *)t->panic_jmp, 1);
+}
+
 // ---------------------------------------------------------------- start
 
 static int lt_ncpu(void) {
@@ -739,6 +858,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     lt_task *m = lt_task_new(entry, result_size, run, NULL);
     m->rc = 2; // returned to the caller + running
     lt_main_task = m;
+    lt_panic_hook = lt_task_panic_hook;
     lt_workers = lt_ncpu();
     pthread_t timer;
     pthread_create(&timer, NULL, lt_timer_thread, NULL);
