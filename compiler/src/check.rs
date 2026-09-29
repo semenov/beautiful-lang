@@ -3514,6 +3514,21 @@ impl Checker {
     }
 
     fn exhaustive(&mut self, ty: &Ty, arms: &[TArm], span: Span) {
+        // `a | b => x` covers what `a => x` and `b => x` would
+        if arms.iter().any(|a| matches!(a.pat, TPat::Or(_))) {
+            let mut flat = vec![];
+            for a in arms {
+                match &a.pat {
+                    TPat::Or(alts) => {
+                        for p in alts {
+                            flat.push(TArm { pat: p.clone(), guard: a.guard.clone(), body: a.body.clone() });
+                        }
+                    }
+                    _ => flat.push(a.clone()),
+                }
+            }
+            return self.exhaustive(ty, &flat, span);
+        }
         let total = |p: &TPat| matches!(p, TPat::Wild | TPat::Bind(_)) || matches!(p, TPat::Record { args } if args.iter().all(|a| matches!(a, TPat::Wild | TPat::Bind(_))));
         if arms.iter().any(|a| a.guard.is_none() && total(&a.pat)) {
             return;
@@ -3581,6 +3596,12 @@ impl Checker {
         let ty = self.resolve(ty);
         match pat {
             Pattern::Wild(_) => TPat::Wild,
+            Pattern::Or(alts, sp) => {
+                if alts.iter().any(pattern_binds) {
+                    self.err_help(*sp, "patterns joined with `|` can't bind names", "match the cases separately, or bind nothing: `Circle(_) | Square(_) => ...`");
+                }
+                TPat::Or(alts.iter().map(|a| self.pattern(a, &ty)).collect())
+            }
             Pattern::Bind(name, sp) => TPat::Bind(self.declare(*sp, name, ty, false)),
             Pattern::Int(v, sp) => {
                 if !matches!(ty, Ty::Int | Ty::Err) {
@@ -3943,6 +3964,7 @@ fn is_literal(e: &Expr) -> bool {
 fn pattern_binds(p: &Pattern) -> bool {
     match p {
         Pattern::Bind(..) => true,
+        Pattern::Or(alts, _) => alts.iter().any(pattern_binds),
         Pattern::Some(x, _) => pattern_binds(x),
         Pattern::Ctor { args: Some(a), .. } => a.iter().any(pattern_binds),
         _ => false,

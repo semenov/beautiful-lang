@@ -37,7 +37,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
     - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
     - [ ] sorting by a list key (lexicographic) or with a comparator
-    - [ ] or-patterns in `match`: `"a" | "b" => ...`
+    - [x] or-patterns in `match`: `"a" | "b" => ...`
     - [ ] `Duration` in interpolation shows its fields
     - [ ] a variant named `String` can't be built by its bare name: suggest `Value.String(...)`
     - [ ] guide: a one-line record example doesn't parse

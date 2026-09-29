@@ -210,6 +210,8 @@ pub enum Pattern {
     Some(Box<Pattern>, Span),
     // `Circle(r)`, `Status.Draft`, `NotFound` (type test)
     Ctor { path: Vec<String>, args: Option<Vec<Pattern>>, span: Span },
+    // `"a" | "b"`: any of them (in a match arm, without names)
+    Or(Vec<Pattern>, Span),
 }
 
 impl Pattern {
@@ -224,6 +226,7 @@ impl Pattern {
             | Pattern::None(s)
             | Pattern::Some(_, s) => *s,
             Pattern::Ctor { span, .. } => *span,
+            Pattern::Or(_, span) => *span,
         }
     }
 }

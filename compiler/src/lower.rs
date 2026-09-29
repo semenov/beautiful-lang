@@ -1171,6 +1171,20 @@ impl<'a> Lowerer<'a> {
         };
         match pat {
             TPat::Wild => {}
+            TPat::Or(alts) => {
+                // try each; the first that fits goes on, the last one's
+                // failure is the pattern's
+                let ok = self.new_block();
+                for (i, alt) in alts.iter().enumerate() {
+                    let miss = if i + 1 < alts.len() { self.new_block() } else { fail };
+                    self.test_pat(alt, v.clone(), ty, miss);
+                    self.term(Term::Goto(ok));
+                    if i + 1 < alts.len() {
+                        self.switch_to(miss);
+                    }
+                }
+                self.switch_to(ok);
+            }
             TPat::Bind(id) => {
                 let lty = self.local_ty(*id);
                 let name = self.fbr().body_locals[*id].name.clone();

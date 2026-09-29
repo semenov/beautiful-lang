@@ -84,7 +84,14 @@ let label = match shape {
   Circle(radius) => "circle ${radius}"
   Rect(width, height) => "rect"
 }
+let kind = match word {
+  "if" | "else" | "match" => "keyword"   // `|`: any of them (binds no names)
+  _ => "name"
+}
 ```
+
+Patterns: literals, `_`, a name, `some(p)`, `none`, `Variant(p, ...)`, a
+record type inside an interface (`NotFound(id)`), and `p | q`.
 
 No semicolons. Braces always. `if` conditions have no parentheses.
 Two-space indentation; `lang fmt` lays files out the standard way.

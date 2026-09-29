@@ -1,0 +1,33 @@
+// Or-patterns: `"a" | "b" => ...` in a match arm.
+
+enum Shape {
+  Circle(r: Float)
+  Square(side: Float)
+  Dot
+}
+
+fn keyword(w: String) -> Bool {
+  return match w {
+    "break" | "case" | "continue" => true
+    _ => false
+  }
+}
+
+fn round(s: Shape) -> String {
+  return match s {
+    Circle(_) | Dot => "round"
+    Square(_) => "square"
+  }
+}
+
+fn small(n: Int?) -> String {
+  return match n {
+    some(1) | some(2) | none => "tiny or nothing"
+    some(_) => "other"
+  }
+}
+
+fn main() {
+  print("${["break", "if", "case"].map(w => keyword(w))} ${round(Circle(r: 1.0))} ${round(Dot)} ${round(Square(side: 2.0))}")
+  print("${small(1)} ${small(none)} ${small(5)}")
+}

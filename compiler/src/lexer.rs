@@ -82,6 +82,8 @@ pub enum Tok {
     SlashEq,
     PercentEq,
     Amp,
+    // `a | b` in a match arm
+    Bar,
     Newline,
     Eof,
 }
@@ -287,6 +289,7 @@ impl<'a> Lexer<'a> {
                     b'/' => (Tok::Slash, 1),
                     b'%' => (Tok::Percent, 1),
                     b'&' => (Tok::Amp, 1),
+                    b'|' => (Tok::Bar, 1),
                     b'!' => return Err(self.err(lo, "use `not x` instead of `!x`")),
                     b';' => return Err(self.err(lo, "no semicolons: a statement ends at the end of the line")),
                     b'\'' => return Err(self.err(lo, "text uses double quotes only")),

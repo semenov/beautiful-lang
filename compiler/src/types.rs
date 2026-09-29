@@ -248,6 +248,8 @@ pub enum TPat {
     Type { def: DefId, targs: Vec<Ty>, args: Vec<TPat>, bind: Option<LocalId> },
     // a record matched by its fields (scrutinee already has the record type)
     Record { args: Vec<TPat> },
+    // any of the alternatives (they bind no names)
+    Or(Vec<TPat>),
 }
 
 #[derive(Clone, Debug)]

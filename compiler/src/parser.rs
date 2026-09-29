@@ -106,6 +106,7 @@ impl Parser {
             }
             Tok::RBrace | Tok::Eof => Ok(()),
             Tok::Catch => Err(self.err_here("`catch` needs `try` before the call it handles").help("write `try f(x) catch err { ... }`")),
+            Tok::Bar => Err(self.err_here("`|` only joins patterns in a `match` arm").help("either of two conditions: `a or b`; bits: `a.bit_or(b)`")),
             t => {
                 let d = Self::describe(t);
                 Err(self.err_here(format!("expected the end of the line, found {}", d)))
@@ -806,6 +807,9 @@ impl Parser {
                 let span = sp.to(e.span);
                 return Ok(Expr { kind: ExprKind::ExpectThrows(Box::new(e)), span });
             }
+            Tok::Bar => {
+                return Err(self.err_here("`|` only joins patterns in a `match` arm: `\"a\" | \"b\" => ...`").help("for either of two conditions, use `or`"));
+            }
             Tok::Amp => {
                 return Err(self
                     .err_here("there is no `&`: a function can't change its arguments")
@@ -1071,7 +1075,16 @@ impl Parser {
                     if self.at(&Tok::Ident("case".into())) {
                         return Err(self.err_here("match arms have no `case`").help("write `Circle(r) => ...`"));
                     }
-                    let pat = self.pattern()?;
+                    let mut pat = self.pattern()?;
+                    if self.at(&Tok::Bar) {
+                        let mut alts = vec![pat];
+                        while self.eat(&Tok::Bar) {
+                            self.skip_newlines();
+                            alts.push(self.pattern()?);
+                        }
+                        let span = alts[0].span().to(alts[alts.len() - 1].span());
+                        pat = Pattern::Or(alts, span);
+                    }
                     let guard = if self.eat(&Tok::If) {
                         self.in_guard = true;
                         let g = self.expr();
@@ -1280,6 +1293,7 @@ pub fn tok_text(t: &Tok) -> &'static str {
         Tok::SlashEq => "/=",
         Tok::PercentEq => "%=",
         Tok::Amp => "&",
+        Tok::Bar => "|",
         _ => "?",
     }
 }
