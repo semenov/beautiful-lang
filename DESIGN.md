@@ -182,14 +182,47 @@ used result is always a mutation or an action. The rule also catches the
 - `throws` passes through lambdas: `try users.map(u => try load(u))`.
   Higher-order functions declare this once in the standard library.
 
-### Modules
+### Modules and packages
 
-- One file is one module.
-- Private by default. The public API is marked `pub`.
-- Imports are qualified only: `import json` → `json.decode(...)`. No `*` and
-  no importing individual names. Every name is either declared in this file or
-  has a module prefix.
-- No cyclic imports.
+- **One file is one module.** The import path is the file's path from the
+  project root, with dots: `import store.users` loads `store/users.lang`;
+  the code uses the last part: `users.find(...)`. Only root-relative paths,
+  no `../` or relative imports (one way to write an import).
+- An alias only when two imports would have the same name:
+  `import billing.users as billing_users` (the compiler asks for it).
+- Imports are always qualified: no `from x import y`, no `*`. Every name in
+  the code is either declared in this file or has a module prefix.
+- **Private by default:** without `pub`, a function, type or method is
+  visible only inside its file. Fields are visible wherever the type is.
+- **No cyclic imports:** the error shows the cycle (`a → b → a`) and
+  suggests moving the shared part into a third module.
+- The main file can't be imported.
+- **Where a name comes from:** the standard library first, then packages
+  from `lang.toml`, then the project's files.
+- **The project root** is the nearest directory with `lang.toml`; without
+  one, the directory of the file being run.
+- **Packages are git repositories** (like Go modules; no central registry
+  for now). `lang.toml` lists them with a version tag:
+
+  ```toml
+  [package]
+  name = "shop"
+  version = "0.1.0"
+
+  [dependencies]
+  router = { git = "https://github.com/someone/router", version = "v1.2.0" }
+  ```
+
+  `lang add <name> <git-url> --version <tag>` adds one; `lang.lock` pins the
+  exact commit of every package (including the packages' own
+  dependencies), so builds are reproducible. Packages are downloaded once
+  into `~/.lang/packages/<name>/<commit>/`. `lang fetch` downloads what the
+  lock file pins; `lang update` moves to the newest commits of the tags.
+- **A package's main module** is the file named after the package
+  (`router/router.lang` → `import router`); its other files are
+  `import router.middleware`. One version of each package per build: two
+  different sources for the same name are an error.
+- `lang new <name>` creates a project (`lang.toml`, `main.lang`).
 
 ### Numbers
 

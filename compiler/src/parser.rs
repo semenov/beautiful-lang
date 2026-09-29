@@ -123,8 +123,25 @@ impl Parser {
                 break;
             }
             if self.eat(&Tok::Import) {
-                let (name, sp) = self.ident("a module name")?;
-                imports.push((name, sp));
+                let (first, sp) = self.ident("a module name")?;
+                let mut path = vec![first];
+                let mut span = sp;
+                while self.eat(&Tok::Dot) {
+                    let (seg, ssp) = self.ident("a module name")?;
+                    path.push(seg);
+                    span = span.to(ssp);
+                }
+                let alias = if matches!(self.peek(), Tok::Ident(s) if s == "as") {
+                    self.bump();
+                    Some(self.ident("a name for the module")?.0)
+                } else {
+                    None
+                };
+                if matches!(self.peek(), Tok::LBrace) || matches!(self.peek(), Tok::Ident(s) if s == "from") {
+                    return Err(self.err_here("import a whole module").help("write `import json` and use `json.decode(...)`"));
+                }
+                let key = path.join(".");
+                imports.push(Import { path, alias, span, key });
                 self.end_of_stmt()?;
                 continue;
             }

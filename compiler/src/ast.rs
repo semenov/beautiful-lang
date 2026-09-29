@@ -4,8 +4,24 @@ use crate::diag::Span;
 
 #[derive(Debug, Clone)]
 pub struct Module {
-    pub imports: Vec<(String, Span)>,
+    pub imports: Vec<Import>,
     pub items: Vec<Item>,
+}
+
+// `import store.users` / `import billing.users as billing_users`
+#[derive(Debug, Clone)]
+pub struct Import {
+    pub path: Vec<String>,
+    pub alias: Option<String>,
+    pub span: Span,
+    // the module it refers to, filled in by the loader
+    pub key: String,
+}
+
+impl Import {
+    pub fn local_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or_else(|| self.path.last().unwrap())
+    }
 }
 
 #[derive(Debug, Clone)]

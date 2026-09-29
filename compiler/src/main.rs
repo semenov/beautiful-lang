@@ -6,6 +6,7 @@ mod lexer;
 mod lower;
 mod mir;
 mod parser;
+mod project;
 mod rc;
 mod types;
 
@@ -14,6 +15,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 const USAGE: &str = "usage:
+  lang new <name>                   create a project
+  lang add <name> <git-url> [--version <tag>]   add a package
+  lang fetch                        download the packages in lang.lock
+  lang update                       move packages to their newest matching versions
   lang run <file.lang> [args]       compile and run
   lang build <file.lang> [-o out]   compile an optimized binary
   lang test <file.lang>             run the tests in the file
@@ -59,45 +64,148 @@ fn std_module(name: &str) -> Option<&'static str> {
     })
 }
 
-// Parses and checks; prints errors. Returns the program on success.
+struct Loaded {
+    key: String,
+    module: ast::Module,
+    privileged: bool,
+}
+
+// Where a module's own imports are looked up: the project, or a package.
+#[derive(Clone)]
+struct Base {
+    root: PathBuf,
+    prefix: String, // "" for the project, the package name for a package
+}
+
+// Parses and checks the program; prints errors. Modules are found in this
+// order: the standard library, the project's packages, the project's files.
 fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)> {
-    let text = match std::fs::read_to_string(path) {
+    let entry = PathBuf::from(path);
+    let text = match std::fs::read_to_string(&entry) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("error: can't read {}: {}", path, e);
             return None;
         }
     };
-    let parse = |sources: &mut Sources, name: &str, src: &str, privileged: bool| -> Result<ast::Module, ()> {
-        let f = sources.add(name.to_string(), src.to_string());
-        lexer::lex(src, f).and_then(|t| parser::parse_module(t, privileged)).map_err(|d| eprint!("{}", sources.render(&d)))
+    let root = project::find_root(&entry);
+    let deps = match project::resolve(&root, false) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            return None;
+        }
     };
-    let prelude = parse(sources, "<prelude>", include_str!("prelude.lang"), true).ok()?;
+    let parse = |sources: &mut Sources, name: &str, src: &str, privileged: bool| -> Option<ast::Module> {
+        let f = sources.add(name.to_string(), src.to_string());
+        lexer::lex(src, f).and_then(|t| parser::parse_module(t, privileged)).map_err(|d| eprint!("{}", sources.render(&d))).ok()
+    };
+    let prelude = parse(sources, "<prelude>", include_str!("prelude.lang"), true)?;
     let uf = sources.files.len() as u32;
-    let user = parse(sources, path, &text, false).ok()?;
-    // standard library modules the program uses, and the ones they use
-    let mut mods: Vec<(String, ast::Module, bool)> = vec![("<prelude>".into(), prelude, true)];
-    let mut pending: Vec<(String, diag::Span)> = user.imports.clone();
-    let mut loaded: Vec<String> = vec![];
-    while let Some((name, span)) = pending.pop() {
-        if loaded.contains(&name) {
-            continue;
-        }
-        match std_module(&name) {
-            Some(src) => {
-                let m = parse(sources, &format!("<{}>", name), src, true).ok()?;
-                pending.extend(m.imports.iter().cloned());
-                loaded.push(name.clone());
-                mods.push((name, m, true));
-            }
-            None => {
-                let d = diag::Diag::new(span, format!("unknown module `{}`", name));
+    let mut user = parse(sources, path, &text, false)?;
+    let abs_entry = std::fs::canonicalize(&entry).unwrap_or(entry.clone());
+    let entry_key = abs_entry
+        .strip_prefix(&root)
+        .ok()
+        .map(|r| r.with_extension("").to_string_lossy().replace('/', "."))
+        .unwrap_or_else(|| "main".into());
+
+    let mut loaded: Vec<Loaded> = vec![Loaded { key: "<prelude>".into(), module: prelude, privileged: true }];
+    let mut graph: std::collections::HashMap<String, Vec<(String, diag::Span)>> = std::collections::HashMap::new();
+    let mut failed = false;
+    // resolves the imports of `m` (seen from `base`) and queues new modules
+    let mut queue: Vec<(ast::Module, Base, String, bool)> = vec![];
+    let project_base = Base { root: root.clone(), prefix: String::new() };
+    let mut resolve_imports = |m: &mut ast::Module, base: &Base, from_key: &str, sources: &mut Sources, queue: &mut Vec<(ast::Module, Base, String, bool)>, known: &mut Vec<String>| -> bool {
+        let mut ok = true;
+        for imp in m.imports.iter_mut() {
+            let dotted = imp.path.join(".");
+            let (key, file, next_base, privileged): (String, Option<PathBuf>, Base, bool) = if imp.path.len() == 1 && std_module(&dotted).is_some() {
+                (dotted.clone(), None, base.clone(), true)
+            } else if let Some(dir) = deps.get(&imp.path[0]) {
+                let rel = if imp.path.len() == 1 { imp.path[0].clone() } else { imp.path[1..].join("/") };
+                (dotted.clone(), Some(dir.join(format!("{}.lang", rel))), Base { root: dir.clone(), prefix: imp.path[0].clone() }, false)
+            } else {
+                let key = if base.prefix.is_empty() { dotted.clone() } else { format!("{}.{}", base.prefix, dotted) };
+                (key, Some(base.root.join(format!("{}.lang", imp.path.join("/")))), base.clone(), false)
+            };
+            imp.key = key.clone();
+            graph.entry(from_key.to_string()).or_default().push((key.clone(), imp.span));
+            if key == entry_key && base.prefix.is_empty() {
+                let d = diag::Diag::new(imp.span, "the main file can't be imported").help("move the shared code into its own file and import that");
                 eprint!("{}", sources.render(&d));
-                return None;
+                ok = false;
+                continue;
+            }
+            if known.contains(&key) {
+                continue;
+            }
+            known.push(key.clone());
+            let (name, src) = match &file {
+                None => (format!("<{}>", dotted), std_module(&dotted).unwrap().to_string()),
+                Some(f) => match std::fs::read_to_string(f) {
+                    Ok(s) => (f.to_string_lossy().to_string(), s),
+                    Err(_) => {
+                        let shown = f.strip_prefix(&root).map(|p| p.to_path_buf()).unwrap_or(f.clone());
+                        let d = diag::Diag::new(imp.span, format!("there is no module `{}`", dotted))
+                            .help(format!("expected the file {}, a package in lang.toml, or a standard module", shown.display()));
+                        eprint!("{}", sources.render(&d));
+                        ok = false;
+                        continue;
+                    }
+                },
+            };
+            let f = sources.add(name, src.clone());
+            match lexer::lex(&src, f).and_then(|t| parser::parse_module(t, privileged || file.is_none())) {
+                Ok(pm) => queue.push((pm, next_base, key, file.is_none())),
+                Err(d) => {
+                    eprint!("{}", sources.render(&d));
+                    ok = false;
+                }
             }
         }
+        ok
+    };
+    let mut known: Vec<String> = vec![entry_key.clone()];
+    if !resolve_imports(&mut user, &project_base, &entry_key, sources, &mut queue, &mut known) {
+        failed = true;
     }
-    mods.push((path.to_string(), user, false));
+    while let Some((mut m, base, key, privileged)) = queue.pop() {
+        if !resolve_imports(&mut m, &base, &key, sources, &mut queue, &mut known) {
+            failed = true;
+        }
+        loaded.push(Loaded { key, module: m, privileged });
+    }
+    if failed {
+        return None;
+    }
+    // import cycles
+    fn visit(k: &str, graph: &std::collections::HashMap<String, Vec<(String, diag::Span)>>, stack: &mut Vec<String>, done: &mut Vec<String>) -> Option<(Vec<String>, diag::Span)> {
+        if done.iter().any(|d| d == k) {
+            return None;
+        }
+        stack.push(k.to_string());
+        for (next, sp) in graph.get(k).map(|v| v.as_slice()).unwrap_or(&[]) {
+            if let Some(pos) = stack.iter().position(|s| s == next) {
+                let mut cycle = stack[pos..].to_vec();
+                cycle.push(next.clone());
+                return Some((cycle, *sp));
+            }
+            if let Some(c) = visit(next, graph, stack, done) {
+                return Some(c);
+            }
+        }
+        stack.pop();
+        done.push(k.to_string());
+        None
+    }
+    if let Some((cycle, sp)) = visit(&entry_key, &graph, &mut vec![], &mut vec![]) {
+        let d = diag::Diag::new(sp, format!("modules import each other: {}", cycle.join(" → "))).help("move what they share into a third module that both import");
+        eprint!("{}", sources.render(&d));
+        return None;
+    }
+    let mut mods: Vec<(String, ast::Module, bool)> = loaded.into_iter().map(|l| (l.key, l.module, l.privileged)).collect();
+    mods.push((entry_key, user, false));
     let mut c = check::Checker::new();
     c.check_program(&mods);
     if !c.diags.is_empty() {
@@ -110,6 +218,76 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
         return None;
     }
     Some((c.prog, uf))
+}
+
+// `lang new`, `lang add`, `lang fetch`, `lang update`
+fn project_command(args: &[String]) -> Option<ExitCode> {
+    let cmd = args.first()?.as_str();
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let fail = |e: String| {
+        eprintln!("error: {}", e);
+        Some(ExitCode::from(1))
+    };
+    match cmd {
+        "new" => {
+            let name = match args.get(1) {
+                Some(n) => n.clone(),
+                None => return fail("usage: lang new <name>".into()),
+            };
+            let dir = cwd.join(&name);
+            if dir.exists() {
+                return fail(format!("{} already exists", dir.display()));
+            }
+            if std::fs::create_dir_all(&dir).is_err() {
+                return fail(format!("can't create {}", dir.display()));
+            }
+            let m = project::Manifest { name: name.clone(), version: "0.1.0".into(), deps: Default::default() };
+            if let Err(e) = project::write_manifest(&dir, &m) {
+                return fail(e);
+            }
+            let _ = std::fs::write(dir.join("main.lang"), format!("fn main() {{\n  print(\"hello from {}\")\n}}\n", name));
+            println!("created {}/ (lang.toml, main.lang)\nrun it: cd {} && lang run main.lang", name, name);
+            Some(ExitCode::SUCCESS)
+        }
+        "add" => {
+            let (name, git) = match (args.get(1), args.get(2)) {
+                (Some(n), Some(g)) => (n.clone(), g.clone()),
+                _ => return fail("usage: lang add <name> <git-url> [--version <tag>]".into()),
+            };
+            let version = args.iter().position(|a| a == "--version").and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
+            let root = project::find_root(&cwd.join("x.lang"));
+            let mut m = match project::read_manifest(&root) {
+                Ok(Some(m)) => m,
+                Ok(None) => return fail("there is no lang.toml here; create a project with `lang new <name>`".into()),
+                Err(e) => return fail(e),
+            };
+            m.deps.insert(name.clone(), project::Dep { git, version });
+            if let Err(e) = project::write_manifest(&root, &m) {
+                return fail(e);
+            }
+            match project::resolve(&root, false) {
+                Ok(dirs) => {
+                    println!("added {} ({} package(s) pinned in lang.lock)
+use it: import {}", name, dirs.len(), name);
+                    Some(ExitCode::SUCCESS)
+                }
+                Err(e) => fail(e),
+            }
+        }
+        "fetch" | "update" => {
+            let root = project::find_root(&cwd.join("x.lang"));
+            match project::resolve(&root, cmd == "update") {
+                Ok(dirs) => {
+                    for (n, d) in &dirs {
+                        println!("{} -> {}", n, d.display());
+                    }
+                    Some(ExitCode::SUCCESS)
+                }
+                Err(e) => fail(e),
+            }
+        }
+        _ => None,
+    }
 }
 
 fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
@@ -190,6 +368,10 @@ fn build_dir() -> PathBuf {
 }
 
 fn main() -> ExitCode {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = project_command(&raw) {
+        return code;
+    }
     let opts = match parse_args() {
         Some(o) => o,
         None => {

@@ -202,12 +202,15 @@ impl Checker {
             self.modules.push(ModScope { name: name.clone(), globals: HashMap::new(), imports: HashMap::new(), privileged: *privileged });
         }
         for (i, (_, m, _)) in mods.iter().enumerate() {
-            for (imp, sp) in &m.imports {
-                match mods.iter().position(|x| x.0 == *imp) {
+            for imp in &m.imports {
+                let local = imp.local_name().to_string();
+                match mods.iter().position(|x| x.0 == imp.key) {
                     Some(j) if j != 0 => {
-                        self.modules[i].imports.insert(imp.clone(), j);
+                        if self.modules[i].imports.insert(local.clone(), j).is_some() {
+                            self.err_help(imp.span, format!("two imports are named `{}`", local), format!("rename one: `import {} as other_name`", imp.path.join(".")));
+                        }
                     }
-                    _ => self.err(*sp, format!("unknown module `{}`", imp)),
+                    _ => self.err(imp.span, format!("unknown module `{}`", imp.path.join("."))),
                 }
             }
         }
@@ -2496,6 +2499,11 @@ impl Checker {
             }
         };
         let f = self.prog.fns[id].clone();
+        let md = self.fc().module;
+        if f.module != md && !f.is_pub {
+            let tn = self.prog.defs[def].name.clone();
+            self.err_help(nsp, format!("`{}.{}` is private to its module", tn, name), "mark it `pub fn` in its module to use it here");
+        }
         let n_owner = self.prog.defs[def].generics.len();
         let targs = self.instantiate(&f, &owner_args[..n_owner.min(owner_args.len())], explicit, span);
         let params: Vec<(String, Ty)> = f.params.iter().map(|(n, t)| (n.clone(), t.subst(&targs))).collect();
