@@ -1,0 +1,41 @@
+// The API's routes.
+
+import api
+import articles
+import comments
+import http
+import profiles
+import users
+
+pub fn router(app: api.App) -> http.Router {
+  var router = http.Router()
+  router.use(http.log_requests())
+  router.use(http.cors(["*"]))
+  router.use(api.errors())
+
+  router.post("/api/users", req => try users.register(req, app))
+  router.post("/api/users/login", req => try users.login(req, app))
+  router.get("/api/user", req => try users.current(req, app))
+  router.put("/api/user", req => try users.update(req, app))
+
+  router.get("/api/profiles/:username", req => try profiles.get(req, app))
+  router.post("/api/profiles/:username/follow", req => try profiles.follow(req, app))
+  router.delete("/api/profiles/:username/follow", req => try profiles.unfollow(req, app))
+
+  // before /api/articles/:slug: the first route that matches wins
+  router.get("/api/articles/feed", req => try articles.feed(req, app))
+  router.get("/api/articles", req => try articles.get_list(req, app))
+  router.post("/api/articles", req => try articles.create(req, app))
+  router.get("/api/articles/:slug", req => try articles.get(req, app))
+  router.put("/api/articles/:slug", req => try articles.update(req, app))
+  router.delete("/api/articles/:slug", req => try articles.delete(req, app))
+  router.post("/api/articles/:slug/favorite", req => try articles.favorite(req, app))
+  router.delete("/api/articles/:slug/favorite", req => try articles.unfavorite(req, app))
+
+  router.get("/api/articles/:slug/comments", req => try comments.list(req, app))
+  router.post("/api/articles/:slug/comments", req => try comments.add(req, app))
+  router.delete("/api/articles/:slug/comments/:id", req => try comments.delete(req, app))
+
+  router.get("/api/tags", req => try articles.tags_list(req, app))
+  return router
+}

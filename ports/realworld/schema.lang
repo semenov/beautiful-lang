@@ -1,0 +1,78 @@
+// The tables, created on start when they don't exist yet.
+
+import db
+
+pub fn create(conn: db.Connection) throws {
+  try conn.execute("pragma foreign_keys = on", [])
+  try conn.execute("pragma journal_mode = wal", [])
+  try conn.execute("""
+    create table if not exists users (
+      id integer primary key,
+      username text not null unique,
+      email text not null unique,
+      password_hash text not null,
+      bio text,
+      image text
+    )
+    """, [])
+  try conn.execute("""
+    create table if not exists follows (
+      follower_id integer not null references users(id) on delete cascade,
+      followed_id integer not null references users(id) on delete cascade,
+      primary key (follower_id, followed_id)
+    )
+    """, [])
+  try conn.execute("""
+    create table if not exists articles (
+      id integer primary key,
+      slug text not null unique,
+      title text not null,
+      description text not null,
+      body text not null,
+      author_id integer not null references users(id) on delete cascade,
+      created_at text not null,
+      updated_at text not null
+    )
+    """, [])
+  try conn.execute("""
+    create table if not exists article_tags (
+      article_id integer not null references articles(id) on delete cascade,
+      tag text not null,
+      primary key (article_id, tag)
+    )
+    """, [])
+  try conn.execute("create index if not exists article_tags_tag on article_tags (tag)", [])
+  try conn.execute("""
+    create table if not exists favorites (
+      user_id integer not null references users(id) on delete cascade,
+      article_id integer not null references articles(id) on delete cascade,
+      primary key (user_id, article_id)
+    )
+    """, [])
+  try conn.execute("create index if not exists favorites_article on favorites (article_id)", [])
+  try conn.execute("""
+    create table if not exists comments (
+      id integer primary key,
+      body text not null,
+      article_id integer not null references articles(id) on delete cascade,
+      author_id integer not null references users(id) on delete cascade,
+      created_at text not null,
+      updated_at text not null
+    )
+    """, [])
+  try conn.execute("create index if not exists comments_article on comments (article_id)", [])
+  // An article with what every answer shows about it. Who is asking
+  // (favorited, following) is added by the queries.
+  try conn.execute("""
+    create view if not exists article_view as
+    select
+      a.id, a.slug, a.title, a.description, a.body, a.created_at, a.updated_at,
+      a.author_id, u.username as author_username, u.bio as author_bio,
+      u.image as author_image,
+      (select count(*) from favorites f where f.article_id = a.id) as favorites_count,
+      (select json_group_array(tag) from (
+        select t.tag from article_tags t where t.article_id = a.id order by t.tag
+      )) as tags
+    from articles a join users u on u.id = a.author_id
+    """, [])
+}

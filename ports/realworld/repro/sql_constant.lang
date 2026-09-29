@@ -1,0 +1,27 @@
+// A top-level `let` holding SQL text is rejected as a query, though it is
+// a fixed literal and can't carry injected values. So queries can't share
+// SQL: the article list, the feed and the single article all need the same
+// 15-column select with the same two `exists(...)` subqueries.
+//
+// Workaround in the port: an SQL view (`article_view`) for the shared
+// part, and one query with `(?2 = '' or author = ?2) and ...` for the
+// optional filters, since a WHERE clause can't be built either.
+//
+// Expected: compiles (a `let` of a string literal is as safe as the
+// literal). Got:
+//   error: the SQL must be written right here, as text in quotes
+
+import db
+
+let count_tables = "select count(*) as n from sqlite_master"
+
+type Count {
+  n: Int
+}
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    let rows = try conn.query<Count>(count_tables, [])
+    print("${rows[0].n}")
+  }
+}

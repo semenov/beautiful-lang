@@ -1,0 +1,56 @@
+// `db.Connection` is meant to be shared by tasks (`insert` says "Safe when
+// several tasks share the connection"), but `transaction` isn't:
+//
+// 1. Two tasks in `transaction` at once: the second fails with
+//    "cannot start a transaction within a transaction".
+// 2. A statement another task runs while a transaction is open becomes part
+//    of it: when the transaction rolls back, the other task's insert
+//    (which succeeded, and was never in a transaction) is gone too.
+//
+// Expected: each task's transaction is its own (a connection per
+// transaction, or transactions wait for each other), and statements from
+// other tasks are not taken in.
+
+import db
+import time
+
+type Count {
+  n: Int
+}
+
+fn slow_transaction(conn: db.Connection, fail: Bool) throws {
+  try conn.transaction(() => {
+    try conn.execute("insert into t (who) values ('transaction')", [])
+    try time.sleep(time.millis(100))
+    if fail {
+      throw Failure(message: "rolled back on purpose")
+    }
+  })
+}
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table t (who text)", [])
+
+    // 1: two transactions at once
+    let a = spawn slow_transaction(conn, fail: false)
+    let b = spawn slow_transaction(conn, fail: false)
+    try a.wait() catch err {
+      print("first transaction: ${err}")
+    }
+    try b.wait() catch err {
+      print("second transaction: ${err}")
+    }
+
+    // 2: a plain insert from another task, rolled back with the transaction
+    try conn.execute("delete from t", [])
+    let c = spawn slow_transaction(conn, fail: true)
+    try time.sleep(time.millis(20))
+    try conn.execute("insert into t (who) values ('outside')", [])
+    try c.wait() catch err {
+      print("transaction: ${err}")
+    }
+    let rows = try conn.query<Count>("select count(*) as n from t where who = 'outside'", [])
+    print("rows inserted outside the transaction: ${rows[0].n} (expected 1)")
+  }
+}

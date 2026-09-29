@@ -1,0 +1,18 @@
+// A block after `??` (log a warning, then give a fallback) is read as a
+// map literal, and the error doesn't say so:
+//
+//   error: expected `:` between a key and a value, found end of line
+//
+// Wanted: either blocks as expressions after `??`, or an error that says
+// "a `{` after `??` starts a map; for several statements use if/else".
+
+import env
+import log
+
+fn main() {
+  let secret = env.get("SECRET") ?? {
+    log.warn("SECRET is not set: using a random one")
+    "random"
+  }
+  print(secret)
+}

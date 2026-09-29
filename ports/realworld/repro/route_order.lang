@@ -1,0 +1,16 @@
+// A `:param` route registered first hides a fixed route registered after
+// it: GET /articles/feed goes to /articles/:slug with slug "feed".
+// Go's routers (net/http 1.22, httprouter, gin, chi) pick the most specific
+// route whatever the order; the docs don't say that order matters.
+//
+// Expected: "feed". Got: "article feed".
+
+import http
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/articles/:slug", req => http.text(200, "article ${req.param("slug") ?? ""}"))
+  router.get("/articles/feed", req => http.text(200, "feed"))
+  let res = try router.handle(http.request("GET", "/articles/feed"))
+  print(try res.text())
+}

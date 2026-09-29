@@ -1,0 +1,41 @@
+// All requests of a server share one `db.Connection` (there is no pool, and
+// opening one per request isn't shown anywhere), and queries on one
+// connection run one at a time: 8 tasks querying at once take as long as
+// 8 queries in a row. In the RealWorld port, GET /api/articles does
+// ~1300 req/s with 1 client and ~1190 with 16 (14 cores).
+//
+// Expected: reads from several tasks run in parallel (a pool of
+// connections, or one per worker thread, with WAL).
+
+import db
+import time
+
+type Count {
+  n: Int
+}
+
+fn slow_query(conn: db.Connection) throws -> Int {
+  let rows = try conn.query<Count>(
+    "with recursive c(x) as (select 1 union all select x + 1 from c where x < 2000000) select count(*) as n from c",
+    [],
+  )
+  return rows[0].n
+}
+
+fn main() throws {
+  with conn = try db.open("/tmp/serialized_queries.db") {
+    let one = time.now()
+    let _ = try slow_query(conn)
+    print("one query: ${one.elapsed()}")
+
+    let many = time.now()
+    var tasks: List<Task<Int>> = []
+    for _ in 0..<8 {
+      tasks.append(spawn slow_query(conn))
+    }
+    for t in tasks {
+      let _ = try t.wait()
+    }
+    print("8 queries in 8 tasks: ${many.elapsed()} (parallel would be close to one query)")
+  }
+}

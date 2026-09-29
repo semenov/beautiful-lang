@@ -1,0 +1,27 @@
+// `json.decode<T>` gives none both for a field left out and for a field
+// set to null, so a PUT that changes only the fields given can't be
+// written with a record. RealWorld's PUT /api/user: {"bio": null} clears
+// the bio, {} keeps it, {"email": null} is a 422, {} keeps the email.
+//
+// Workaround in the port: `json.parse` and walking the `json.Value.Object`
+// by hand (api.fields, required_text, optional_text, tag_list: ~60 lines),
+// losing the typed record and decode's error messages.
+//
+// Wanted: some way to tell them apart in a record, e.g. a field type
+// `json.Field<String?>` (Absent / Present(value)), or decode filling a
+// `Set<String>` of the keys that were present.
+
+import json
+
+type Update {
+  email: String? = none
+  bio: String? = none
+}
+
+fn main() throws {
+  let left_out = try json.decode<Update>("{}")
+  let cleared = try json.decode<Update>("{\"bio\": null, \"email\": null}")
+  print("${left_out}")
+  print("${cleared}")
+  print("same: ${left_out == cleared}")
+}

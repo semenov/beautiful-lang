@@ -1,0 +1,42 @@
+// Who is asking: the JWT in `Authorization: Token <jwt>`.
+
+import api
+import http
+import jwt
+import time
+
+type Claims {
+  id: Int
+  username: String
+  exp: Int
+}
+
+let token_lifetime = 60 * 60 * 24 * 30
+
+pub fn token(user_id: Int, username: String, secret: String) -> String {
+  let claims = Claims(id: user_id, username: username, exp: time.unix_now() + token_lifetime)
+  return jwt.sign(claims, secret: secret)
+}
+
+// The signed-in user's id; none when the request has no token. A token that
+// doesn't check out is a 401.
+pub fn viewer(req: http.Request, app: api.App) throws -> Int? {
+  let header = req.header("authorization") ?? ""
+  if header.is_empty() {
+    return none
+  }
+  let parts = header.trim().split(" ")
+  let scheme = parts[0].lower()
+  if parts.length != 2 or (scheme != "token" and scheme != "bearer") {
+    throw api.unauthorized("is invalid")
+  }
+  let claims = try jwt.verify<Claims>(parts[1], secret: app.secret) catch err {
+    throw api.unauthorized("is invalid")
+  }
+  return claims.id
+}
+
+// The signed-in user's id; a 401 without a valid token.
+pub fn require(req: http.Request, app: api.App) throws -> Int {
+  return try viewer(req, app) ?? throw api.unauthorized("is missing")
+}

@@ -1,0 +1,117 @@
+// Comments on an article: /api/articles/:slug/comments.
+
+import api
+import auth
+import http
+import profiles
+
+type Row {
+  id: Int
+  body: String
+  created_at: String
+  updated_at: String
+  author_id: Int
+  author_username: String
+  author_bio: String? = none
+  author_image: String? = none
+  following: Bool
+}
+
+type Comment {
+  id: Int
+  created_at: String
+  updated_at: String
+  body: String
+  author: profiles.Profile
+}
+
+type CommentBody {
+  comment: Comment
+}
+
+type CommentList {
+  comments: List<Comment>
+}
+
+type NewComment {
+  body: String = ""
+}
+
+type NewCommentBody {
+  comment: NewComment
+}
+
+type Id {
+  id: Int
+}
+
+fn comment(row: Row) -> Comment {
+  let author = profiles.Profile(username: row.author_username, bio: row.author_bio, image: row.author_image, following: row.following)
+  return Comment(id: row.id, created_at: row.created_at, updated_at: row.updated_at, body: row.body, author: author)
+}
+
+// The id of the article at :slug.
+fn article(req: http.Request, app: api.App) throws -> Int {
+  let found = try app.conn.query<Id>("select id from articles where slug = ?", [req.param("slug") ?? ""])
+  return (found.first() ?? throw api.not_found("article")).id
+}
+
+// The comments of an article (or the one with `id`, when it isn't 0),
+// oldest first.
+fn find(app: api.App, article_id: Int, id: Int, viewer: Int) throws -> List<Row> {
+  return try app.conn.query<Row>(
+    """
+    select c.id, c.body, c.created_at, c.updated_at, c.author_id,
+      u.username as author_username, u.bio as author_bio, u.image as author_image,
+      exists(select 1 from follows where follower_id = ?1 and followed_id = u.id) as following
+    from comments c join users u on u.id = c.author_id
+    where c.article_id = ?2 and (?3 = 0 or c.id = ?3)
+    order by c.id
+    """,
+    [viewer, article_id, id],
+  )
+}
+
+// POST /api/articles/:slug/comments
+pub fn add(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let article_id = try article(req, app: app)
+  let input = (try api.decode<NewCommentBody>(req)).comment
+  if input.body.trim().is_empty() {
+    throw api.blank("body")
+  }
+  let now = api.now()
+  let id = try app.write(() => try app.conn.insert(
+    "insert into comments (body, article_id, author_id, created_at, updated_at) values (?, ?, ?, ?, ?)",
+    [input.body, article_id, viewer, now, now],
+  ))
+  let rows = try find(app, article_id: article_id, id: id, viewer: viewer)
+  return api.reply(201, CommentBody(comment: comment(rows[0])))
+}
+
+// GET /api/articles/:slug/comments
+pub fn list(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.viewer(req, app) ?? 0
+  let article_id = try article(req, app: app)
+  let rows = try find(app, article_id: article_id, id: 0, viewer: viewer)
+  return api.reply(200, CommentList(comments: rows.map(r => comment(r))))
+}
+
+// DELETE /api/articles/:slug/comments/:id
+pub fn delete(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let article_id = try article(req, app: app)
+  let id = try (req.param("id") ?? "").to_int() catch err {
+    throw api.not_found("comment")
+  }
+  if id <= 0 {
+    throw api.not_found("comment")
+  }
+  let rows = try find(app, article_id: article_id, id: id, viewer: viewer)
+  let row = rows.first() ?? throw api.not_found("comment")
+  if row.author_id != viewer {
+    throw api.forbidden("comment")
+  }
+  try app.write(() => try app.conn.execute("delete from comments where id = ?", [id]))
+  return http.text(204, "")
+}
