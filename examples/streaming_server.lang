@@ -1,0 +1,42 @@
+import http
+import io
+import time
+
+fn ticks(req: http.Request) throws -> http.Response {
+  return http.stream(200, content_type: "text/event-stream", writer: send_ticks)
+}
+
+fn send_ticks(out: io.Stream) throws {
+  for i in 0..<3 {
+    try out.write_text("data: tick ${i}\n\n")
+    try time.sleep(time.millis(300))
+  }
+}
+
+fn export(req: http.Request) throws -> http.Response {
+  return http.stream(200, content_type: "text/csv", writer: out => try write_rows(out))
+}
+
+fn write_rows(out: io.Stream) throws {
+  try out.write_text("id,name\n")
+  for i in 0..<200000 {
+    try out.write_text("${i},item ${i}\n")
+  }
+}
+
+fn broken(req: http.Request) throws -> http.Response {
+  return http.stream(200, content_type: "text/plain", writer: out => try fail_midway(out))
+}
+
+fn fail_midway(out: io.Stream) throws {
+  try out.write_text("partial\n")
+  throw Failure(message: "the database went away")
+}
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/ticks", ticks)
+  router.get("/export", export)
+  router.get("/broken", broken)
+  try http.serve(router, port: 8094)
+}

@@ -1327,7 +1327,15 @@ impl Checker {
                             let _ = self.expr(v, None);
                             TStmt::Return(None)
                         } else {
-                            TStmt::Return(Some(self.expr_coerce(v, &ret)))
+                            // a function may hand a new resource to its caller, who
+                            // must then use `with`: `fn open_db() throws -> db.Connection`
+                            let rt = self.resolve(&ret);
+                            if self.resource_close(&rt).is_some() {
+                                self.fcx().with_value = true;
+                            }
+                            let e = self.expr_coerce(v, &ret);
+                            self.fcx().with_value = false;
+                            TStmt::Return(Some(e))
                         }
                     }
                     None => {

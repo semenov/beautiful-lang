@@ -1666,7 +1666,7 @@ static {rsc} lt_http_response_from(lt_http_out *o) {{
   {mc} h = {mc}_new(8);
   for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) {mc}_put(&h, o->headers->items[i], o->headers->items[i + 1]);
   if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
-  return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0) }};
+  return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0), (lt_fn){{0}} }};
 }}
 static lt_text *lt_url_decode(const char *s, int64_t n) {{
   lt_text *t = lt_text_new(n); int64_t w = 0;
@@ -1698,7 +1698,7 @@ static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *o
     out->status = 500; out->body = lt_bytes_from("internal server error", 21); out->headers = NULL; out->file = NULL;
     return;
   }}
-  out->status = resp.f0; out->body = resp.f1; lt_bytes_dup(resp.f1); out->file = resp.f3; lt_text_dup(resp.f3);
+  out->status = resp.f0; out->body = resp.f1; lt_bytes_dup(resp.f1); out->file = resp.f3; lt_text_dup(resp.f3); out->writer = resp.f4; lt_fn_dup(resp.f4);
   lt_texts *hs = lt_texts_new(8);
   for (int64_t i = 0; i < resp.f2->n; i++) {{ if (!resp.f2->e[i].h) continue; lt_text_dup(resp.f2->e[i].k); lt_text_dup(resp.f2->e[i].v); lt_texts_push(&hs, resp.f2->e[i].k); lt_texts_push(&hs, resp.f2->e[i].v); }}
   out->headers = hs;
@@ -2878,11 +2878,28 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.gen_http_glue();
                 format!("({{ lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_download({}, {}, &o_); if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[2])
             }
-            "http.__fetch" => {
+            "http.__send" | "http.__open" => {
                 self.curl = true;
+                // curl's thread allocates too: the thread-safe allocator
+                self.threads = true;
                 self.gen_http_glue();
-                format!("({{ lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_fetch({}, {}, {}, &o_); if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[2], a[3])
+                let map = self.tid(&Ty::Adt(self.prog.b.map, vec![Ty::Text, Ty::Text]));
+                let mc = self.tys[map].c.clone();
+                // the headers as a borrowed list of alternating names and values
+                let hs = format!("{mc} m_ = {m}; lt_texts *h_ = lt_texts_new(m_->len * 2 + 1); for (int64_t i_ = 0; i_ < m_->n; i_++) if (m_->e[i_].h) {{ lt_texts_push(&h_, m_->e[i_].k); lt_texts_push(&h_, m_->e[i_].v); }}", mc = mc, m = a[2]);
+                let free_hs = "lt_free(h_, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)h_->cap);";
+                if name == "http.__send" {
+                    format!("({{ {hs} lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_send_request({}, {}, h_, {}, {}, &o_); {free_hs} if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[3], a[4], a[5], hs = hs, free_hs = free_hs)
+                } else {
+                    format!("({{ {hs} lt_err e_ = lt_http_open({}, {}, h_, {}, {}, {}); {free_hs} e_; }})", a[0], a[1], a[3], a[4], a[5], hs = hs, free_hs = free_hs)
+                }
             }
+            "http.ResponseStream.status" => format!("(((lt_hstream *){})->status)", a[0]),
+            "http.ResponseStream.header" => format!("lt_hstream_header_get({}, {})", a[0], a[1]),
+            "http.ResponseStream.read" => format!("lt_conn_read(&((lt_hstream *){})->body->h, {}, {})", a[0], a[1], a[2]),
+            "http.ResponseStream.read_line" => format!("lt_conn_read_line(&((lt_hstream *){})->body->h, {})", a[0], a[1]),
+            "http.ResponseStream.read_all" => format!("lt_conn_read_all(&((lt_hstream *){})->body->h, {})", a[0], a[1]),
+            "http.ResponseStream.close" => format!("({{ lt_hstream_join((lt_hstream *){}); (lt_err){{0}}; }})", a[0]),
             "json.encode" | "json.encode_pretty" => {
                 let id = tid0.unwrap();
                 self.need(H::Enc, id);

@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <signal.h>
+#include <sys/uio.h>
 #if defined(__APPLE__)
 #include <sys/uio.h>
 #else
@@ -59,6 +60,11 @@ typedef struct lt_conn {
     bool buffered;  // files: collect writes, flush at 64 KB and on close
     bool borrowed;  // standard streams: close doesn't close the descriptor
     bool is_stdout; // flush print's buffer first, to keep the order
+    bool chunked;   // an HTTP response body: each write is a chunk
+    bool gone;      // a write found the other side gone (not worth logging)
+    // http.open: checks at the end that the whole body arrived
+    lt_err (*on_eof)(struct lt_conn *);
+    void *owner;
     char peer[64];
     lt_text *path; // files and programs: for messages
     const char *label; // standard streams: for messages
@@ -78,6 +84,7 @@ static lt_err lt_net_error(const char *what, const char *detail) {
 }
 
 static lt_err lt_conn_error(lt_conn *c, const char *what, const char *detail) {
+    if (errno == EPIPE || errno == ECONNRESET) c->gone = true;
     char buf[1024];
     if (c->label) snprintf(buf, sizeof buf, "can't %s %s: %s", what, c->label, detail);
     else if (c->path) snprintf(buf, sizeof buf, "can't %s \"%.*s\": %s", what, (int)c->path->len, c->path->data, detail);
@@ -162,6 +169,11 @@ static lt_err lt_conn_fill(lt_conn *c, bool *eof) {
         }
         if (n == 0) {
             *eof = true;
+            if (c->on_eof) {
+                lt_err e = c->on_eof(c);
+                c->on_eof = NULL;
+                return e;
+            }
             return (lt_err){ 0 };
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
@@ -260,6 +272,26 @@ static lt_err lt_conn_write_raw(lt_handle *h, const void *d, int64_t n) {
         lt_err e = { 0 };
         c->tls_send(c, d, (size_t)n, &e);
         return e;
+    }
+    if (c->chunked) {
+        if (n == 0) return (lt_err){ 0 }; // an empty chunk would end the body
+        char head[24];
+        int hl = snprintf(head, sizeof head, "%llx\r\n", (unsigned long long)n);
+        struct iovec v[3] = { { head, (size_t)hl }, { (void *)d, (size_t)n }, { "\r\n", 2 } };
+        size_t total = (size_t)hl + (size_t)n + 2;
+        ssize_t w = writev(c->fd, v, 3);
+        if (w == (ssize_t)total) return (lt_err){ 0 };
+        // partly written (a full socket buffer): the rest in order
+        size_t done = w > 0 ? (size_t)w : 0;
+        for (int i = 0; i < 3; i++) {
+            if (done >= v[i].iov_len) {
+                done -= v[i].iov_len;
+                continue;
+            }
+            if (!lt_sock_write_all(c->fd, (const char *)v[i].iov_base + done, v[i].iov_len - done)) return lt_conn_error(c, "write", strerror(errno));
+            done = 0;
+        }
+        return (lt_err){ 0 };
     }
     if (c->buffered) {
         if (c->wlen + (size_t)n <= LT_WBUF) {

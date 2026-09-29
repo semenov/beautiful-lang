@@ -1,0 +1,25 @@
+import http
+import time
+
+fn main() throws {
+  let r = try http.send(http.ClientRequest(url: "http://localhost:8095/echo", method: "POST", headers: {"Authorization": "Bearer abc"}, body: "hi".bytes()))
+  print("${r.status} ${try r.text()}")
+  let start = time.now()
+  with res = try http.open(http.ClientRequest(url: "http://localhost:8095/ticks")) {
+    print("status ${res.status()} type ${res.header("Content-Type") ?? "?"} after ${start.elapsed().millis() < 200}")
+    while try res.read_line() is some(line) {
+      if not line.is_empty() {
+        print("${line}")
+      }
+    }
+  }
+  // stop early: close in the middle
+  with res = try http.open(http.ClientRequest(url: "http://localhost:8095/ticks")) {
+    print("first: ${try res.read_line() ?? ""}")
+  }
+  print("closed early")
+  let t = try http.send(http.ClientRequest(url: "http://localhost:8095/slow", timeout: 1)) catch err {
+    print(err.message())
+    return
+  }
+}
