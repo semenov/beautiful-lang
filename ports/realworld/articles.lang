@@ -22,7 +22,7 @@ type Row {
   author_bio: String? = none
   author_image: String? = none
   favorites_count: Int
-  // the tags as a JSON array, in the order they were given
+  // the tags as a JSON array, sorted
   tags: String
   favorited: Bool
   following: Bool
@@ -251,8 +251,8 @@ fn clean_tags(tags: List<String>) -> List<String> {
 
 fn save_tags(app: api.App, article_id: Int, tags: List<String>) throws {
   try app.conn.execute("delete from article_tags where article_id = ?", [article_id])
-  for tag in tags.indexed() {
-    try app.conn.execute("insert into article_tags (article_id, tag, position) values (?, ?, ?)", [article_id, tag.value, tag.index])
+  for tag in tags {
+    try app.conn.execute("insert into article_tags (article_id, tag) values (?, ?)", [article_id, tag])
   }
 }
 

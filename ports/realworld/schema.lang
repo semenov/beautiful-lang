@@ -38,7 +38,6 @@ pub fn create(conn: db.Connection) throws {
     create table if not exists article_tags (
       article_id integer not null references articles(id) on delete cascade,
       tag text not null,
-      position integer not null,
       primary key (article_id, tag)
     )
     """, [])
@@ -72,7 +71,7 @@ pub fn create(conn: db.Connection) throws {
       u.image as author_image,
       (select count(*) from favorites f where f.article_id = a.id) as favorites_count,
       (select json_group_array(tag) from (
-        select t.tag from article_tags t where t.article_id = a.id order by t.position
+        select t.tag from article_tags t where t.article_id = a.id order by t.tag
       )) as tags
     from articles a join users u on u.id = a.author_id
     """, [])
