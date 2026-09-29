@@ -162,6 +162,8 @@ let user = users[id] ?? throw NotFound(id: id)
 An optional can't go into text as it is (`"${email}"` is an error: it
 would print `none`): write `"${email ?? ""}"`.
 `m[key]` gives `V?`; `xs[i]` out of range is a bug (it stops the task).
+`counts[w] += 1` is an error (a new key would stop the program): write
+`counts[w] = (counts[w] ?? 0) + 1`.
 Change a value inside a map or list in place: `m[key].append(x)`,
 `accounts[id].balance -= 5`. Reading it out and writing it back
 (`if m[k] is some(v) { m[k] = grow(v) }`) copies the whole value, since

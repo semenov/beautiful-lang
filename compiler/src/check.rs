@@ -1506,6 +1506,17 @@ impl Checker {
                 let v = match op {
                     None => self.expr_coerce(value, &pty),
                     Some(op) => {
+                        // `counts[w] += 1` would stop the program on a new key
+                        if matches!(place.path.last(), Some(PlaceElem::MapKey(_))) {
+                            let sym = match op {
+                                BinOp::Add => "+",
+                                BinOp::Sub => "-",
+                                BinOp::Mul => "*",
+                                _ => "op",
+                            };
+                            let zero = if matches!(self.resolve(&pty), Ty::Float) { "0.0" } else { "0" };
+                            self.err_help(*span, "the key may not be in the map yet: `m[k] += ...` would stop the program then", format!("write `m[k] = (m[k] ?? {}) {} ...`", zero, sym));
+                        }
                         let cur = self.place_read(&place, target.span);
                         let rhs = self.expr(value, Some(&pty));
                         self.binary(*op, cur, rhs, *span, Some(&pty))
