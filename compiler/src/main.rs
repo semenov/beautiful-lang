@@ -698,16 +698,36 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         libs = static_libs(&libs);
         cmd.arg("-static");
     }
-    let status = cmd
-        .args(["-std=gnu11", "-w", "-fwrapv", "-o"])
-        .arg(exe)
-        .arg(&c_path)
-        .arg("-lm")
-        .args(&libs)
-        .status();
+    cmd.args(["-std=gnu11", "-w", "-fwrapv"]).arg("-lm").args(&libs);
+    // the same C with the same compiler and flags gives the same program:
+    // take it from the cache instead of compiling again
+    let key = {
+        let mut h = Fnv(0xcbf29ce484222325);
+        h.add(c.as_bytes());
+        h.add(cc.as_bytes());
+        for a in cmd.get_args() {
+            h.add(b"\0");
+            h.add(a.as_encoded_bytes());
+        }
+        format!("{:016x}", h.0)
+    };
+    let cache = build_dir().join("cache");
+    let cached = cache.join(&key);
+    if std::fs::copy(&cached, exe).is_ok() {
+        // used now: the cache drops the least recently used first
+        if let Ok(f) = std::fs::File::options().append(true).open(&cached) {
+            let _ = f.set_modified(std::time::SystemTime::now());
+        }
+        let _ = std::fs::remove_file(&c_path);
+        return true;
+    }
+    let status = cmd.arg("-o").arg(exe).arg(&c_path).status();
     // kept when the C compiler fails: the message points at it
     if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
         let _ = std::fs::remove_file(&c_path);
+    }
+    if matches!(&status, Ok(s) if s.success()) {
+        cache_store(&cache, &cached, exe);
     }
     match status {
         Ok(s) if s.success() => true,
@@ -719,6 +739,44 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
             eprintln!("error: can't run the C compiler `{}`: {}", cc, e);
             false
         }
+    }
+}
+
+struct Fnv(u64);
+impl Fnv {
+    fn add(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.0 = (self.0 ^ *b as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+}
+
+// Copies a new program into the build cache (through a temporary name, so
+// another build never sees half a file); past 256 MB, the least recently
+// used go.
+fn cache_store(dir: &Path, to: &Path, exe: &Path) {
+    let _ = std::fs::create_dir_all(dir);
+    let tmp = dir.join(format!("tmp-{}", std::process::id()));
+    if std::fs::copy(exe, &tmp).is_err() || std::fs::rename(&tmp, to).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return;
+    }
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    let mut all: Vec<(std::time::SystemTime, u64, PathBuf)> = rd
+        .flatten()
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            Some((m.modified().ok()?, m.len(), e.path()))
+        })
+        .collect();
+    let mut total: u64 = all.iter().map(|a| a.1).sum();
+    all.sort();
+    for (_, len, p) in &all {
+        if total <= 256 << 20 {
+            break;
+        }
+        let _ = std::fs::remove_file(p);
+        total -= len;
     }
 }
 
