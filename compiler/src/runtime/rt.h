@@ -881,7 +881,8 @@ static lt_bytes *lt_bytes_from(const void *p, int64_t n) {
 static void lt_bytes_reserve(lt_bytes **p, int64_t more) {
     lt_bytes *b = *p;
     if (LT_UNIQUE(b) && b->len + more <= b->cap) return;
-    int64_t cap = b->cap * 2;
+    // a shared value is copied with room for its length, not its capacity
+    int64_t cap = (LT_UNIQUE(b) ? b->cap : b->len) * 2;
     if (cap < b->len + more) cap = b->len + more;
     if (cap < 16) cap = 16;
     if (LT_UNIQUE(b)) {

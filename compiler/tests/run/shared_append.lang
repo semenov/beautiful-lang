@@ -1,0 +1,30 @@
+// Appending to a list or bytes that another variable still holds copies it
+// with room for its length: repeating it must not double the size each time.
+type Node {
+  children: List<Node>
+}
+
+fn fill(out: List<List<Int>>, depth: Int) -> List<List<Int>> {
+  if depth == 0 {
+    return out
+  }
+  var next = out
+  next.append([depth])
+  return fill(next, depth: depth - 1)
+}
+
+fn main() {
+  var p: List<Int> = []
+  var keep: List<Int> = []
+  for i in 0..<200 {
+    keep = p
+    p.append(i)
+  }
+  var b = Bytes()
+  var kb = Bytes()
+  for i in 0..<200 {
+    kb = b
+    b.append(i % 256)
+  }
+  print("${keep.length} ${p.length} ${kb.length} ${b.length} ${fill([], depth: 200).length}")
+}

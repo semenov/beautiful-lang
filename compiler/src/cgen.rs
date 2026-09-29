@@ -921,7 +921,9 @@ static {l} {l}_new(int64_t cap) {{ if (cap <= 0) return ({l})&lt_empty_list; {l}
 static void {l}_free({l} l) {{ for (int64_t i = 0; i < l->len; i++) {{ {drop_e} }} lt_free(l, {l}_SIZE(l->cap)); }}
 static {l} {l}_clone({l} l, int64_t cap) {{ {l} n = {l}_new(cap); memcpy(n->items, l->items, sizeof({ec}) * (size_t)l->len); n->len = l->len; for (int64_t i = 0; i < n->len; i++) {{ {dup_e} }} return n; }}
 static void {l}_grow({l} *p, int64_t need) {{
-  {l} l = *p; int64_t nc = l->cap * 2; if (nc < need) nc = need; if (nc < 4) nc = 4;
+  // a shared list is copied with room for its length, not its capacity
+  // (copying a copy again and again must not double the size each time)
+  {l} l = *p; int64_t nc = (LT_UNIQUE(l) ? l->cap : l->len) * 2; if (nc < need) nc = need; if (nc < 4) nc = 4;
   if (LT_UNIQUE(l)) {{ l = ({l})lt_realloc(l, {l}_SIZE(l->cap), {l}_SIZE(nc)); l->cap = nc; *p = l; }}
   else {{ {l} n = {l}_clone(l, nc); drop_{id}(l); *p = n; }}
 }}
