@@ -1,0 +1,44 @@
+import json
+
+type Rng {
+  state: Int
+
+  mutating fn next() -> Int {
+    var x = self.state
+    x = x.bit_xor(x.shift_left(13).bit_and(4294967295))
+    x = x.bit_xor(x.shift_right(17))
+    x = x.bit_xor(x.shift_left(5).bit_and(4294967295))
+    self.state = x
+    return x
+  }
+}
+
+type User {
+  id: Int
+  name: String
+  score: Int
+  active: Bool
+  tags: List<String>
+}
+
+fn main() throws {
+  let n = 300_000
+  var rng = Rng(state: 2463534242)
+  var users: List<User> = []
+  for i in 0..<n {
+    users.append(User(id: i, name: "user${i}", score: rng.next() % 1000, active: i % 3 == 0, tags: ["alpha", "beta"]))
+  }
+  var total = 0
+  var length = 0
+  for r in 0..<10 {
+    let data = json.encode(users)
+    length = data.byte_length()
+    let back = try json.decode<List<User>>(data)
+    for u in back {
+      if u.active {
+        total += u.score
+      }
+    }
+  }
+  print("${length} ${total}")
+}

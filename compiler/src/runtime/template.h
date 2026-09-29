@@ -509,7 +509,7 @@ static lt_err lt_template_render(lt_handle *h, lt_text *name, lt_text *json, lt_
     e = lt_trender_nodes(&r, t->root.kids, t->root.nkids);
     lt_arena_free(&ar);
     if (e.obj) {
-        free(r.out.d);
+        lt_buf_free(&r.out);
         return e;
     }
     *out = lt_buf_text(&r.out);

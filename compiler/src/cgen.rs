@@ -3699,7 +3699,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
                     FnKind::Test(n) => n.clone(),
                     _ => String::new(),
                 };
-                let _ = writeln!(main, "  {{ lt_buf logs = {{0}}; lt_log_capture = &logs; lt_err e = {}(); flockfile(stderr); lt_log_capture = NULL; funlockfile(stderr); if (e.obj) {{ failed++; lt_text *m = lt_error_message(e); printf(\"FAIL  %s\\n      %.*s\\n\", {}, (int)m->len, m->data); if (logs.len) {{ printf(\"      its log:\\n\"); lt_print_indented(logs.d, logs.len); }} lt_text_drop(m); lt_iface_drop(e); }} else {{ passed++; printf(\"ok    %s\\n\", {}); }} free(logs.d); }}", f.name, c_str(&name), c_str(&name));
+                let _ = writeln!(main, "  {{ lt_buf logs = {{0}}; lt_log_capture = &logs; lt_err e = {}(); flockfile(stderr); lt_log_capture = NULL; funlockfile(stderr); if (e.obj) {{ failed++; lt_text *m = lt_error_message(e); printf(\"FAIL  %s\\n      %.*s\\n\", {}, (int)m->len, m->data); if (logs.len) {{ printf(\"      its log:\\n\"); lt_print_indented(logs.d, logs.len); }} lt_text_drop(m); lt_iface_drop(e); }} else {{ passed++; printf(\"ok    %s\\n\", {}); }} lt_buf_free(&logs); }}", f.name, c_str(&name), c_str(&name));
                 let _ = i;
             }
             main += "  printf(\"\\n%d passed, %d failed\\n\", passed, failed);\n  lt_tests_failed = failed;\n}\n";

@@ -173,7 +173,7 @@ static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t le
         body = NULL;
     }
     bool ok = lt_sock_write_all(fd, b.d, (size_t)b.len) && (!body || lt_sock_write_all(fd, (const char *)body->data, (size_t)body->len));
-    free(b.d);
+    lt_buf_free(&b);
     return ok;
 }
 

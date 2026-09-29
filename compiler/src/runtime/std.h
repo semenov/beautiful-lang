@@ -754,7 +754,7 @@ static void lt_log_fields(const char *level, lt_text *msg, lt_texts *keys, lt_te
     if (lt_log_capture) lt_buf_put(lt_log_capture, b.d, b.len);
     else fwrite(b.d, 1, (size_t)b.len, stderr);
     funlockfile(stderr);
-    free(b.d);
+    lt_buf_free(&b);
 }
 
 static void lt_log(const char *level, lt_text *msg) {
@@ -1577,7 +1577,7 @@ static bool lt_xml_text(lt_xml *x, const char *p, const char *e, bool keep_space
     }
     lt_buf b = { 0 };
     if (!lt_xml_decode(x, p, e, &b)) {
-        free(b.d);
+        lt_buf_free(&b);
         return false;
     }
     lt_xml_emit(x, "text", 4);
@@ -1682,7 +1682,7 @@ static bool lt_xml_run(lt_xml *x) {
                 if (x->s >= x->e) return lt_xml_fail(x, "an attribute value without its closing quote");
                 lt_buf b = { 0 };
                 if (!lt_xml_decode(x, v, x->s, &b)) {
-                    free(b.d);
+                    lt_buf_free(&b);
                     return false;
                 }
                 x->s++;

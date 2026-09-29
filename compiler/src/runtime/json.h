@@ -22,21 +22,29 @@ typedef struct lt_dyn {
 // All nodes of one parse live in an arena freed at once.
 typedef struct lt_arena {
     char **blocks;
+    size_t *sizes;
     int nblocks, cap;
     char *cur, *end;
 } lt_arena;
 
+// Blocks double from 16 KB, so a small parse stays small; blocks of 1 MB
+// and more come straight from the system and go back to it when freed
+// (the system allocator would keep them, and a program that parses big
+// texts again and again would grow).
 static void *lt_arena_alloc(lt_arena *a, size_t n) {
     n = (n + 15) & ~(size_t)15;
     if (!a->cur || (size_t)(a->end - a->cur) < n) {
-        size_t sz = n > 65536 ? n : 65536;
-        char *b = (char *)malloc(sz);
+        size_t sz = (size_t)16384 << (a->nblocks < 10 ? a->nblocks : 10);
+        if (sz < n) sz = n;
+        char *b = sz >= LT_BIG ? (char *)lt_big_alloc(sz) : (char *)malloc(sz);
         if (!b) lt_oom();
         if (a->nblocks == a->cap) {
             a->cap = a->cap ? a->cap * 2 : 8;
             a->blocks = (char **)realloc(a->blocks, sizeof(char *) * (size_t)a->cap);
+            a->sizes = (size_t *)realloc(a->sizes, sizeof(size_t) * (size_t)a->cap);
         }
-        a->blocks[a->nblocks++] = b;
+        a->blocks[a->nblocks] = b;
+        a->sizes[a->nblocks++] = sz;
         a->cur = b;
         a->end = b + sz;
     }
@@ -45,8 +53,12 @@ static void *lt_arena_alloc(lt_arena *a, size_t n) {
     return p;
 }
 static void lt_arena_free(lt_arena *a) {
-    for (int i = 0; i < a->nblocks; i++) free(a->blocks[i]);
+    for (int i = 0; i < a->nblocks; i++) {
+        if (a->sizes[i] >= LT_BIG) lt_big_free(a->blocks[i], a->sizes[i]);
+        else free(a->blocks[i]);
+    }
     free(a->blocks);
+    free(a->sizes);
 }
 
 // ---------------------------------------------------------------- errors with a path
@@ -252,7 +264,50 @@ typedef struct {
     const char *err;
     const char *err_at;
     int depth;
+    // the children of the containers being read, until each one closes and
+    // gets an array of its exact size in the arena
+    lt_dyn *stk;
+    const char **sk;
+    int64_t *sl;
+    int64_t top, cap;
 } lt_jp;
+
+static void lt_jp_push(lt_jp *p, const lt_dyn *d, const char *k, int64_t kl) {
+    if (p->top == p->cap) {
+        // the runtime's allocator: big ones go back to the system when freed
+        int64_t nc = p->cap ? p->cap * 2 : 64;
+        if (p->cap) {
+            p->stk = (lt_dyn *)lt_realloc(p->stk, sizeof(lt_dyn) * (size_t)p->cap, sizeof(lt_dyn) * (size_t)nc);
+            p->sk = (const char **)lt_realloc(p->sk, sizeof(char *) * (size_t)p->cap, sizeof(char *) * (size_t)nc);
+            p->sl = (int64_t *)lt_realloc(p->sl, sizeof(int64_t) * (size_t)p->cap, sizeof(int64_t) * (size_t)nc);
+        } else {
+            p->stk = (lt_dyn *)lt_alloc(sizeof(lt_dyn) * (size_t)nc);
+            p->sk = (const char **)lt_alloc(sizeof(char *) * (size_t)nc);
+            p->sl = (int64_t *)lt_alloc(sizeof(int64_t) * (size_t)nc);
+        }
+        p->cap = nc;
+    }
+    p->stk[p->top] = *d;
+    p->sk[p->top] = k;
+    p->sl[p->top] = kl;
+    p->top++;
+}
+// moves the children above `base` into the arena
+static void lt_jp_close(lt_jp *p, lt_dyn *d, int64_t base, bool keys) {
+    int64_t n = p->top - base;
+    d->n = n;
+    if (n > 0) {
+        d->items = (lt_dyn *)lt_arena_alloc(p->arena, sizeof(lt_dyn) * (size_t)n);
+        memcpy(d->items, p->stk + base, sizeof(lt_dyn) * (size_t)n);
+        if (keys) {
+            d->keys = (const char **)lt_arena_alloc(p->arena, sizeof(char *) * (size_t)n);
+            memcpy(d->keys, p->sk + base, sizeof(char *) * (size_t)n);
+            d->klens = (int64_t *)lt_arena_alloc(p->arena, sizeof(int64_t) * (size_t)n);
+            memcpy(d->klens, p->sl + base, sizeof(int64_t) * (size_t)n);
+        }
+    }
+    p->top = base;
+}
 
 static void lt_jp_ws(lt_jp *p) {
     while (p->s < p->end && (*p->s == ' ' || *p->s == '\n' || *p->s == '\r' || *p->s == '\t')) p->s++;
@@ -363,7 +418,7 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
     if (c == '{') {
         p->s++;
         d->kind = LT_D_OBJ;
-        int64_t cap = 0;
+        int64_t base = p->top;
         lt_jp_ws(p);
         if (p->s < p->end && *p->s == '}') {
             p->s++;
@@ -377,25 +432,9 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
                 lt_jp_ws(p);
                 if (p->s >= p->end || *p->s != ':') { ok = lt_jp_fail(p, "expected `:` after the key"); break; }
                 p->s++;
-                if (d->n == cap) {
-                    int64_t nc = cap ? cap * 2 : 8;
-                    lt_dyn *ni = (lt_dyn *)lt_arena_alloc(p->arena, sizeof(lt_dyn) * (size_t)nc);
-                    const char **nk = (const char **)lt_arena_alloc(p->arena, sizeof(char *) * (size_t)nc);
-                    int64_t *nl = (int64_t *)lt_arena_alloc(p->arena, sizeof(int64_t) * (size_t)nc);
-                    if (d->n) {
-                        memcpy(ni, d->items, sizeof(lt_dyn) * (size_t)d->n);
-                        memcpy(nk, d->keys, sizeof(char *) * (size_t)d->n);
-                        memcpy(nl, d->klens, sizeof(int64_t) * (size_t)d->n);
-                    }
-                    d->items = ni;
-                    d->keys = nk;
-                    d->klens = nl;
-                    cap = nc;
-                }
-                d->keys[d->n] = k;
-                d->klens[d->n] = kl;
-                if (!lt_jp_value(p, &d->items[d->n])) { ok = false; break; }
-                d->n++;
+                lt_dyn v;
+                if (!lt_jp_value(p, &v)) { ok = false; break; }
+                lt_jp_push(p, &v, k, kl);
                 lt_jp_ws(p);
                 if (p->s < p->end && *p->s == ',') { p->s++; continue; }
                 if (p->s < p->end && *p->s == '}') { p->s++; break; }
@@ -403,24 +442,19 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
                 break;
             }
         }
+        lt_jp_close(p, d, base, true);
     } else if (c == '[') {
         p->s++;
         d->kind = LT_D_ARR;
-        int64_t cap = 0;
+        int64_t base = p->top;
         lt_jp_ws(p);
         if (p->s < p->end && *p->s == ']') {
             p->s++;
         } else {
             for (;;) {
-                if (d->n == cap) {
-                    int64_t nc = cap ? cap * 2 : 8;
-                    lt_dyn *ni = (lt_dyn *)lt_arena_alloc(p->arena, sizeof(lt_dyn) * (size_t)nc);
-                    if (d->n) memcpy(ni, d->items, sizeof(lt_dyn) * (size_t)d->n);
-                    d->items = ni;
-                    cap = nc;
-                }
-                if (!lt_jp_value(p, &d->items[d->n])) { ok = false; break; }
-                d->n++;
+                lt_dyn v;
+                if (!lt_jp_value(p, &v)) { ok = false; break; }
+                lt_jp_push(p, &v, NULL, 0);
                 lt_jp_ws(p);
                 if (p->s < p->end && *p->s == ',') { p->s++; continue; }
                 if (p->s < p->end && *p->s == ']') { p->s++; break; }
@@ -428,6 +462,7 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
                 break;
             }
         }
+        lt_jp_close(p, d, base, false);
     } else if (c == '"') {
         d->kind = LT_D_STR;
         ok = lt_jp_string(p, &d->s, &d->slen);
@@ -482,8 +517,17 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
 
 // Parses JSON text into *d (nodes in `arena`).
 static lt_err lt_json_parse(lt_text *text, lt_arena *arena, lt_dyn *d) {
-    lt_jp p = { text->data, text->data + text->len, text->data, arena, NULL, NULL, 0 };
+    lt_jp p;
+    memset(&p, 0, sizeof p);
+    p.s = p.start = text->data;
+    p.end = text->data + text->len;
+    p.arena = arena;
     bool ok = lt_jp_value(&p, d);
+    if (p.cap) {
+        lt_free(p.stk, sizeof(lt_dyn) * (size_t)p.cap);
+        lt_free(p.sk, sizeof(char *) * (size_t)p.cap);
+        lt_free(p.sl, sizeof(int64_t) * (size_t)p.cap);
+    }
     if (ok) {
         lt_jp_ws(&p);
         if (p.s < p.end) ok = lt_jp_fail(&p, "unexpected text after the value");
@@ -515,8 +559,15 @@ static void lt_buf_grow(lt_buf *b, int64_t n) {
     if (b->len + n <= b->cap) return;
     int64_t nc = b->cap ? b->cap * 2 : 256;
     while (nc < b->len + n) nc *= 2;
-    b->d = (char *)realloc(b->d, (size_t)nc);
+    // through the runtime's allocator: a big buffer is mapped from the
+    // system and given back when freed (malloc keeps freed big blocks)
+    b->d = b->d ? (char *)lt_realloc(b->d, (size_t)b->cap, (size_t)nc) : (char *)lt_alloc((size_t)nc);
     b->cap = nc;
+}
+static void lt_buf_free(lt_buf *b) {
+    if (b->d) lt_free(b->d, (size_t)b->cap);
+    b->d = NULL;
+    b->len = b->cap = 0;
 }
 static void lt_buf_put(lt_buf *b, const char *s, int64_t n) {
     lt_buf_grow(b, n);
@@ -634,6 +685,6 @@ static void lt_json_key(lt_buf *b, const char *k, bool first) {
 }
 static lt_text *lt_buf_text(lt_buf *b) {
     lt_text *t = lt_text_from(b->d ? b->d : "", b->len);
-    free(b->d);
+    lt_buf_free(b);
     return t;
 }

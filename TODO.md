@@ -19,6 +19,13 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       files, concurrency); report memory (peak RSS) next to time / req/s.
       Where we lose to Go, find out why (profile) and fix it or write down
       the reason
+  - [x] json: Lang 1.64 s / 349 MB vs Go 2.38 s / 283 MB (was 876 MB: the
+        parser's containers grew by copying inside the arena, and big buffers
+        freed to macOS malloc stay resident; now a scratch stack and the
+        runtime's allocator for big buffers)
+  - [ ] other runtime buffers that grow with realloc and are freed to malloc
+        (lt_grow for HTTP bodies, readers): same treatment where big
+  - [ ] lt_dyn is 80 bytes per JSON node: a union would halve it
 - [ ] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
       pool of OS threads, stacks, parking, I/O and timers; its strengths and
       its possible weak spots

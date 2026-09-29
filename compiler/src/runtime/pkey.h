@@ -78,7 +78,7 @@ static lt_bytes *lt_spki(bool rsa, const unsigned char *key, size_t klen) {
     lt_der_put(&all, 0x03, (const unsigned char *)bits.d, (size_t)bits.len);
     lt_der_put(&out, 0x30, (const unsigned char *)all.d, (size_t)all.len);
     lt_bytes *r = lt_bytes_from(out.d, out.len);
-    free(alg.d), free(algseq.d), free(bits.d), free(all.d), free(out.d);
+    lt_buf_free(&alg), lt_buf_free(&algseq), lt_buf_free(&bits), lt_buf_free(&all), lt_buf_free(&out);
     return r;
 }
 
@@ -123,7 +123,7 @@ static lt_bytes *lt_ecdsa_to_der(lt_bytes *raw) {
     lt_der_int(&ints, raw->data + 32, 32);
     lt_der_put(&out, 0x30, (const unsigned char *)ints.d, (size_t)ints.len);
     lt_bytes *r = lt_bytes_from(out.d, out.len);
-    free(ints.d), free(out.d);
+    lt_buf_free(&ints), lt_buf_free(&out);
     return r;
 }
 
@@ -367,7 +367,7 @@ static lt_err lt_crypto_rsa_public(lt_bytes *n, lt_bytes *e, lt_handle **out) {
     lt_der_int(&ints, e->data, (size_t)e->len);
     lt_der_put(&seq, 0x30, (const unsigned char *)ints.d, (size_t)ints.len);
     lt_bytes *spki = lt_spki(true, (const unsigned char *)seq.d, (size_t)seq.len);
-    free(ints.d), free(seq.d);
+    lt_buf_free(&ints), lt_buf_free(&seq);
     lt_err err = lt_pkey_from_spki(spki, out);
     lt_bytes_drop(spki);
     return err;
