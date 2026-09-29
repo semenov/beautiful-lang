@@ -5,7 +5,7 @@ declarations with their comments, bodies left out. `import <module>`,
 then use `module.name`. Functions without a body are built into the
 compiler and runtime.
 
-Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`term`](#term), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`url`](#url), [`zlib`](#zlib), [`math`](#math), and the [prelude](#prelude)
+Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`term`](#term), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`template`](#template), [`url`](#url), [`zlib`](#zlib), [`math`](#math), and the [prelude](#prelude)
 (available everywhere without `import`).
 
 ## files
@@ -1122,6 +1122,59 @@ pub fn render(element: Element) -> String
 
 // Text safe inside an element or a quoted attribute: `<` becomes `&lt;` etc.
 pub fn escape(text: String) -> String
+```
+
+## template
+
+template: text from templates and data, in the Handlebars / Mustache
+style most web developers know.
+
+```
+let page = try template.compile("<h1>{{title}}</h1>{{#each items}}<li>{{name}}: {{price}}</li>{{/each}}")
+let html = try page.render(Page(title: "Menu", items: items))
+```
+
+{{name}}, {{user.email}}      a value (HTML-escaped in HTML templates)
+{{{name}}}                     a value as it is (no escaping)
+{{#if x}} ... {{else}} ... {{/if}}      false, none, 0, "" and [] are false
+{{#unless x}} ... {{/unless}}
+{{#each items}} ... {{else}} ... {{/each}}   {{this}}, {{@index}},
+
+```
+                             {{@first}}, {{@last}}, {{@key}} (maps)
+```
+
+{{#with user}} ... {{/with}}   names inside refer to user's fields
+{{> header}}                   another template of the same `load`
+{{! comment }}  {{~ trims whitespace before, ~}} after
+
+Inside a block, a name not found there is looked up in the enclosing
+data (../name does it explicitly). A name that isn't anywhere is an error,
+with the line: a typo doesn't quietly render as nothing. The data is any
+value, as `json.encode` sees it.
+
+```
+// A compiled template.
+pub builtin type Template {
+  fn render<T>(self, data: T) throws -> String
+}
+
+// A template for HTML: values are escaped (<, >, &, quotes).
+pub fn compile(source: String) throws -> Template
+// A template for plain text (emails, config files): values go in as they are.
+pub fn compile_text(source: String) throws -> Template
+
+// A folder of templates that can include each other with {{> name}}.
+pub builtin type Library {
+  // `name` is the file's path under the folder without its extension:
+  // "pages/home" for pages/home.html.
+  fn render<T>(self, name: String, data: T) throws -> String
+  fn names(self) -> List<String>
+}
+
+// Loads every file under `dir`. Files ending in .html, .htm, .xml and .svg
+// escape values; others (.txt, .md, ...) don't.
+pub fn load(dir: String) throws -> Library
 ```
 
 ## url

@@ -413,6 +413,9 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
         tmp[n] = 0;
         char *e;
         d->kind = LT_D_NUM;
+        // the digits as written (1.50 stays 1.50 for Decimal and templates)
+        d->s = st;
+        d->slen = n;
         d->num = strtod(tmp, &e);
         if (*e) {
             p->s = st;

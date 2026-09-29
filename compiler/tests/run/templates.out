@@ -1,0 +1,23 @@
+["email", "menu", "partials/header"]
+<header>Tom&#39;s &lt;Café&gt;</header>
+<ul>
+  <li class="first">0. Soup — 4.50 🌶</li>
+  <li class="">1. Bread &amp; butter — 1.20 </li>
+</ul>
+<p>&lt;b&gt;escaped&lt;/b&gt;</p>
+<p><b>raw</b></p>
+
+Hello Ada,
+Your order for Ada (id 42) is ready.
+Please pay on pickup.
+
+<header>X</header>
+<ul>
+  <li>nothing today</li>
+</ul>
+<p></p>
+<p></p>
+
+template: line 1: not in the data: nmae
+template: line 1: {{#each}} isn't closed with {{/each}}
+A<B & co

@@ -45,7 +45,7 @@ Options:
 
 // The standard library's modules, for `lang doc`.
 const STD_NAMES: &[&str] = &[
-    "files", "path", "io", "process", "env", "cli", "term", "log", "time", "json", "http", "net", "sql", "db", "crypto", "encoding", "random", "regex", "csv", "xml", "url", "zlib", "math",
+    "files", "path", "io", "process", "env", "cli", "term", "log", "time", "json", "http", "net", "sql", "db", "crypto", "encoding", "random", "regex", "csv", "xml", "template", "url", "zlib", "math",
 ];
 
 // `lang help`, `lang guide`, `lang doc`
@@ -261,6 +261,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "io" => include_str!("std/io.lang"),
         "sql" => include_str!("std/sql.lang"),
         "term" => include_str!("std/term.lang"),
+        "template" => include_str!("std/template.lang"),
         _ => return None,
     })
 }

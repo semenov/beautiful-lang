@@ -1220,7 +1220,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         let body: String = match &kind {
             Kind::Int => "return lt_dec_int(src, d, p, lenient, out);".into(),
             Kind::Float => "return lt_dec_float(src, d, p, lenient, out);".into(),
-            Kind::Decimal => "if (d->kind == LT_D_NUM) { if (d->is_int) { *out = (lt_decimal){ d->i, 0 }; return (lt_err){0}; } lt_text *t = lt_float_to_text(d->num); bool ok = lt_decimal_parse(t->data, t->len, out); lt_text_drop(t); if (ok) return (lt_err){0}; } if (d->kind == LT_D_STR && lt_decimal_parse(d->s, d->slen, out)) return (lt_err){0}; return lt_dec_error(src, p, \"a decimal number\", d);".into(),
+            Kind::Decimal => "if (d->kind == LT_D_NUM && d->s && lt_decimal_parse(d->s, d->slen, out)) return (lt_err){0}; if (d->kind == LT_D_NUM) { if (d->is_int) { *out = (lt_decimal){ d->i, 0 }; return (lt_err){0}; } lt_text *t = lt_float_to_text(d->num); bool ok = lt_decimal_parse(t->data, t->len, out); lt_text_drop(t); if (ok) return (lt_err){0}; } if (d->kind == LT_D_STR && lt_decimal_parse(d->s, d->slen, out)) return (lt_err){0}; return lt_dec_error(src, p, \"a decimal number\", d);".into(),
             Kind::Bool => "return lt_dec_bool(src, d, p, lenient, out);".into(),
             Kind::Text => "return lt_dec_text(src, d, p, lenient, out);".into(),
             Kind::Bytes => "if (d->kind == LT_D_STR && d->raw) { *out = lt_bytes_from(d->s, d->slen); return (lt_err){0}; } if (d->kind != LT_D_STR) return lt_dec_error(src, p, \"base64 text\", d); lt_text *t = lt_text_from(d->s, d->slen); lt_err e = lt_base64_decode(t, out); lt_text_drop(t); if (e.obj) { lt_iface_drop(e); return lt_dec_error(src, p, \"base64 text\", d); } return (lt_err){0};".into(),
@@ -2845,6 +2845,21 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let ec = self.tys[e].c.clone();
                 format!("({{ {ec} it_ = {x}; lt_chan_send({c}, &it_); }})", ec = ec, x = a[1], c = a[0])
             }
+            "template.compile" => format!("lt_template_compile({}, true, {})", a[0], a[1]),
+            "template.compile_text" => format!("lt_template_compile({}, false, {})", a[0], a[1]),
+            "template.load" => format!("lt_template_load({}, {})", a[0], a[1]),
+            "template.Library.names" => format!("lt_template_names({})", a[0]),
+            "template.Template.render" | "template.Library.render" => {
+                // the data as JSON (what json.encode writes), then filled in
+                let t = tys.last().unwrap().clone();
+                let id = self.tid(&t);
+                self.need(H::Enc, id);
+                if name == "template.Template.render" {
+                    format!("({{ lt_buf b_ = {{0}}; b_.indent = -1; enc_{}({}, &b_); lt_text *j_ = lt_buf_text(&b_); lt_err e_ = lt_template_render({}, NULL, j_, {}); lt_text_drop(j_); e_; }})", id, a[1], a[0], a[2])
+                } else {
+                    format!("({{ lt_buf b_ = {{0}}; b_.indent = -1; enc_{}({}, &b_); lt_text *j_ = lt_buf_text(&b_); lt_err e_ = lt_template_render({}, {}, j_, {}); lt_text_drop(j_); e_; }})", id, a[2], a[0], a[1], a[3])
+                }
+            }
             "Channel.try_receive" => {
                 let e = match &self.tys[tid0.unwrap()].kind {
                     Kind::Channel(e) => *e,
@@ -3542,6 +3557,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         out += include_str!("runtime/json.h");
         out += include_str!("runtime/std.h");
         out += include_str!("runtime/io.h");
+        out += include_str!("runtime/template.h");
         if self.http_glue || self.net {
             if self.curl {
                 out = format!("#define LT_CURL 1\n// link: -lcurl\n{}", out);

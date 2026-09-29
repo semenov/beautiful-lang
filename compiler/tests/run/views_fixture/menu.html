@@ -1,0 +1,11 @@
+{{> partials/header}}
+<ul>
+  {{#each items}}
+  <li class="{{#if @first}}first{{/if}}">{{@index}}. {{name}} — {{price}} {{#if spicy}}🌶{{/if}}</li>
+  {{else}}
+  <li>nothing today</li>
+  {{/each}}
+</ul>
+{{! a comment }}
+<p>{{note}}</p>
+<p>{{{html_note}}}</p>

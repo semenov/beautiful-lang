@@ -1,0 +1,45 @@
+import template
+
+type Item {
+  name: String
+  price: Decimal
+  spicy: Bool = false
+}
+
+type Menu {
+  shop: String
+  items: List<Item>
+  note: String
+  html_note: String
+}
+
+type Customer {
+  name: String
+}
+
+type Email {
+  customer: Customer
+  order_id: Int
+  paid: Bool
+}
+
+fn main() throws {
+  let views = try template.load("views_fixture")
+  print("${views.names()}")
+  let menu = Menu(shop: "Tom's <Café>", items: [Item(name: "Soup", price: 4.50, spicy: true), Item(name: "Bread & butter", price: 1.20)], note: "<b>escaped</b>", html_note: "<b>raw</b>")
+  print(try views.render("menu", data: menu))
+  print(try views.render("email", data: Email(customer: Customer(name: "Ada"), order_id: 42, paid: false)))
+  let empty = Menu(shop: "X", items: [], note: "", html_note: "")
+  print(try views.render("menu", data: empty))
+  let t = try template.compile("Hi {{nmae}}")
+  let _ = try t.render(Customer(name: "Ada")) catch err {
+    print(err.message())
+    ""
+  }
+  let bad = try template.compile("{{#each items}} no end") catch err {
+    print(err.message())
+    t
+  }
+  let quick = try template.compile_text("{{name}} & co")
+  print(try quick.render(Customer(name: "A<B")))
+}

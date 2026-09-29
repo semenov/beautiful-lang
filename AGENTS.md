@@ -335,6 +335,16 @@ test "adding a todo" {                  // handlers are tested without a network
 }
 ```
 
+## Templates (Handlebars style)
+
+```
+let views = try template.load("views")             // views/*.html escape values
+let html = try views.render("menu", data: menu)    // {{name}} {{#each items}}...{{/each}}
+                                                   // {{#if x}}...{{else}}...{{/if}} {{> header}}
+```
+
+A name missing from the data is an error (with the line), not empty text.
+
 ## Tests
 
 ```

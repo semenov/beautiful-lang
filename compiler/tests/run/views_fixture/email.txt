@@ -1,0 +1,3 @@
+Hello {{customer.name}},
+{{#with customer}}Your order for {{name}} (id {{../order_id}}) is ready.{{/with}}
+{{#unless paid}}Please pay on pickup.{{/unless}}

@@ -72,7 +72,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `http`: middleware (`router.use`), cookies, forms (urlencoded,
       multipart), `http.mime_type`, CORS, request logging
 - [ ] WebSockets (server and client)
-- [ ] **templates** (Vlad asked too): user-friendly; look at what's popular
+- [x] **templates** (Vlad asked too; `template` module, Handlebars syntax): user-friendly; look at what's popular
       (Handlebars/Mustache, Jinja/Nunjucks, EJS, Go templates) and pick the
       shape agents know best; HTML-escaping by default
 - [ ] `tar` and `zip`
