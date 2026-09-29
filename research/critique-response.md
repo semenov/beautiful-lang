@@ -15,7 +15,7 @@ answer: does it keep the language simple and fast?
 | 4 | copy-on-write makes some loops quadratic | **explain** the rule (a change to a value someone else still holds copies it) + the idioms that avoid it; a compiler note later |
 | 5 | `Shared` is one mutex | **fix**: `with v = s.read() { }` for readers (a readers-writer lock) |
 | 6 | generics without bounds | **explain**: asked; they stay without bounds (pass a function) |
-| 7 | SQL only as one literal | **ask** |
+| 7 | SQL only as one literal | **explain**: asked; stays one literal for now |
 | 8 | an optional prints as `none` in text | **ask** (make it an error) |
 | 9 | `counts[w] += 1` compiles, then panics | **ask** (make it an error) |
 | 10 | no private fields | **explain**: asked; fields stay visible (most types are data) |

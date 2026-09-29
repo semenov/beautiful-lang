@@ -562,10 +562,10 @@ wrong thing; Vlad chose (see `research/critique-response.md`):
   (`email.parse`) by convention.
 - **`is` looks through `cause`:** `err is files.NotFound` is true when the
   error or any error in its `cause` chain is one (Go's `errors.Is`).
-- **SQL from literal pieces:** a query may be chosen or joined from
-  literals (`if`/`match` over literals, a top-level `let` of a literal),
-  and a `List` parameter expands `in (?)` to `in (?, ?, ?)`. Still no
-  injection: every piece is a literal.
+- **SQL stays one literal in the call, for now** (Vlad, after a second
+  look). List parameters (`in (?)` expanding to `?, ?, ?`) and choosing
+  between whole literals were considered; optional filters use
+  `(?1 = '' or col = ?1)`.
 - **Name every argument after the first**, whenever there are two or more
   parameters (the 3+ rule for all): one way to call, and calls explain
   themselves; stdlib parameter names are chosen to read well

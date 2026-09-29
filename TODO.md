@@ -22,7 +22,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] generic bounds: not added (Vlad, after a second look)
   - [x] private fields: not added (Vlad, after a second look)
   - [ ] `is` through `cause`
-  - [ ] SQL from literal pieces; list parameters
+  - [x] SQL pieces / list parameters: not now (Vlad, after a second look)
   - [ ] name every argument after the first (2+ parameters)
   - [x] ranges: left as they are (Vlad, after a second look)
   - [ ] fixes: changed-a-copy error, pattern names, flow typing through
