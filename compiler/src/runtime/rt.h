@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>

@@ -324,7 +324,22 @@ pub type Duration {
   nanos: Int
   pub fn seconds(self) -> Float
   pub fn millis(self) -> Int
+  pub fn plus(self, other: Duration) -> Duration
+  pub fn minus(self, other: Duration) -> Duration
+  pub fn times(self, n: Int) -> Duration
+  pub fn is_longer_than(self, other: Duration) -> Bool
+  // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
+  pub fn text(self) -> Text
 }
+
+pub fn minutes(n: Int) -> Duration
+
+pub fn hours(n: Int) -> Duration
+
+pub fn days(n: Int) -> Duration
+
+// "1h30m", "90s", "1.5s", "250ms", "10us" (or µs), "10ns", "2d", "-5m".
+pub fn parse_duration(text: Text) throws -> Duration
 
 pub fn seconds(n: Int) -> Duration
 
@@ -338,12 +353,21 @@ pub fn millis(n: Int) -> Duration
 pub type Instant {
   nanos: Int
   pub fn elapsed(self) -> Duration
+  pub fn plus(self, d: Duration) -> Instant
+  // How long from `earlier` to this moment.
+  pub fn since(self, earlier: Instant) -> Duration
 }
 
 pub fn now() -> Instant
 
 // Wait without blocking other tasks. Fails with `Cancelled` if the task is cancelled.
 pub fn sleep(duration: Duration) throws
+
+// Waits until a moment (now or in the past: doesn't wait). For steady
+// ticks, sleep until start + interval × n rather than a fixed interval,
+// so the time the work takes doesn't add up:
+//   for n in 1..=10 { try time.sleep_until(start.plus(interval.times(n))) ... }
+pub fn sleep_until(moment: Instant) throws
 
 // Runs `work`, giving up after `duration`: the work is cancelled (whatever
 // it waits for stops with an error, its own tasks too) and `timeout`
@@ -367,8 +391,23 @@ pub type DateTime {
   second: Int
   // "2026-09-29T12:00:00Z"
   pub fn iso(self) -> Text
-  // "2026-09-29"
-  pub fn date(self) -> Text
+  // The same moment on the wall clock of a time zone:
+  //   let berlin = try moment.in_zone("Europe/Berlin")   // 14:05 UTC -> 16:05 +02:00
+  pub fn in_zone(self, zone: Text) throws -> Zoned
+  // The calendar day.
+  pub fn date(self) -> Date
+  pub fn weekday(self) -> Weekday
+  // As a pattern says (strftime): "%Y-%m-%d %H:%M" gives "2026-09-29 12:30".
+  // %Y year, %m month, %d day, %H hour, %M minute, %S second, %y two-digit
+  // year, %e day without zero, %I hour 1-12, %p AM/PM, %B September, %b Sep,
+  // %A Tuesday, %a Tue, %j day of the year, %s Unix seconds, %z +0000,
+  // %Z UTC, %% a percent sign.
+  pub fn format(self, pattern: Text) -> Text
+  pub fn is_before(self, other: DateTime) -> Bool
+  pub fn is_after(self, other: DateTime) -> Bool
+  // The same day and time `n` months later; the day is clamped to the
+  // month's length (Jan 31 + 1 month = Feb 28).
+  pub fn plus_months(self, n: Int) -> DateTime
   // Seconds since 1970-01-01 UTC.
   pub fn to_unix(self) -> Int
   // A moment `seconds` later (or earlier, if negative).
@@ -388,6 +427,86 @@ pub fn unix_now() -> Int
 
 // The date and time of a Unix timestamp.
 pub fn from_unix(seconds: Int) -> DateTime
+
+pub enum Weekday {
+  Monday
+  Tuesday
+  Wednesday
+  Thursday
+  Friday
+  Saturday
+  Sunday
+}
+
+// A calendar day, without a time or a zone: birthdays, due dates, reports.
+pub type Date {
+  year: Int
+  month: Int
+  day: Int
+  // "2026-09-29"
+  pub fn iso(self) -> Text
+  // Days since 1970-01-01 (negative before).
+  pub fn to_days(self) -> Int
+  pub fn plus_days(self, n: Int) -> Date
+  // Clamped to the month's length: Jan 31 + 1 month = Feb 28.
+  pub fn plus_months(self, n: Int) -> Date
+  // Days from this date to `other` (negative if `other` is earlier).
+  pub fn days_until(self, other: Date) -> Int
+  pub fn weekday(self) -> Weekday
+  pub fn is_before(self, other: Date) -> Bool
+  pub fn is_after(self, other: Date) -> Bool
+  // This day at a time of day, in UTC.
+  pub fn at(self, hour: Int, minute: Int, second: Int) -> DateTime
+  pub fn format(self, pattern: Text) -> Text
+}
+
+// Today in UTC.
+pub fn today() -> Date
+
+// "2026-09-29"
+pub fn parse_date(text: Text) throws -> Date
+
+// Reads a date and time written as `pattern` says (see `DateTime.format`):
+//   try time.parse("29/09/2026 14:05", pattern: "%d/%m/%Y %H:%M")
+// Fields the pattern doesn't have are 0 (or 1 for month and day); with %z
+// the result is converted to UTC.
+pub fn parse(text: Text, pattern: Text) throws -> DateTime
+
+// A moment as the wall clock of a time zone shows it.
+pub type Zoned {
+  year: Int
+  month: Int
+  day: Int
+  hour: Int
+  minute: Int
+  second: Int
+  // seconds east of UTC: 7200 for Berlin in summer, -18000 for New York in winter
+  offset: Int
+  // "Europe/Berlin"
+  zone: Text
+  // "CEST"
+  abbreviation: Text
+  // "2026-09-29T16:05:09+02:00"
+  pub fn iso(self) -> Text
+  // As `DateTime.format`; %z gives the offset (+0200), %Z the abbreviation.
+  pub fn format(self, pattern: Text) -> Text
+  // The same moment in UTC.
+  pub fn utc(self) -> DateTime
+  pub fn date(self) -> Date
+}
+
+// The moment when the wall clock in `zone` shows this date and time:
+//   let meeting = try time.in_zone("Europe/Berlin", date: d, hour: 9, minute: 30)
+// A time skipped by a clock change moves forward; a repeated one takes
+// the first.
+pub fn in_zone(zone: Text, date: Date, hour: Int, minute: Int) throws -> DateTime
+
+// Now, on the wall clock of `zone`.
+pub fn now_in(zone: Text) throws -> Zoned
+
+// This machine's zone ("Europe/Berlin"): TZ, else the system setting,
+// else "UTC".
+pub fn local_zone() -> Text
 ```
 
 ## json

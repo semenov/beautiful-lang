@@ -495,6 +495,50 @@ typedef struct lt_deadline {
 } lt_deadline;
 static lt_deadline *lt_deadlines;
 
+// The timer thread's wait. On macOS a condition variable's timeout is
+// coalesced for background processes (services): sleep(10ms) took ~70ms.
+// A kqueue timer marked critical isn't, so there the thread waits on a
+// kqueue, and new timers wake it with a user event. Called holding
+// lt_timer_mu; `ns` < 0 waits until woken.
+#if defined(__APPLE__)
+#include <sys/event.h>
+static int lt_timer_kq = -1;
+static void lt_timer_kick(void) {
+    struct kevent ev;
+    EV_SET(&ev, 1, EVFILT_USER, 0, NOTE_TRIGGER, 0, NULL);
+    kevent(lt_timer_kq, &ev, 1, NULL, 0, NULL);
+}
+static void lt_timer_wait(int64_t ns) {
+    struct kevent ch[2], out[2];
+    int n = 0;
+    if (ns >= 0) EV_SET(&ch[n++], 2, EVFILT_TIMER, EV_ADD | EV_ONESHOT, NOTE_NSECONDS | NOTE_CRITICAL, ns, NULL);
+    pthread_mutex_unlock(&lt_timer_mu);
+    kevent(lt_timer_kq, ch, n, out, 2, NULL);
+    pthread_mutex_lock(&lt_timer_mu);
+}
+static void lt_timer_setup(void) {
+    lt_timer_kq = kqueue();
+    struct kevent ev;
+    EV_SET(&ev, 1, EVFILT_USER, EV_ADD | EV_CLEAR, 0, 0, NULL);
+    kevent(lt_timer_kq, &ev, 1, NULL, 0, NULL);
+}
+#else
+static void lt_timer_kick(void) { pthread_cond_signal(&lt_timer_cv); }
+static void lt_timer_wait(int64_t ns) {
+    if (ns < 0) {
+        pthread_cond_wait(&lt_timer_cv, &lt_timer_mu);
+        return;
+    }
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    int64_t n2 = ts.tv_nsec + ns % 1000000000;
+    ts.tv_sec += ns / 1000000000 + n2 / 1000000000;
+    ts.tv_nsec = n2 % 1000000000;
+    pthread_cond_timedwait(&lt_timer_cv, &lt_timer_mu, &ts);
+}
+static void lt_timer_setup(void) {}
+#endif
+
 static void *lt_timer_thread(void *arg) {
     (void)arg;
     pthread_mutex_lock(&lt_timer_mu);
@@ -531,17 +575,7 @@ static void *lt_timer_thread(void *arg) {
             t = n;
         }
         lt_spin_unlock(&lt_timer_spin);
-        if (next == INT64_MAX) {
-            pthread_cond_wait(&lt_timer_cv, &lt_timer_mu);
-        } else {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            int64_t wait = next - now;
-            int64_t ns = ts.tv_nsec + wait % 1000000000;
-            ts.tv_sec += wait / 1000000000 + ns / 1000000000;
-            ts.tv_nsec = ns % 1000000000;
-            pthread_cond_timedwait(&lt_timer_cv, &lt_timer_mu, &ts);
-        }
+        lt_timer_wait(next == INT64_MAX ? -1 : next - now);
     }
     return NULL;
 }
@@ -559,7 +593,7 @@ static int64_t lt_cancel_after(lt_task *t, int64_t ns) {
     pthread_mutex_lock(&lt_timer_mu);
     d->next = lt_deadlines;
     lt_deadlines = d;
-    pthread_cond_signal(&lt_timer_cv);
+    lt_timer_kick();
     pthread_mutex_unlock(&lt_timer_mu);
     return (int64_t)(intptr_t)d;
 }
@@ -594,7 +628,7 @@ static lt_err lt_sleep_nanos(int64_t ns) {
     // lock order everywhere: the timer mutex, then the timer queue
     pthread_mutex_lock(&lt_timer_mu);
     lt_spin_lock(&lt_timer_spin);
-    pthread_cond_signal(&lt_timer_cv);
+    lt_timer_kick();
     pthread_mutex_unlock(&lt_timer_mu);
     lt_park_on(&lt_timer_q, true);
     t = lt_current();
@@ -1001,6 +1035,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     lt_main_task = m;
     lt_panic_hook = lt_task_panic_hook;
     lt_workers = lt_ncpu();
+    lt_timer_setup();
     pthread_t timer;
     pthread_create(&timer, NULL, lt_timer_thread, NULL);
     pthread_detach(timer);

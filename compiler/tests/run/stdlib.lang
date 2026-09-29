@@ -41,7 +41,7 @@ fn main() throws {
   print("shuffled keeps items: ${random.shuffle([1, 2, 3]).sorted() == [1, 2, 3]}")
   let now = time.utc_now()
   print("year ok: ${now.year >= 2025}, iso length ${now.iso().length}")
-  print("${time.from_unix(0).iso()} ${time.from_unix(1767225600).date()}")
+  print("${time.from_unix(0).iso()} ${time.from_unix(1767225600).date().iso()}")
   print("${path.stem("a/b/report.tar.gz")} ${path.clean("a/./b/../c")} ${path.clean("/x/../../y")} ${path.parts("/usr/local/bin")} ${path.is_absolute("rel/x")}")
   log.info("done")
 }

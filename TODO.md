@@ -43,7 +43,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] `Decimal` for money
   - [x] `time.timeout(duration, work)`
   - [x] `lang doc`
-  - [ ] a `Date` type (calendar dates apart from instants)
+  - [x] a `Date` type (calendar dates apart from instants)
   - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
   - [ ] test doubles: a fixed clock, calling handlers without a network (done
         for http), temporary directories (done)
@@ -63,7 +63,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `files.walk`, `files.glob`, `path.matches`, `files.delete_all`
 - [x] `term`: colors (off when not a terminal / NO_COLOR), text width, tables,
       questions (yes/no, password), a progress line
-- [ ] `time`: format and parse with a pattern, time zones, `Date`,
+- [x] `time`: format and parse with a pattern, time zones, `Date`,
       `parse_duration`, printing durations
 - [ ] `Decimal`
 - [ ] `http`: middleware (`router.use`), cookies, forms (urlencoded,
@@ -88,8 +88,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] writing to a closed pipe (`| head`) exits quietly (status 141)
 - [x] `eprint(text)` for standard error without `with`
 - [x] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
-- [ ] `time`: parse_duration, Duration text and arithmetic, precise timers
-      (macOS: sleep(10ms) takes ~70ms), a ticker
+- [x] `time`: parse_duration, Duration text and arithmetic, precise timers
+      (macOS: sleep(10ms) takes ~70ms), a ticker (sleep_until on a grid)
 - [ ] `cli`: -n style flags and one-letter names
 - [ ] channels: try_receive, receive with a timeout, select
 - [ ] `-> Never` in user code; constants (`const`)

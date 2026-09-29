@@ -1,0 +1,18 @@
+1h30m -> 1h30m
+90s -> 1m30s
+1.5s -> 1.5s
+250ms -> 250ms
+10us -> 10µs
+12ns -> 12ns
+2d -> 48h
+-5m -> -5m
+1h0m5s -> 1h5s
+time: "5 minutes" is not a duration like 1h30m, 90s or 250ms
+2026-09-29 14:05:09 | Tue 29 Sep 2026 | Tuesday September 29 | 02:05 PM | 272 | 26 | +0000 UTC | 1790690709
+true
+2026-09-29T12:05:00Z
+2026-09-03T00:00:00Z
+time: "31/02/2026" doesn't match the pattern "%d/%m/%Y"
+2026-02-28 2026-03-02 328 true 2025-02-28
+2027-02-28T14:05:09Z true 1h30m 2h3m
+5 ticks of 20ms: ~100ms: true

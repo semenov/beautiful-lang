@@ -4,5 +4,5 @@
 FROM rust:alpine
 RUN apk add --no-cache build-base pkgconf bash python3 \
     curl-dev curl-static openssl-dev openssl-libs-static \
-    sqlite-dev sqlite-static zlib-dev zlib-static \
+    sqlite-dev sqlite-static zlib-dev zlib-static tzdata \
     nghttp2-static brotli-static zstd-static libidn2-static libpsl-static c-ares-dev libunistring-static

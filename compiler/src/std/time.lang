@@ -10,6 +10,134 @@ pub type Duration {
   pub fn millis(self) -> Int {
     return self.nanos.div(1000000)
   }
+
+  pub fn plus(self, other: Duration) -> Duration {
+    return Duration(nanos: self.nanos + other.nanos)
+  }
+
+  pub fn minus(self, other: Duration) -> Duration {
+    return Duration(nanos: self.nanos - other.nanos)
+  }
+
+  pub fn times(self, n: Int) -> Duration {
+    return Duration(nanos: self.nanos * n)
+  }
+
+  pub fn is_longer_than(self, other: Duration) -> Bool {
+    return self.nanos > other.nanos
+  }
+
+  // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
+  pub fn text(self) -> Text {
+    let n = self.nanos
+    if n < 0 {
+      return "-${Duration(nanos: 0 - n).text()}"
+    }
+    if n < 1000 {
+      return "${n}ns"
+    }
+    if n < 1000000 {
+      return "${trim_zeros((n.to_float() / 1000.0).format(1))}µs"
+    }
+    if n < 1000000000 {
+      return "${trim_zeros((n.to_float() / 1000000.0).format(1))}ms"
+    }
+    let total = n.div(1000000000)
+    let h = total.div(3600)
+    let m = (total % 3600).div(60)
+    let s = total % 60
+    var out = ""
+    if h > 0 {
+      out = "${h}h"
+    }
+    if m > 0 {
+      out = "${out}${m}m"
+    }
+    if h == 0 and m == 0 {
+      return "${trim_zeros((n.to_float() / 1000000000.0).format(3))}s"
+    }
+    if s > 0 {
+      out = "${out}${s}s"
+    }
+    return out
+  }
+}
+
+fn trim_zeros(t: Text) -> Text {
+  if not t.contains(".") {
+    return t
+  }
+  var s = t
+  while s.ends_with("0") {
+    s = s.slice(from: 0, to: s.length - 1)
+  }
+  if s.ends_with(".") {
+    s = s.slice(from: 0, to: s.length - 1)
+  }
+  return s
+}
+
+pub fn minutes(n: Int) -> Duration {
+  return Duration(nanos: n * 60000000000)
+}
+
+pub fn hours(n: Int) -> Duration {
+  return Duration(nanos: n * 3600000000000)
+}
+
+pub fn days(n: Int) -> Duration {
+  return Duration(nanos: n * 86400000000000)
+}
+
+// "1h30m", "90s", "1.5s", "250ms", "10us" (or µs), "10ns", "2d", "-5m".
+pub fn parse_duration(text: Text) throws -> Duration {
+  let bad = Failure(message: "time: \"${text}\" is not a duration like 1h30m, 90s or 250ms")
+  var s = text.trim()
+  var sign = 1
+  if s.starts_with("-") {
+    sign = -1
+    s = s.slice(from: 1, to: s.length)
+  }
+  if s.is_empty() {
+    throw bad
+  }
+  var total = 0.0
+  var i = 0
+  let chars = s.chars()
+  while i < chars.length {
+    var number = ""
+    while i < chars.length and "0123456789.".contains(chars[i]) {
+      number = "${number}${chars[i]}"
+      i += 1
+    }
+    var unit = ""
+    while i < chars.length and not "0123456789.".contains(chars[i]) {
+      unit = "${unit}${chars[i]}"
+      i += 1
+    }
+    if number.is_empty() {
+      throw bad
+    }
+    let value = try number.to_float() catch err {
+      throw bad
+    }
+    let scale = match unit {
+      "ns" => 1.0
+      "us" => 1000.0
+      "µs" => 1000.0
+      "ms" => 1000000.0
+      "s" => 1000000000.0
+      "m" => 60000000000.0
+      "h" => 3600000000000.0
+      "d" => 86400000000000.0
+      _ => -1.0
+    }
+    if scale < 0.0 {
+      throw bad
+    }
+    total = total + value * scale
+  }
+  return Duration(nanos: total.round() * sign)
 }
 
 pub fn seconds(n: Int) -> Duration {
@@ -35,6 +163,15 @@ pub type Instant {
   pub fn elapsed(self) -> Duration {
     return Duration(nanos: __monotonic_nanos() - self.nanos)
   }
+
+  pub fn plus(self, d: Duration) -> Instant {
+    return Instant(nanos: self.nanos + d.nanos)
+  }
+
+  // How long from `earlier` to this moment.
+  pub fn since(self, earlier: Instant) -> Duration {
+    return Duration(nanos: self.nanos - earlier.nanos)
+  }
 }
 
 pub fn now() -> Instant {
@@ -49,6 +186,14 @@ pub fn sleep(duration: Duration) throws {
 }
 
 fn __sleep_nanos(nanos: Int) throws
+
+// Waits until a moment (now or in the past: doesn't wait). For steady
+// ticks, sleep until start + interval × n rather than a fixed interval,
+// so the time the work takes doesn't add up:
+//   for n in 1..=10 { try time.sleep_until(start.plus(interval.times(n))) ... }
+pub fn sleep_until(moment: Instant) throws {
+  try __sleep_nanos(moment.nanos - __monotonic_nanos())
+}
 
 // Runs `work`, giving up after `duration`: the work is cancelled (whatever
 // it waits for stops with an error, its own tasks too) and `timeout`
@@ -95,9 +240,49 @@ pub type DateTime {
     return "${d}T${pad(self.hour)}:${pad(self.minute)}:${pad(self.second)}Z"
   }
 
-  // "2026-09-29"
-  pub fn date(self) -> Text {
-    return "${self.year}-${pad(self.month)}-${pad(self.day)}"
+  // The same moment on the wall clock of a time zone:
+  //   let berlin = try moment.in_zone("Europe/Berlin")   // 14:05 UTC -> 16:05 +02:00
+  pub fn in_zone(self, zone: Text) throws -> Zoned {
+    var abbr: List<Text> = []
+    let f = try __zone_fields(zone, unix: self.to_unix(), abbreviation: abbr)
+    return Zoned(year: f[0], month: f[1], day: f[2], hour: f[3], minute: f[4], second: f[5], offset: f[6], zone: zone, abbreviation: abbr.first() ?? zone)
+  }
+
+  // The calendar day.
+  pub fn date(self) -> Date {
+    return Date(year: self.year, month: self.month, day: self.day)
+  }
+
+  pub fn weekday(self) -> Weekday {
+    return self.date().weekday()
+  }
+
+  // As a pattern says (strftime): "%Y-%m-%d %H:%M" gives "2026-09-29 12:30".
+  // %Y year, %m month, %d day, %H hour, %M minute, %S second, %y two-digit
+  // year, %e day without zero, %I hour 1-12, %p AM/PM, %B September, %b Sep,
+  // %A Tuesday, %a Tue, %j day of the year, %s Unix seconds, %z +0000,
+  // %Z UTC, %% a percent sign.
+  pub fn format(self, pattern: Text) -> Text {
+    return format_parts(self, pattern: pattern, offset: 0, zone: "UTC")
+  }
+
+  pub fn is_before(self, other: DateTime) -> Bool {
+    return self.to_unix() < other.to_unix()
+  }
+
+  pub fn is_after(self, other: DateTime) -> Bool {
+    return self.to_unix() > other.to_unix()
+  }
+
+  // The same day and time `n` months later; the day is clamped to the
+  // month's length (Jan 31 + 1 month = Feb 28).
+  pub fn plus_months(self, n: Int) -> DateTime {
+    let d = self.date().plus_months(n)
+    var r = self
+    r.year = d.year
+    r.month = d.month
+    r.day = d.day
+    return r
   }
 
   // Seconds since 1970-01-01 UTC.
@@ -220,3 +405,332 @@ pub fn from_unix(seconds: Int) -> DateTime {
   let year = yoe + era * 400 + (if month <= 2 { 1 } else { 0 })
   return DateTime(year: year, month: month, day: day, hour: rest.div(3600), minute: (rest % 3600).div(60), second: rest % 60)
 }
+
+pub enum Weekday {
+  Monday
+  Tuesday
+  Wednesday
+  Thursday
+  Friday
+  Saturday
+  Sunday
+}
+
+fn weekday_name(w: Weekday) -> Text {
+  return match w {
+    Monday => "Monday"
+    Tuesday => "Tuesday"
+    Wednesday => "Wednesday"
+    Thursday => "Thursday"
+    Friday => "Friday"
+    Saturday => "Saturday"
+    Sunday => "Sunday"
+  }
+}
+
+fn month_name(m: Int) -> Text {
+  let names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+  return names[m - 1]
+}
+
+fn days_in_month(year: Int, month: Int) -> Int {
+  if month == 2 {
+    let leap = (year % 4 == 0 and year % 100 != 0) or year % 400 == 0
+    return if leap { 29 } else { 28 }
+  }
+  return if month == 4 or month == 6 or month == 9 or month == 11 { 30 } else { 31 }
+}
+
+// A calendar day, without a time or a zone: birthdays, due dates, reports.
+pub type Date {
+  year: Int
+  month: Int
+  day: Int
+
+  // "2026-09-29"
+  pub fn iso(self) -> Text {
+    return "${self.year.to_text().pad_start(width: 4, fill: "0")}-${pad(self.month)}-${pad(self.day)}"
+  }
+
+  // Days since 1970-01-01 (negative before).
+  pub fn to_days(self) -> Int {
+    return DateTime(year: self.year, month: self.month, day: self.day, hour: 0, minute: 0, second: 0).to_unix().div(86400)
+  }
+
+  pub fn plus_days(self, n: Int) -> Date {
+    return from_unix((self.to_days() + n) * 86400).date()
+  }
+
+  // Clamped to the month's length: Jan 31 + 1 month = Feb 28.
+  pub fn plus_months(self, n: Int) -> Date {
+    let m0 = self.year * 12 + (self.month - 1) + n
+    let year = m0.div(12)
+    let month = m0 - year * 12 + 1
+    return Date(year: year, month: month, day: min(self.day, days_in_month(year, month: month)))
+  }
+
+  // Days from this date to `other` (negative if `other` is earlier).
+  pub fn days_until(self, other: Date) -> Int {
+    return other.to_days() - self.to_days()
+  }
+
+  pub fn weekday(self) -> Weekday {
+    // 1970-01-01 was a Thursday
+    let names = [Weekday.Thursday, Weekday.Friday, Weekday.Saturday, Weekday.Sunday, Weekday.Monday, Weekday.Tuesday, Weekday.Wednesday]
+    let i = self.to_days() % 7
+    return names[if i < 0 { i + 7 } else { i }]
+  }
+
+  pub fn is_before(self, other: Date) -> Bool {
+    return self.to_days() < other.to_days()
+  }
+
+  pub fn is_after(self, other: Date) -> Bool {
+    return self.to_days() > other.to_days()
+  }
+
+  // This day at a time of day, in UTC.
+  pub fn at(self, hour: Int, minute: Int, second: Int) -> DateTime {
+    return DateTime(year: self.year, month: self.month, day: self.day, hour: hour, minute: minute, second: second)
+  }
+
+  pub fn format(self, pattern: Text) -> Text {
+    return self.at(0, minute: 0, second: 0).format(pattern)
+  }
+}
+
+// Today in UTC.
+pub fn today() -> Date {
+  return utc_now().date()
+}
+
+// "2026-09-29"
+pub fn parse_date(text: Text) throws -> Date {
+  return (try parse_iso(text.trim().slice(from: 0, to: min(text.trim().length, 10)))).date()
+}
+
+fn format_parts(dt: DateTime, pattern: Text, offset: Int, zone: Text) -> Text {
+  var out: List<Text> = []
+  let chars = pattern.chars()
+  var i = 0
+  while i < chars.length {
+    let c = chars[i]
+    if c != "%" or i + 1 >= chars.length {
+      out.append(c)
+      i += 1
+      continue
+    }
+    let f = chars[i + 1]
+    i += 2
+    let hour12 = if dt.hour % 12 == 0 { 12 } else { dt.hour % 12 }
+    let sign = if offset < 0 { "-" } else { "+" }
+    let off = if offset < 0 { 0 - offset } else { offset }
+    out.append(match f {
+      "Y" => dt.year.to_text()
+      "m" => pad(dt.month)
+      "d" => pad(dt.day)
+      "e" => dt.day.to_text()
+      "H" => pad(dt.hour)
+      "M" => pad(dt.minute)
+      "S" => pad(dt.second)
+      "y" => pad(dt.year % 100)
+      "I" => pad(hour12)
+      "p" => if dt.hour < 12 { "AM" } else { "PM" }
+      "B" => month_name(dt.month)
+      "b" => month_name(dt.month).slice(from: 0, to: 3)
+      "A" => weekday_name(dt.weekday())
+      "a" => weekday_name(dt.weekday()).slice(from: 0, to: 3)
+      "j" => (dt.date().to_days() - Date(year: dt.year, month: 1, day: 1).to_days() + 1).to_text().pad_start(width: 3, fill: "0")
+      "s" => (dt.to_unix() - offset).to_text()
+      "z" => "${sign}${pad(off.div(3600))}${pad((off % 3600).div(60))}"
+      "Z" => zone
+      "%" => "%"
+      _ => "%${f}"
+    })
+  }
+  return out.join("")
+}
+
+// Reads a date and time written as `pattern` says (see `DateTime.format`):
+//   try time.parse("29/09/2026 14:05", pattern: "%d/%m/%Y %H:%M")
+// Fields the pattern doesn't have are 0 (or 1 for month and day); with %z
+// the result is converted to UTC.
+pub fn parse(text: Text, pattern: Text) throws -> DateTime {
+  let bad = Failure(message: "time: \"${text}\" doesn't match the pattern \"${pattern}\"")
+  let s = text.chars()
+  let p = pattern.chars()
+  var r = DateTime(year: 1970, month: 1, day: 1, hour: 0, minute: 0, second: 0)
+  var pm = -1
+  var offset = 0
+  var i = 0
+  var j = 0
+  while j < p.length {
+    if p[j] != "%" or j + 1 >= p.length {
+      if i >= s.length or s[i] != p[j] {
+        throw bad
+      }
+      i += 1
+      j += 1
+      continue
+    }
+    let f = p[j + 1]
+    j += 2
+    if f == "%" {
+      if i >= s.length or s[i] != "%" {
+        throw bad
+      }
+      i += 1
+      continue
+    }
+    if f == "p" {
+      let word = s.drop(i).take(2).join("").upper()
+      if word != "AM" and word != "PM" {
+        throw bad
+      }
+      pm = if word == "PM" { 1 } else { 0 }
+      i += 2
+      continue
+    }
+    if f == "B" or f == "b" {
+      var found = 0
+      for m in 1..=12 {
+        let name = if f == "B" { month_name(m) } else { month_name(m).slice(from: 0, to: 3) }
+        if s.drop(i).take(name.length).join("").lower() == name.lower() {
+          found = m
+          i += name.length
+          break
+        }
+      }
+      if found == 0 {
+        throw bad
+      }
+      r.month = found
+      continue
+    }
+    if f == "Z" {
+      while i < s.length and s[i] != " " {
+        i += 1
+      }
+      continue
+    }
+    if f == "z" {
+      if i < s.length and s[i] == "Z" {
+        i += 1
+        continue
+      }
+      if i + 5 > s.length or (s[i] != "+" and s[i] != "-") {
+        throw bad
+      }
+      let digits = s.drop(i + 1).take(5).join("").replace(":", "")
+      let hh = try digits.slice(from: 0, to: 2).to_int() catch err {
+        throw bad
+      }
+      let mm = try digits.slice(from: 2, to: 4).to_int() catch err {
+        throw bad
+      }
+      offset = (hh * 3600 + mm * 60) * (if s[i] == "-" { -1 } else { 1 })
+      i += if s.drop(i + 1).take(3).join("").contains(":") { 6 } else { 5 }
+      continue
+    }
+    let width = if f == "Y" { 4 } else if f == "j" { 3 } else { 2 }
+    var digits = ""
+    while i < s.length and digits.length < width and "0123456789".contains(s[i]) {
+      digits = "${digits}${s[i]}"
+      i += 1
+    }
+    let n = try digits.to_int() catch err {
+      throw bad
+    }
+    if f == "Y" {
+      r.year = n
+    } else if f == "y" {
+      r.year = 2000 + n
+    } else if f == "m" {
+      r.month = n
+    } else if f == "d" or f == "e" {
+      r.day = n
+    } else if f == "H" or f == "I" {
+      r.hour = n
+    } else if f == "M" {
+      r.minute = n
+    } else if f == "S" {
+      r.second = n
+    } else {
+      throw bad
+    }
+  }
+  if i != s.length {
+    throw bad
+  }
+  if pm == 1 and r.hour < 12 {
+    r.hour += 12
+  }
+  if pm == 0 and r.hour == 12 {
+    r.hour = 0
+  }
+  if r.month < 1 or r.month > 12 or r.day < 1 or r.day > days_in_month(r.year, month: r.month) or r.hour > 23 or r.minute > 59 or r.second > 60 {
+    throw bad
+  }
+  return r.plus_seconds(0 - offset)
+}
+
+// A moment as the wall clock of a time zone shows it.
+pub type Zoned {
+  year: Int
+  month: Int
+  day: Int
+  hour: Int
+  minute: Int
+  second: Int
+  // seconds east of UTC: 7200 for Berlin in summer, -18000 for New York in winter
+  offset: Int
+  // "Europe/Berlin"
+  zone: Text
+  // "CEST"
+  abbreviation: Text
+
+  // "2026-09-29T16:05:09+02:00"
+  pub fn iso(self) -> Text {
+    let sign = if self.offset < 0 { "-" } else { "+" }
+    let off = if self.offset < 0 { 0 - self.offset } else { self.offset }
+    return "${self.wall().iso().slice(from: 0, to: 19)}${sign}${pad(off.div(3600))}:${pad((off % 3600).div(60))}"
+  }
+
+  // As `DateTime.format`; %z gives the offset (+0200), %Z the abbreviation.
+  pub fn format(self, pattern: Text) -> Text {
+    return format_parts(self.wall(), pattern: pattern, offset: self.offset, zone: self.abbreviation)
+  }
+
+  // The same moment in UTC.
+  pub fn utc(self) -> DateTime {
+    return self.wall().plus_seconds(0 - self.offset)
+  }
+
+  pub fn date(self) -> Date {
+    return Date(year: self.year, month: self.month, day: self.day)
+  }
+
+  fn wall(self) -> DateTime {
+    return DateTime(year: self.year, month: self.month, day: self.day, hour: self.hour, minute: self.minute, second: self.second)
+  }
+}
+
+// The moment when the wall clock in `zone` shows this date and time:
+//   let meeting = try time.in_zone("Europe/Berlin", date: d, hour: 9, minute: 30)
+// A time skipped by a clock change moves forward; a repeated one takes
+// the first.
+pub fn in_zone(zone: Text, date: Date, hour: Int, minute: Int) throws -> DateTime {
+  return from_unix(try __zone_unix(zone, fields: [date.year, date.month, date.day, hour, minute, 0]))
+}
+
+// Now, on the wall clock of `zone`.
+pub fn now_in(zone: Text) throws -> Zoned {
+  return try utc_now().in_zone(zone)
+}
+
+// This machine's zone ("Europe/Berlin"): TZ, else the system setting,
+// else "UTC".
+pub fn local_zone() -> Text
+
+fn __zone_fields(zone: Text, unix: Int, abbreviation: List<Text>) throws -> List<Int>
+fn __zone_unix(zone: Text, fields: List<Int>) throws -> Int

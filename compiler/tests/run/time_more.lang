@@ -1,0 +1,29 @@
+import time
+
+fn main() throws {
+  for t in ["1h30m", "90s", "1.5s", "250ms", "10us", "12ns", "2d", "-5m", "1h0m5s"] {
+    print("${t} -> ${(try time.parse_duration(t)).text()}")
+  }
+  let bad = try time.parse_duration("5 minutes") catch err {
+    print(err.message())
+    time.seconds(0)
+  }
+  let dt = try time.parse_iso("2026-09-29T14:05:09Z")
+  print(dt.format("%Y-%m-%d %H:%M:%S | %a %d %b %Y | %A %B %e | %I:%M %p | %j | %y | %z %Z | %s"))
+  print("${dt.weekday() == time.Weekday.Tuesday}")
+  let p = try time.parse("29/09/2026 02:05 PM +0200", pattern: "%d/%m/%Y %I:%M %p %z")
+  print(p.iso())
+  print((try time.parse("Sep 3 2026", pattern: "%b %e %Y")).iso())
+  let x = try time.parse("31/02/2026", pattern: "%d/%m/%Y") catch err {
+    print(err.message())
+    dt
+  }
+  let d = time.Date(year: 2026, month: 1, day: 31)
+  print("${d.plus_months(1).iso()} ${d.plus_days(30).iso()} ${d.days_until(time.Date(year: 2026, month: 12, day: 25))} ${d.weekday() == time.Weekday.Saturday} ${(try time.parse_date("2024-02-29")).plus_months(12).iso()}")
+  print("${dt.plus_months(5).iso()} ${dt.is_before(dt.plus_seconds(1))} ${time.minutes(90).text()} ${time.hours(2).plus(time.minutes(3)).text()}")
+  let start = time.now()
+  for n in 1..=5 {
+    try time.sleep_until(start.plus(time.millis(20).times(n)))
+  }
+  print("5 ticks of 20ms: ~100ms: ${start.elapsed().millis() >= 100 and start.elapsed().millis() < 130}")
+}

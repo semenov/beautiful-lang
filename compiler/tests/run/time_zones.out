@@ -1,0 +1,7 @@
+2026-09-29T16:05:09+02:00 CEST 16:05 CEST (+0200)
+2026-09-29T10:05:09-04:00 EDT
+2026-01-15T13:00:00+01:00 2026-01-15T21:00:00+09:00
+skipped hour: 2026-03-29T01:30:00Z = 2026-03-29T03:30:00+02:00
+round trip: 2026-09-29T14:05:09Z
+local zone known: true
+time: unknown time zone "Mars/Olympus" (names are like Europe/Berlin or America/New_York)

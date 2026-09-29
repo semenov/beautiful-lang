@@ -1547,3 +1547,118 @@ static lt_text *lt_xml_escape(lt_text *t) {
     }
     return lt_buf_text(&b);
 }
+
+// ---------------------------------------------------------------- time zones
+// Through the C library (it knows the system's zone database), one
+// conversion at a time: TZ is process-wide.
+
+static pthread_mutex_t lt_tz_mu = PTHREAD_MUTEX_INITIALIZER;
+
+static bool lt_tz_known(const char *name) {
+    if (strcmp(name, "UTC") == 0) return true;
+    if (!*name || name[0] == '/' || strstr(name, "..")) return false;
+    char path[512];
+    snprintf(path, sizeof path, "/usr/share/zoneinfo/%s", name);
+    struct stat st;
+    return stat(path, &st) == 0 && S_ISREG(st.st_mode);
+}
+
+static void lt_tz_enter(const char *name, char *saved, size_t cap) {
+    pthread_mutex_lock(&lt_tz_mu);
+    const char *old = getenv("TZ");
+    snprintf(saved, cap, "%s", old ? old : "");
+    setenv("TZ", strcmp(name, "UTC") == 0 ? "UTC0" : name, 1);
+    tzset();
+}
+
+static void lt_tz_leave(const char *saved) {
+    if (*saved) setenv("TZ", saved, 1);
+    else unsetenv("TZ");
+    tzset();
+    pthread_mutex_unlock(&lt_tz_mu);
+}
+
+static lt_err lt_tz_unknown(lt_text *zone) {
+    char buf[300];
+    snprintf(buf, sizeof buf, "time: unknown time zone \"%s\" (names are like Europe/Berlin or America/New_York)", zone->data);
+    return lt_make_failure(lt_text_cstr(buf));
+}
+
+// The wall clock in `zone` at a Unix time: year, month, day, hour, minute,
+// second, offset (seconds east of UTC); and the zone's abbreviation.
+static lt_err lt_tz_fields(lt_text *zone, int64_t at, lt_texts **abbr_out, int64_t *f) {
+    if (!lt_tz_known(zone->data)) return lt_tz_unknown(zone);
+    char saved[256];
+    lt_tz_enter(zone->data, saved, sizeof saved);
+    time_t t = (time_t)at;
+    struct tm tm;
+    localtime_r(&t, &tm);
+    // the abbreviation lives in the C library's zone state: copy it first
+    char abbr[16];
+    snprintf(abbr, sizeof abbr, "%s", tm.tm_zone ? tm.tm_zone : "UTC");
+    lt_tz_leave(saved);
+    f[0] = tm.tm_year + 1900;
+    f[1] = tm.tm_mon + 1;
+    f[2] = tm.tm_mday;
+    f[3] = tm.tm_hour;
+    f[4] = tm.tm_min;
+    f[5] = tm.tm_sec;
+    f[6] = tm.tm_gmtoff;
+    lt_texts_push(abbr_out, lt_text_cstr(abbr));
+    return (lt_err){ 0 };
+}
+
+// The Unix time of a wall-clock time in `zone`. A time skipped by a clock
+// change (02:30 when clocks jump to 03:00) moves forward; a repeated one
+// (autumn) takes the first.
+static lt_err lt_tz_unix(lt_text *zone, int64_t y, int64_t mo, int64_t d, int64_t h, int64_t mi, int64_t s, int64_t *out) {
+    if (!lt_tz_known(zone->data)) return lt_tz_unknown(zone);
+    char saved[256];
+    lt_tz_enter(zone->data, saved, sizeof saved);
+    struct tm tm;
+    memset(&tm, 0, sizeof tm);
+    tm.tm_year = (int)(y - 1900);
+    tm.tm_mon = (int)(mo - 1);
+    tm.tm_mday = (int)d;
+    tm.tm_hour = (int)h;
+    tm.tm_min = (int)mi;
+    tm.tm_sec = (int)s;
+    tm.tm_isdst = -1;
+    time_t t = mktime(&tm);
+    // a time skipped by a clock change: C libraries differ, so decide here:
+    // read it with the offset from before the change (02:30 -> 03:30)
+    struct tm back;
+    localtime_r(&t, &back);
+    if (back.tm_hour != (int)h || back.tm_min != (int)mi || back.tm_mday != (int)d) {
+        struct tm want;
+        memset(&want, 0, sizeof want);
+        want.tm_year = (int)(y - 1900);
+        want.tm_mon = (int)(mo - 1);
+        want.tm_mday = (int)d;
+        want.tm_hour = (int)h;
+        want.tm_min = (int)mi;
+        want.tm_sec = (int)s;
+        time_t as_utc = timegm(&want);
+        time_t before = as_utc - 6 * 3600;
+        struct tm b2;
+        localtime_r(&before, &b2);
+        t = as_utc - b2.tm_gmtoff;
+    }
+    lt_tz_leave(saved);
+    *out = (int64_t)t;
+    return (lt_err){ 0 };
+}
+
+// This machine's zone: TZ, else the name /etc/localtime points to, else UTC.
+static lt_text *lt_tz_local(void) {
+    const char *tz = getenv("TZ");
+    if (tz && *tz && lt_tz_known(tz[0] == ':' ? tz + 1 : tz)) return lt_text_cstr(tz[0] == ':' ? tz + 1 : tz);
+    char buf[512];
+    ssize_t n = readlink("/etc/localtime", buf, sizeof buf - 1);
+    if (n > 0) {
+        buf[n] = 0;
+        const char *z = strstr(buf, "zoneinfo/");
+        if (z && lt_tz_known(z + 9)) return lt_text_cstr(z + 9);
+    }
+    return lt_text_cstr("UTC");
+}

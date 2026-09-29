@@ -2807,6 +2807,15 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 }
             }
             "Channel.close" => format!("lt_chan_close({})", a[0]),
+            "time.local_zone" => "lt_tz_local()".to_string(),
+            "time.__zone_fields" => {
+                // the abbreviation list is filled in place: a borrowed var
+                let lid = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::Int]));
+                self.need(H::Ops, lid);
+                let lc = self.tys[lid].c.clone();
+                format!("({{ int64_t f_[7]; lt_texts *ab_ = lt_texts_new(1); lt_err e_ = lt_tz_fields({}, {}, &ab_, f_); if (!e_.obj) {{ {lc} l_ = {lc}_new(7); for (int i_ = 0; i_ < 7; i_++) {lc}_push(&l_, f_[i_]); *{out} = l_; lt_texts_push(&{abbr}, ab_->items[0]); }} if (ab_->cap) lt_free(ab_, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)ab_->cap); e_; }})", a[0], a[1], lc = lc, out = a[3], abbr = a[2])
+            }
+            "time.__zone_unix" => format!("({{ __typeof__({f}) f_ = {f}; lt_tz_unix({}, f_->items[0], f_->items[1], f_->items[2], f_->items[3], f_->items[4], f_->items[5], {}); }})", a[0], a[2], f = a[1]),
             "time.__cancel_after" => {
                 self.threads = true;
                 format!("lt_cancel_after({}, {})", a[0], a[1])

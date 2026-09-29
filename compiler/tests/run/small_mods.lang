@@ -25,5 +25,5 @@ fn main() throws {
   print(url.query_text({"q": "a b", "page": "2"}))
   print("${math.pi().format(4)} ${math.sin(0.0)} ${math.log10(1000.0)} ${math.atan2(1.0, 1.0).format(3)} ${2.0.pow(0.5).format(6)}")
   let d = try time.parse_iso("2026-09-29T12:30:00+02:00")
-  print("${d.iso()} ${d.plus_days(3).date()} ${time.from_unix(d.to_unix()).iso()} ${(1234.5678).format(2)}")
+  print("${d.iso()} ${d.plus_days(3).date().iso()} ${time.from_unix(d.to_unix()).iso()} ${(1234.5678).format(2)}")
 }
