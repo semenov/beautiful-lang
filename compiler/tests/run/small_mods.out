@@ -1,0 +1,12 @@
+[["name", "note"], ["Ada", "likes, commas"], ["Bob", "says \"hi\""]]
+name,note
+Ada,"likes, commas"
+Bob,"says ""hi"""
+
+[Person(name: "Ada", age: 36, email: "ada@example.com"), Person(name: "Bob", age: 41, email: none)]
+csv: at $[2].age: expected a whole number, found "old"
+https example.com 8443 /a/b {"q": "hello world", "page": "2"} top
+a%20b%26c%2Fd
+q=a%20b&page=2
+3.1416 0.0 3.0 0.785 1.414214
+2026-09-29T10:30:00Z 2026-10-02 2026-09-29T10:30:00Z 1234.57

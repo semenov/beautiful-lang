@@ -21,6 +21,8 @@ builtin type Float {
   fn floor(self) -> Int
   fn ceil(self) -> Int
   fn to_text(self) -> Text
+  // With exactly `decimals` digits after the point: 3.14159.format(2) == "3.14"
+  fn format(self, decimals: Int) -> Text
   fn abs(self) -> Float
   fn pow(self, exponent: Float) -> Float
   fn sqrt(self) -> Float

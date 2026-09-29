@@ -1,0 +1,25 @@
+// math: the usual functions on Float.
+
+pub fn pi() -> Float {
+  return 3.141592653589793
+}
+pub fn e() -> Float {
+  return 2.718281828459045
+}
+pub fn sin(x: Float) -> Float
+pub fn cos(x: Float) -> Float
+pub fn tan(x: Float) -> Float
+pub fn asin(x: Float) -> Float
+pub fn acos(x: Float) -> Float
+pub fn atan(x: Float) -> Float
+// the angle of the point (x, y)
+pub fn atan2(y: Float, x: Float) -> Float
+// natural logarithm
+pub fn log(x: Float) -> Float
+pub fn log10(x: Float) -> Float
+pub fn log2(x: Float) -> Float
+pub fn exp(x: Float) -> Float
+// sqrt(x*x + y*y)
+pub fn hypot(x: Float, y: Float) -> Float
+pub fn is_nan(x: Float) -> Bool
+pub fn infinity() -> Float

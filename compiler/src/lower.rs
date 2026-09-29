@@ -1413,7 +1413,7 @@ impl<'a> Lowerer<'a> {
                 itys.extend(arg_tys.iter().cloned());
             }
         }
-        if matches!(name.as_str(), "json.decode" | "env.decode" | "cli.decode" | "db.Connection.query") {
+        if matches!(name.as_str(), "json.decode" | "env.decode" | "cli.decode" | "db.Connection.query" | "csv.decode") {
             if let Some(t) = itys.last().cloned() {
                 self.ensure_defaults(&t);
             }

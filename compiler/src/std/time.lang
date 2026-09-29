@@ -61,6 +61,97 @@ pub type DateTime {
   pub fn date(self) -> Text {
     return "${self.year}-${pad(self.month)}-${pad(self.day)}"
   }
+
+  // Seconds since 1970-01-01 UTC.
+  pub fn to_unix(self) -> Int {
+    let y = if self.month <= 2 { self.year - 1 } else { self.year }
+    let era = y.div(400)
+    let yoe = y - era * 400
+    let mp = if self.month > 2 { self.month - 3 } else { self.month + 9 }
+    let doy = (153 * mp + 2).div(5) + self.day - 1
+    let doe = yoe * 365 + yoe.div(4) - yoe.div(100) + doy
+    let days = era * 146097 + doe - 719468
+    return days * 86400 + self.hour * 3600 + self.minute * 60 + self.second
+  }
+
+  // A moment `seconds` later (or earlier, if negative).
+  pub fn plus_seconds(self, seconds: Int) -> DateTime {
+    return from_unix(self.to_unix() + seconds)
+  }
+
+  pub fn plus_days(self, days: Int) -> DateTime {
+    return from_unix(self.to_unix() + days * 86400)
+  }
+}
+
+// Reads "2026-09-29", "2026-09-29T12:30:00Z" or "2026-09-29 12:30:00"
+// (UTC; an offset like +02:00 is converted to UTC).
+pub fn parse_iso(text: Text) throws -> DateTime {
+  let t = text.trim()
+  let bad = Failure(message: "time: \"${text}\" is not a date like 2026-09-29 or 2026-09-29T12:30:00Z")
+  if t.length < 10 {
+    throw bad
+  }
+  let d = t.slice(from: 0, to: 10).split("-")
+  if d.length != 3 {
+    throw bad
+  }
+  let year = try d[0].to_int() catch err {
+    throw bad
+  }
+  let month = try d[1].to_int() catch err {
+    throw bad
+  }
+  let day = try d[2].to_int() catch err {
+    throw bad
+  }
+  if month < 1 or month > 12 or day < 1 or day > 31 {
+    throw bad
+  }
+  var result = DateTime(year: year, month: month, day: day, hour: 0, minute: 0, second: 0)
+  if t.length == 10 {
+    return result
+  }
+  if t.length < 19 {
+    throw bad
+  }
+  let clock = t.slice(from: 11, to: 19).split(":")
+  if clock.length != 3 {
+    throw bad
+  }
+  result.hour = try clock[0].to_int() catch err {
+    throw bad
+  }
+  result.minute = try clock[1].to_int() catch err {
+    throw bad
+  }
+  let secs = clock[2]
+  result.second = try secs.to_int() catch err {
+    throw bad
+  }
+  var zone = t.slice(from: 19, to: t.length)
+  if zone.starts_with(".") {
+    // fractions of a second are dropped
+    var i = 1
+    while i < zone.length and "0123456789".contains(zone.slice(from: i, to: i + 1)) {
+      i += 1
+    }
+    zone = zone.slice(from: i, to: zone.length)
+  }
+  if zone == "" or zone == "Z" {
+    return result
+  }
+  if zone.length == 6 and (zone.starts_with("+") or zone.starts_with("-")) {
+    let oh = try zone.slice(from: 1, to: 3).to_int() catch err {
+      throw bad
+    }
+    let om = try zone.slice(from: 4, to: 6).to_int() catch err {
+      throw bad
+    }
+    let offset = (oh * 3600 + om * 60) * (if zone.starts_with("+") { -1 } else { 1 })
+    return result.plus_seconds(offset)
+  }
+  throw bad
 }
 
 fn pad(n: Int) -> Text {

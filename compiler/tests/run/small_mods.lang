@@ -1,0 +1,29 @@
+import csv
+import url
+import math
+import time
+
+type Person {
+  name: Text
+  age: Int
+  email: Text?
+}
+
+fn main() throws {
+  let rows = try csv.parse("name,note\nAda,\"likes, commas\"\nBob,\"says \"\"hi\"\"\"\n")
+  print("${rows}")
+  print(csv.encode(rows))
+  let people = try csv.decode<Person>("name,age,email\nAda,36,ada@example.com\nBob,41,\n")
+  print("${people}")
+  let bad = try csv.decode<Person>("name,age\nAda,old\n") catch err {
+    print(err.message())
+    []
+  }
+  let u = try url.parse("https://Example.com:8443/a/b?q=hello%20world&page=2#top")
+  print("${u.scheme} ${u.host} ${u.port} ${u.path} ${u.query} ${u.fragment}")
+  print(url.encode("a b&c/d"))
+  print(url.query_text({"q": "a b", "page": "2"}))
+  print("${math.pi().format(4)} ${math.sin(0.0)} ${math.log10(1000.0)} ${math.atan2(1.0, 1.0).format(3)} ${2.0.pow(0.5).format(6)}")
+  let d = try time.parse_iso("2026-09-29T12:30:00+02:00")
+  print("${d.iso()} ${d.plus_days(3).date()} ${time.from_unix(d.to_unix()).iso()} ${(1234.5678).format(2)}")
+}

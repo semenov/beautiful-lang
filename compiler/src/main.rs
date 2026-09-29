@@ -73,6 +73,9 @@ fn std_module(name: &str) -> Option<&'static str> {
         "net" => include_str!("std/net.lang"),
         "db" => include_str!("std/db.lang"),
         "regex" => include_str!("std/regex.lang"),
+        "csv" => include_str!("std/csv.lang"),
+        "url" => include_str!("std/url.lang"),
+        "math" => include_str!("std/math.lang"),
         _ => return None,
     })
 }

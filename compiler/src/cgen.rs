@@ -744,7 +744,15 @@ impl<'a> CGen<'a> {
                 let inner = *inner;
                 let sa = self.opt_is_some(id, "a");
                 let va = self.opt_val(id, "a");
-                let e = self.totext_expr(inner, &va, true);
+                // a present value prints like the value itself
+                let e = match &self.tys[inner].kind {
+                    Kind::Text => format!("(debug ? lt_text_quote({v}) : lt_text_ret({v}))", v = va),
+                    Kind::Int | Kind::Float | Kind::Bool => self.totext_expr(inner, &va, false),
+                    _ => {
+                        self.need(H::ToText, inner);
+                        format!("totext_{}({}, debug)", inner, va)
+                    }
+                };
                 let none = self.lit("none");
                 let _ = write!(s, " if ({}) lt_texts_push(&p, {}); else lt_texts_push(&p, {});", sa, e, none);
             }
@@ -1564,6 +1572,38 @@ static lt_err {name}({c} *out) {{
             a = acc
         );
         name
+    }
+
+    fn csv_intrinsic(&mut self, name: &str, tys: &[Ty], a: &[String]) -> String {
+        // List<List<Text>>: an outer list of lt_texts*
+        let rows_ty = Ty::Adt(self.prog.b.list, vec![Ty::Adt(self.prog.b.list, vec![Ty::Text])]);
+        let rid = self.tid(&rows_ty);
+        self.need(H::Ops, rid);
+        let rc = self.tys[rid].c.clone();
+        match name {
+            "csv.parse" => format!("({{ lt_texts **r_; int64_t n_; lt_err e_ = lt_csv_parse({t}, &r_, &n_); if (!e_.obj) {{ {rc} o_ = {rc}_new(n_); for (int64_t i_ = 0; i_ < n_; i_++) o_->items[o_->len++] = r_[i_]; free(r_); *{out} = o_; }} e_; }})", t = a[0], rc = rc, out = a[1]),
+            "csv.encode" => format!("({{ {rc} r_ = {x}; lt_buf b_ = {{0}}; for (int64_t i_ = 0; i_ < r_->len; i_++) {{ lt_texts *row_ = r_->items[i_]; for (int64_t j_ = 0; j_ < row_->len; j_++) {{ if (j_) lt_buf_c(&b_, ','); lt_csv_field(&b_, row_->items[j_]); }} lt_buf_c(&b_, '\\n'); }} lt_buf_text(&b_); }})", rc = rc, x = a[0]),
+            _ => {
+                // decode<T>: header row -> object per row -> T
+                let t = tys[0].clone();
+                let id = self.tid(&t);
+                self.need(H::Dec, id);
+                let lt = Ty::Adt(self.prog.b.list, vec![t]);
+                let lid = self.tid(&lt);
+                self.need(H::Ops, lid);
+                self.need(H::Drop, lid);
+                let lc = self.tys[lid].c.clone();
+                let tc = self.tys[id].c.clone();
+                format!("({{ lt_texts **r_; int64_t n_; lt_err e_ = lt_csv_parse({text}, &r_, &n_); {lc} o_ = {lc}_new(n_); if (!e_.obj && n_ > 0) {{ lt_texts *h_ = r_[0]; lt_dyn d_; memset(&d_, 0, sizeof d_); d_.kind = LT_D_OBJ; d_.items = (lt_dyn *)calloc((size_t)h_->len + 1, sizeof(lt_dyn)); d_.keys = (const char **)calloc((size_t)h_->len + 1, sizeof(char *)); d_.klens = (int64_t *)calloc((size_t)h_->len + 1, sizeof(int64_t)); for (int64_t i_ = 1; i_ < n_ && !e_.obj; i_++) {{ lt_texts *row_ = r_[i_]; if (row_->len == 1 && row_->items[0]->len == 0) continue; d_.n = 0; for (int64_t j_ = 0; j_ < h_->len && j_ < row_->len; j_++) {{ lt_dyn *v_ = &d_.items[d_.n]; memset(v_, 0, sizeof *v_); lt_text *c_ = row_->items[j_]; if (c_->len == 0) v_->kind = LT_D_NULL; else {{ v_->kind = LT_D_STR; v_->s = c_->data; v_->slen = c_->len; }} d_.keys[d_.n] = h_->items[j_]->data; d_.klens[d_.n] = h_->items[j_]->len; d_.n++; }} lt_path q_ = {{ NULL, NULL, 0, i_ + 1 }}; {tc} x_; e_ = dec_{id}(\"csv\", &d_, &q_, 1, &x_); if (!e_.obj) {lc}_push(&o_, x_); }} free(d_.items); free(d_.keys); free(d_.klens); }} for (int64_t i_ = 0; i_ < n_; i_++) drop_{rows_list}(r_[i_]); if (!e_.obj) free(r_), *{out} = o_; else {{ free(r_); drop_{lid}(o_); }} e_; }})",
+                    text = a[0], lc = lc, tc = tc, id = id, lid = lid, out = a[1], rows_list = self.texts_tid())
+            }
+        }
+    }
+
+    fn texts_tid(&mut self) -> usize {
+        let t = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::Text]));
+        self.need(H::Drop, t);
+        t
     }
 
     fn regex_def(&self, name: &str) -> Ty {
@@ -2545,6 +2585,14 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "Float.ceil" => format!("lt_f2i(ceil({}), {})", a[0], line),
             "Float.to_text" => format!("lt_float_to_text({})", a[0]),
             "Float.abs" => format!("fabs({})", a[0]),
+            "Float.format" => format!("lt_float_format({}, {}, {})", a[0], a[1], line),
+            "math.sin" | "math.cos" | "math.tan" | "math.asin" | "math.acos" | "math.atan" | "math.log" | "math.log10" | "math.log2" | "math.exp" => format!("{}({})", &name[5..], a[0]),
+            "math.atan2" | "math.hypot" => format!("{}({}, {})", &name[5..], a[0], a[1]),
+            "math.is_nan" => format!("isnan({})", a[0]),
+            "math.infinity" => "INFINITY".to_string(),
+            "url.encode" => format!("lt_url_encode({})", a[0]),
+            "url.decode" => format!("lt_url_decode_text({}, {})", a[0], a[1]),
+            "csv.parse" | "csv.encode" | "csv.decode" => self.csv_intrinsic(name, tys, a),
             "Float.pow" => format!("pow({}, {})", a[0], a[1]),
             "Float.sqrt" => format!("sqrt({})", a[0]),
             "Bool.to_text" => format!("lt_bool_to_text({})", a[0]),
@@ -3195,8 +3243,8 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.threads {
             out += include_str!("runtime/sched.h");
         }
-        out += include_str!("runtime/std.h");
         out += include_str!("runtime/json.h");
+        out += include_str!("runtime/std.h");
         if self.http_glue || self.net {
             if self.curl {
                 out = format!("#define LT_CURL 1\n// link: -lcurl\n{}", out);

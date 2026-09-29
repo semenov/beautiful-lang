@@ -1,0 +1,62 @@
+// url: parts of URLs, and percent-encoding.
+
+pub type Url {
+  scheme: Text
+  host: Text
+  port: Int?
+  path: Text
+  query: Map<Text, Text>
+  fragment: Text?
+}
+
+// "https://example.com:8080/a/b?x=1#top"
+pub fn parse(text: Text) throws -> Url {
+  let scheme_end = text.split("://")
+  if scheme_end.length < 2 {
+    throw Failure(message: "url: \"${text}\" has no scheme (like https://)")
+  }
+  let scheme = scheme_end[0].lower()
+  var rest = scheme_end.drop(1).join("://")
+  var fragment: Text? = none
+  let hash_parts = rest.split("#")
+  if hash_parts.length > 1 {
+    fragment = hash_parts.drop(1).join("#")
+    rest = hash_parts[0]
+  }
+  var query: Map<Text, Text> = {}
+  let q_parts = rest.split("?")
+  if q_parts.length > 1 {
+    for pair in q_parts.drop(1).join("?").split("&") {
+      if pair.is_empty() {
+        continue
+      }
+      let kv = pair.split("=")
+      query[try decode(kv[0])] = try decode(kv.drop(1).join("="))
+    }
+    rest = q_parts[0]
+  }
+  let slash = rest.split("/")
+  let authority = slash[0]
+  let full_path = if slash.length > 1 { "/${slash.drop(1).join("/")}" } else { "/" }
+  var host = authority
+  var port: Int? = none
+  let colon = authority.split(":")
+  if colon.length == 2 {
+    host = colon[0]
+    port = try colon[1].to_int() catch err {
+      throw Failure(message: "url: bad port in \"${text}\"")
+    }
+  }
+  return Url(scheme: scheme, host: host.lower(), port: port, path: full_path, query: query, fragment: fragment)
+}
+
+// Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"
+pub fn encode(text: Text) -> Text
+
+// "a%20b" -> "a b"
+pub fn decode(text: Text) throws -> Text
+
+// {"q": "a b", "page": "2"} -> "q=a%20b&page=2"
+pub fn query_text(params: Map<Text, Text>) -> Text {
+  return params.entries().map(e => "${encode(e.key)}=${encode(e.value)}").join("&")
+}

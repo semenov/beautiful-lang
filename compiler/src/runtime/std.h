@@ -843,3 +843,144 @@ static lt_texts *lt_regex_split(lt_handle *h, lt_text *t) {
     lt_texts_push(&parts, lt_text_from(t->data + piece, t->len - piece));
     return parts;
 }
+
+// ---------------------------------------------------------------- numbers as text
+
+static lt_text *lt_float_format(double v, int64_t decimals, int line) {
+    if (decimals < 0 || decimals > 20) lt_panic_at("format: decimals must be 0 to 20", line);
+    char buf[400];
+    int n = snprintf(buf, sizeof buf, "%.*f", (int)decimals, v);
+    if (n < 0 || n >= (int)sizeof buf) return lt_float_to_text(v);
+    return lt_text_from(buf, n);
+}
+
+// ---------------------------------------------------------------- url
+
+static lt_text *lt_url_encode(lt_text *t) {
+    static const char hx[] = "0123456789ABCDEF";
+    lt_text *r = lt_text_new(t->len * 3);
+    char *w = r->data;
+    for (int64_t i = 0; i < t->len; i++) {
+        unsigned char c = (unsigned char)t->data[i];
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
+            *w++ = (char)c;
+        } else {
+            *w++ = '%';
+            *w++ = hx[c >> 4];
+            *w++ = hx[c & 15];
+        }
+    }
+    r->len = w - r->data;
+    *w = 0;
+    return r;
+}
+
+static lt_err lt_url_decode_text(lt_text *t, lt_text **out) {
+    lt_text *r = lt_text_new(t->len);
+    int64_t w = 0;
+    for (int64_t i = 0; i < t->len; i++) {
+        char c = t->data[i];
+        if (c == '%') {
+            int h = i + 2 < t->len ? lt_hexval(t->data[i + 1]) : -1, l = i + 2 < t->len ? lt_hexval(t->data[i + 2]) : -1;
+            if (h < 0 || l < 0) {
+                lt_text_drop(r);
+                return lt_make_failure(lt_text_cstr("url: a bad %-escape"));
+            }
+            r->data[w++] = (char)(h * 16 + l);
+            i += 2;
+        } else {
+            r->data[w++] = c == '+' ? ' ' : c;
+        }
+    }
+    r->len = w;
+    r->data[w] = 0;
+    *out = r;
+    return (lt_err){ 0 };
+}
+
+// ---------------------------------------------------------------- csv
+
+// rows as lists of text; returns the number of rows in *nrows
+static lt_err lt_csv_parse(lt_text *t, lt_texts ***rows_out, int64_t *nrows) {
+    int64_t cap = 16, n = 0;
+    lt_texts **rows = (lt_texts **)malloc(sizeof(lt_texts *) * (size_t)cap);
+    const char *p = t->data, *e = t->data + t->len;
+    int64_t line = 1;
+    while (p < e) {
+        lt_texts *row = lt_texts_new(4);
+        for (;;) {
+            size_t fcap = 64, flen = 0;
+            char *f = (char *)malloc(fcap);
+            if (p < e && *p == '"') {
+                p++;
+                for (;;) {
+                    if (p >= e) {
+                        free(f);
+                        for (int64_t i = 0; i < row->len; i++) lt_text_drop(row->items[i]);
+                        for (int64_t r = 0; r < n; r++) {
+                            for (int64_t i = 0; i < rows[r]->len; i++) lt_text_drop(rows[r]->items[i]);
+                            lt_free(rows[r], sizeof(lt_texts) + sizeof(lt_text *) * (size_t)rows[r]->cap);
+                        }
+                        lt_free(row, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)row->cap);
+                        free(rows);
+                        char buf[96];
+                        snprintf(buf, sizeof buf, "csv: a quoted field that starts on line %lld is never closed", (long long)line);
+                        return lt_make_failure(lt_text_cstr(buf));
+                    }
+                    if (*p == '"') {
+                        if (p + 1 < e && p[1] == '"') {
+                            p += 2;
+                            if (flen + 1 >= fcap) f = (char *)realloc(f, fcap *= 2);
+                            f[flen++] = '"';
+                            continue;
+                        }
+                        p++;
+                        break;
+                    }
+                    if (*p == '\n') line++;
+                    if (flen + 1 >= fcap) f = (char *)realloc(f, fcap *= 2);
+                    f[flen++] = *p++;
+                }
+                while (p < e && *p != ',' && *p != '\n' && *p != '\r') p++;
+            } else {
+                while (p < e && *p != ',' && *p != '\n' && *p != '\r') {
+                    if (flen + 1 >= fcap) f = (char *)realloc(f, fcap *= 2);
+                    f[flen++] = *p++;
+                }
+            }
+            lt_texts_push(&row, lt_text_from(f, (int64_t)flen));
+            free(f);
+            if (p < e && *p == ',') {
+                p++;
+                continue;
+            }
+            if (p < e && *p == '\r') p++;
+            if (p < e && *p == '\n') p++;
+            line++;
+            break;
+        }
+        if (n == cap) rows = (lt_texts **)realloc(rows, sizeof(lt_texts *) * (size_t)(cap *= 2));
+        rows[n++] = row;
+    }
+    *rows_out = rows;
+    *nrows = n;
+    return (lt_err){ 0 };
+}
+
+static void lt_csv_field(lt_buf *b, lt_text *f) {
+    bool quote = false;
+    for (int64_t i = 0; i < f->len; i++) {
+        char c = f->data[i];
+        if (c == ',' || c == '"' || c == '\n' || c == '\r') quote = true;
+    }
+    if (!quote) {
+        lt_buf_put(b, f->data, f->len);
+        return;
+    }
+    lt_buf_c(b, '"');
+    for (int64_t i = 0; i < f->len; i++) {
+        if (f->data[i] == '"') lt_buf_c(b, '"');
+        lt_buf_c(b, f->data[i]);
+    }
+    lt_buf_c(b, '"');
+}
