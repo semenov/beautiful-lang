@@ -14,6 +14,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         can live in this repo under `packages/`), and local packages
   - [x] a way for packages to take query parameters without `db`'s
         compiler magic (the `sql` module)
+- [ ] **LLM package** (OpenAI-compatible API, works with OpenRouter and
+      co.): chat completions, streaming (SSE), tool calls, JSON output,
+      embeddings; look at popular npm packages (openai, ai-sdk) for the API
 - [ ] **zlib on streams**: gzip/gunzip a `Stream` piece by piece (big files,
       `content-encoding: gzip` responses)
 - [ ] **Docs**: README for the new language, AGENTS.md (cheat sheet for
