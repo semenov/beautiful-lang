@@ -375,7 +375,9 @@ static pthread_once_t lt_ssl_once = PTHREAD_ONCE_INIT;
 static void lt_ssl_init(void) {
     lt_ssl_ctx = SSL_CTX_new(TLS_client_method());
     SSL_CTX_set_min_proto_version(lt_ssl_ctx, TLS1_2_VERSION);
-    SSL_CTX_set_default_verify_paths(lt_ssl_ctx);
+    const char *ca = lt_ca_file();
+    if (ca) SSL_CTX_load_verify_locations(lt_ssl_ctx, ca, NULL);
+    else SSL_CTX_set_default_verify_paths(lt_ssl_ctx);
     SSL_CTX_set_verify(lt_ssl_ctx, SSL_VERIFY_PEER, NULL);
 }
 
@@ -383,7 +385,9 @@ static lt_err lt_ssl_error(const char *what, SSL *ssl) {
     char detail[256] = "";
     long v = ssl ? SSL_get_verify_result(ssl) : X509_V_OK;
     unsigned long e = ERR_get_error();
-    if (v != X509_V_OK) {
+    if (v == X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY && !lt_ca_file()) {
+        snprintf(detail, sizeof detail, "%s", LT_NO_CA);
+    } else if (v != X509_V_OK) {
         snprintf(detail, sizeof detail, "the server's certificate is not trusted: %s", X509_verify_cert_error_string(v));
     } else if (e) {
         ERR_error_string_n(e, detail, sizeof detail);

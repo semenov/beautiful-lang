@@ -572,3 +572,25 @@ static lt_err lt_proc_close(lt_handle *h) {
     lt_proc_reap(p, true);
     return (lt_err){ 0 };
 }
+
+// ---- trusted certificates (Linux): where each distribution keeps them.
+// A static program can't rely on its build machine's paths.
+
+#if !defined(__APPLE__)
+static const char *lt_ca_file(void) {
+    const char *env = getenv("SSL_CERT_FILE");
+    if (env && *env) return env;
+    static const char *files[] = {
+        "/etc/ssl/certs/ca-certificates.crt",                // Debian, Ubuntu, Alpine, Arch
+        "/etc/pki/tls/certs/ca-bundle.crt",                  // Fedora, RHEL
+        "/etc/ssl/ca-bundle.pem",                            // openSUSE
+        "/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem", // CentOS, RHEL 7
+        "/etc/ssl/cert.pem",                                 // Alpine, others
+    };
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++)
+        if (access(files[i], R_OK) == 0) return files[i];
+    return NULL;
+}
+#define LT_NO_CA "no trusted certificates on this system (install the ca-certificates package, or set SSL_CERT_FILE)"
+#endif
+

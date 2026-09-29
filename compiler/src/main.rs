@@ -25,7 +25,8 @@ const USAGE: &str = "usage:
   lang check <file.lang>            only check for errors
 options:
   --emit-c <file.c>                 also write the generated C
-  --debug                           check memory safety and leaks (slow)";
+  --debug                           check memory safety and leaks (slow)
+  --static                          (build, Linux) one file that needs no libraries at all";
 
 struct Opts {
     cmd: String,
@@ -33,6 +34,7 @@ struct Opts {
     out: Option<String>,
     emit_c: Option<String>,
     debug: bool,
+    static_link: bool,
     args: Vec<String>,
 }
 
@@ -43,17 +45,19 @@ fn parse_args() -> Option<Opts> {
     let mut out = None;
     let mut emit_c = None;
     let mut debug = false;
+    let mut static_link = false;
     let mut rest = vec![];
     while let Some(a) = args.next() {
         match a.as_str() {
             "-o" if path.is_none() || cmd != "run" => out = Some(args.next()?),
             "--emit-c" => emit_c = Some(args.next()?),
             "--debug" if path.is_none() => debug = true,
+            "--static" if path.is_none() => static_link = true,
             _ if path.is_none() => path = Some(a),
             _ => rest.push(a),
         }
     }
-    Some(Opts { cmd, path: path?, out, emit_c, debug, args: rest })
+    Some(Opts { cmd, path: path?, out, emit_c, debug, static_link, args: rest })
 }
 
 // Standard library modules, embedded in the compiler.
@@ -370,7 +374,11 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         cmd.arg(if optimize { "-O2" } else { "-O1" });
     }
     // libraries the program needs, from `// link:` lines
-    let libs: Vec<String> = c.lines().take(16).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
+    let mut libs: Vec<String> = c.lines().take(16).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
+    if opts.static_link {
+        libs = static_libs(&libs);
+        cmd.arg("-static");
+    }
     let status = cmd
         .args(["-std=gnu11", "-w", "-fwrapv", "-o"])
         .arg(exe)
@@ -391,6 +399,36 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         Err(e) => {
             eprintln!("error: can't run the C compiler `{}`: {}", cc, e);
             false
+        }
+    }
+}
+
+// A static program needs the libraries' own dependencies too (libcurl needs
+// OpenSSL, zlib, nghttp2...): pkg-config knows them.
+fn static_libs(libs: &[String]) -> Vec<String> {
+    let mut pkgs = vec![];
+    let mut rest = vec![];
+    for l in libs {
+        match l.as_str() {
+            "-lcurl" => pkgs.push("libcurl"),
+            "-lsqlite3" => pkgs.push("sqlite3"),
+            "-lz" => pkgs.push("zlib"),
+            "-lssl" => pkgs.push("libssl"),
+            "-lcrypto" => pkgs.push("libcrypto"),
+            _ => rest.push(l.clone()),
+        }
+    }
+    if pkgs.is_empty() {
+        return rest;
+    }
+    match Command::new("pkg-config").arg("--static").arg("--libs").args(&pkgs).output() {
+        Ok(o) if o.status.success() => {
+            rest.extend(String::from_utf8_lossy(&o.stdout).split_whitespace().map(String::from));
+            rest
+        }
+        _ => {
+            eprintln!("warning: pkg-config didn't find {}; linking may fail (install the static libraries, e.g. `apk add curl-static openssl-libs-static`)", pkgs.join(", "));
+            libs.to_vec()
         }
     }
 }
@@ -442,6 +480,13 @@ fn main() -> ExitCode {
             }
         }
         "build" => {
+            if opts.static_link && cfg!(target_os = "macos") {
+                eprintln!("error: macOS doesn't allow fully static programs (Apple supports only the system's shared C library).\nThere is no need: `lang build` programs use only libraries that come with macOS, so they run on any Mac as they are.\nFor a static Linux program, build on Linux (Alpine is simplest: see tools/linux/Dockerfile).");
+                return ExitCode::from(1);
+            }
+            if opts.static_link && cfg!(target_env = "gnu") {
+                eprintln!("note: with glibc, a static program still loads glibc's modules for looking up host names at run time; build on a musl system (Alpine) for a program that needs nothing");
+            }
             let exe = PathBuf::from(opts.out.clone().unwrap_or(stem));
             if compile(&opts, false, true, &exe) {
                 ExitCode::SUCCESS

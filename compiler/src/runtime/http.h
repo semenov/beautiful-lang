@@ -540,8 +540,8 @@ static lt_err lt_http_perform(lt_text *method, lt_text *url, lt_text *body, size
     CURL *c = curl_easy_init();
     if (!c) return lt_make_failure(lt_text_cstr("http: can't start the client"));
     lt_texts *hs = lt_texts_new(8);
-    curl_easy_setopt(c, CURLOPT_URL, url->data);
-    curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method->data);
+    curl_easy_setopt(c, CURLOPT_URL, (const char *)url->data);
+    curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, (const char *)method->data);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
@@ -549,13 +549,17 @@ static lt_err lt_http_perform(lt_text *method, lt_text *url, lt_text *body, size
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
     curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(c, CURLOPT_USERAGENT, "lang-http/0.1");
+#if !defined(__APPLE__)
+    const char *ca = lt_ca_file();
+    if (ca) curl_easy_setopt(c, CURLOPT_CAINFO, ca);
+#endif
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, sink);
     curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, lt_curl_header);
     curl_easy_setopt(c, CURLOPT_HEADERDATA, &hs);
     struct curl_slist *req_headers = NULL;
     if (body && (body->len > 0 || strcmp(method->data, "POST") == 0 || strcmp(method->data, "PUT") == 0)) {
-        curl_easy_setopt(c, CURLOPT_POSTFIELDS, body->data);
+        curl_easy_setopt(c, CURLOPT_POSTFIELDS, (const char *)body->data);
         curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)body->len);
         const char *ct = (body->len > 0 && (body->data[0] == '{' || body->data[0] == '[')) ? "content-type: application/json" : "content-type: text/plain; charset=utf-8";
         req_headers = curl_slist_append(req_headers, ct);
@@ -568,7 +572,11 @@ static lt_err lt_http_perform(lt_text *method, lt_text *url, lt_text *body, size
     curl_slist_free_all(req_headers);
     if (rc != CURLE_OK) {
         char buf[512];
-        snprintf(buf, sizeof buf, "http: %s %s failed: %s", method->data, url->data, curl_easy_strerror(rc));
+        const char *why = curl_easy_strerror(rc);
+#if !defined(__APPLE__)
+        if (!ca && (rc == CURLE_SSL_CACERT_BADFILE || rc == CURLE_PEER_FAILED_VERIFICATION)) why = LT_NO_CA;
+#endif
+        snprintf(buf, sizeof buf, "http: %s %s failed: %s", method->data, url->data, why);
         for (int64_t i = 0; i < hs->len; i++) lt_text_drop(hs->items[i]);
         lt_free(hs, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)hs->cap);
         return lt_make_failure(lt_text_cstr(buf));
