@@ -24,7 +24,7 @@ pub struct ModuleDoc {
 fn decl_name(s: &str) -> String {
     let s = s.trim();
     let words: Vec<&str> = s.split_whitespace().collect();
-    let pos = words.iter().position(|w| matches!(*w, "fn" | "type" | "enum" | "interface")).map(|i| i + 1).unwrap_or(0);
+    let pos = words.iter().position(|w| matches!(*w, "fn" | "type" | "enum" | "interface" | "let")).map(|i| i + 1).unwrap_or(0);
     let w = words.get(pos).copied().unwrap_or("");
     w.split(|c: char| !(c.is_alphanumeric() || c == '_')).next().unwrap_or("").to_string()
 }

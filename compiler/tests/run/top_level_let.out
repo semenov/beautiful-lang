@@ -1,0 +1,6 @@
+hello from shop
+[1, 10, 100] (0, 0) Ada 39.98
+5 no tag
+high 3
+usage: tool [options]
+  --retries  (default: 5)

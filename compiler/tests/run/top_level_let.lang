@@ -1,0 +1,43 @@
+// Top-level `let`: fixed values shared by the whole file.
+
+type Point {
+  x: Int
+  y: Int
+}
+
+enum Level {
+  Low
+  High(amount: Int)
+}
+
+let max_retries = 5
+let greeting = "hello from shop"
+let limits: List<Int> = [1, max_retries * 2, 100]
+let origin = Point(x: 0, y: 0)
+let names = {"a": "Ada", "b": "Bob"}
+let price: Decimal = 19.99
+let level = High(amount: 3)
+let tag: String? = none
+let usage = """
+usage: tool [options]
+  --retries  (default: ${max_retries})
+"""
+
+type Config {
+  retries: Int = max_retries
+}
+
+fn describe(p: Point) -> String {
+  return "(${p.x}, ${p.y})"
+}
+
+fn main() {
+  print(greeting)
+  print("${limits} ${describe(origin)} ${names["a"] ?? "-"} ${price * 2}")
+  print("${Config().retries} ${tag ?? "no tag"}")
+  match level {
+    Low => print("low")
+    High(amount) => print("high ${amount}")
+  }
+  print(usage)
+}

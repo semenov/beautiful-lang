@@ -72,6 +72,8 @@ pub struct Checker {
     f: Option<FnCtx>,
     // AST of every function (methods included) by FnId, for body checking
     fn_asts: Vec<Option<(ast::FnDecl, usize)>>,
+    // top-level `let`s: 1 while being checked (to find cycles), 2 when done
+    const_state: HashMap<FnId, u8>,
 }
 
 fn orderable(t: &Ty) -> bool {
@@ -145,6 +147,7 @@ impl Checker {
             prim: HashMap::new(),
             f: None,
             fn_asts: vec![],
+            const_state: HashMap::new(),
         }
     }
 
@@ -273,7 +276,9 @@ impl Checker {
         // bodies
         for id in 0..self.fn_asts.len() {
             if let Some((decl, md)) = self.fn_asts[id].clone() {
-                if decl.body.is_some() {
+                if decl.is_const {
+                    self.check_const(id);
+                } else if decl.body.is_some() {
                     self.check_fn_body(id, &decl, md);
                 }
             }
@@ -551,6 +556,8 @@ impl Checker {
             // throws or loops forever); only as a return type
             Some(TypeExpr::Named { path, args, .. }) if path.len() == 1 && path[0] == "Never" && args.is_empty() && self.lookup_global("Never", md).is_none() => Ty::Never,
             Some(t) => self.resolve_texpr(t, &generics, md),
+            // a `let` without a type: found from its value when it's checked
+            None if decl.is_const => Ty::Err,
             None => Ty::Unit,
         };
         let self_mode = if decl.mutating {
@@ -579,6 +586,7 @@ impl Checker {
             module: md,
             // the prelude and the standard library's methods are its API
             is_pub: decl.is_pub || md == 0 || (owner.is_some() && self.modules[md].privileged),
+            is_const: decl.is_const,
         });
         self.fn_asts.push(Some((decl.clone(), md)));
         self.prog.fns.len() - 1
@@ -900,6 +908,56 @@ impl Checker {
             // a `throws` function that can never fail is allowed (interfaces), no error
         }
         self.prog.fns[id].body = Some(tb);
+    }
+
+    // A use of a top-level `let`: a call of its hidden function.
+    fn const_use(&mut self, id: FnId, span: Span) -> TExpr {
+        self.check_const(id);
+        let ty = self.prog.fns[id].ret.clone();
+        TExpr { kind: TK::Call { callee: Callee::Fn(id, vec![]), args: vec![], throws: false }, ty, span }
+    }
+
+    // Checks a top-level `let` (once, on its first use or at the end), in a
+    // context of its own: it may be reached from the middle of another body.
+    fn check_const(&mut self, id: FnId) {
+        match self.const_state.get(&id) {
+            Some(2) => return,
+            Some(_) => {
+                let (n, sp) = (self.prog.fns[id].name.clone(), self.prog.fns[id].span);
+                self.err_help(sp, format!("`{}` is defined through itself", n), "a top-level `let` can use other ones, but not in a circle");
+                return;
+            }
+            None => {}
+        }
+        let (decl, md) = match self.fn_asts[id].clone() {
+            Some(x) => x,
+            None => return,
+        };
+        self.const_state.insert(id, 1);
+        let value = match decl.body.as_ref().and_then(|b| b.stmts.first()) {
+            Some(Stmt::Return(Some(v), _)) => v.clone(),
+            _ => return,
+        };
+        if let Some(sp) = not_fixed(&value) {
+            self.err_help(sp, "a top-level `let` holds a fixed value", "use literals, other top-level `let`s, and lists, maps and records of them; anything computed belongs in a function or in `main`");
+            self.const_state.insert(id, 2);
+            return;
+        }
+        let saved = self.f.take();
+        let declared = self.prog.fns[id].ret.clone();
+        self.begin_fn(vec![], declared.clone(), false, md);
+        let e = if declared == Ty::Err { self.expr(&value, None) } else { self.expr_coerce(&value, &declared) };
+        let sp = e.span;
+        let ty = self.zonk_ty(&e.ty, &mut None);
+        let mut body = self.end_fn(TBlock { stmts: vec![TStmt::Return(Some(e))], tail: None, ty: Ty::Never });
+        if matches!(ty, Ty::Unit | Ty::Never) {
+            self.err(sp, "a top-level `let` needs a value");
+        }
+        body.params = vec![];
+        self.prog.fns[id].ret = ty;
+        self.prog.fns[id].body = Some(body);
+        self.f = saved;
+        self.const_state.insert(id, 2);
     }
 
     // The `//` lines right above a declaration, joined.
@@ -1638,7 +1696,11 @@ impl Checker {
                 let id = match self.lookup_local(name) {
                     Some(id) => id,
                     None => {
-                        self.err(e.span, format!("unknown name `{}`", name));
+                        let md = self.fc().module;
+                        match self.lookup_global(name, md) {
+                            Some(Global::Fn(f)) if self.prog.fns[f].is_const => self.err_help(e.span, format!("`{}` is a top-level `let`: it can't change", name), format!("copy it into a local: `var {n}_now = {n}`", n = name)),
+                            _ => self.err(e.span, format!("unknown name `{}`", name)),
+                        }
                         return None;
                     }
                 };
@@ -2140,6 +2202,7 @@ impl Checker {
         }
         let md = self.fc().module;
         match self.lookup_global(name, md) {
+            Some(Global::Fn(id)) if self.prog.fns[id].is_const => return self.const_use(id, span),
             Some(Global::Fn(id)) => {
                 let f = self.prog.fns[id].clone();
                 let targs: Vec<Ty> = f.generics.iter().map(|_| self.fresh()).collect();
@@ -2245,6 +2308,7 @@ impl Checker {
         if let ExprKind::Ident(alias) = &base.kind {
             if let Some(target) = self.module_named(alias) {
                 match self.lookup_in_module(target, name, nsp) {
+                    Some(Global::Fn(id)) if self.prog.fns[id].is_const => return self.const_use(id, span),
                     Some(Global::Fn(id)) => {
                         let f = self.prog.fns[id].clone();
                         let targs: Vec<Ty> = f.generics.iter().map(|_| self.fresh()).collect();
@@ -2615,6 +2679,14 @@ impl Checker {
     }
 
     fn fn_call(&mut self, id: FnId, recv: Option<TExpr>, explicit: &[Ty], args: &[ast::Arg], span: Span, _in_try: bool, expected: Option<&Ty>) -> TExpr {
+        if self.prog.fns[id].is_const {
+            let n = self.prog.fns[id].name.clone();
+            self.err_help(span, format!("`{}` is a value, not a function", n), format!("write `{}` without `()`", n));
+            for a in args {
+                let _ = self.expr(&a.value, None);
+            }
+            return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+        }
         let f = self.prog.fns[id].clone();
         let targs = self.instantiate(&f, &[], explicit, span);
         let params: Vec<(String, Ty)> = f.params.iter().map(|(n, t)| (n.clone(), t.subst(&targs))).collect();
@@ -3870,5 +3942,36 @@ fn stmt_diverges(s: &TStmt) -> bool {
         TStmt::Expr(e) => e.ty == Ty::Never,
         TStmt::Let(_, e) => e.ty == Ty::Never,
         _ => false,
+    }
+}
+
+// The first part of a top-level `let`'s value that isn't fixed: a call of a
+// function, `try`, a lambda, ... Types and variants (capitalized) may be
+// called: `Point(x: 1, y: 2)`.
+fn not_fixed(e: &Expr) -> Option<Span> {
+    match &e.kind {
+        ExprKind::Int(_) | ExprKind::Float(_) | ExprKind::Bool(_) | ExprKind::None | ExprKind::Ident(_) => None,
+        ExprKind::Str(segs) => segs.iter().find_map(|s| match s {
+            ast::StrSeg::Expr(x) => not_fixed(x),
+            _ => None,
+        }),
+        ExprKind::List(xs) => xs.iter().find_map(not_fixed),
+        ExprKind::Map(kvs) => kvs.iter().find_map(|(k, v)| not_fixed(k).or_else(|| not_fixed(v))),
+        // `module.NAME` or a field of another fixed value
+        ExprKind::Field(b, _, _) => not_fixed(b),
+        ExprKind::Unary(_, x) => not_fixed(x),
+        ExprKind::Binary(_, a, b) | ExprKind::Coalesce(a, b) => not_fixed(a).or_else(|| not_fixed(b)),
+        ExprKind::Call { callee, args, .. } => {
+            let name = match &callee.kind {
+                ExprKind::Ident(n) => Some(n),
+                ExprKind::Field(b, n, _) if matches!(b.kind, ExprKind::Ident(_)) => Some(n),
+                _ => None,
+            };
+            match name {
+                Some(n) if n.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) => args.iter().find_map(|a| not_fixed(&a.value)),
+                _ => Some(e.span),
+            }
+        }
+        _ => Some(e.span),
     }
 }

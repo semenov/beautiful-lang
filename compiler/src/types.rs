@@ -139,6 +139,8 @@ pub struct FnDef {
     pub is_prelude: bool,
     pub module: usize,
     pub is_pub: bool,
+    // a top-level `let`
+    pub is_const: bool,
 }
 
 #[derive(Clone, Debug)]

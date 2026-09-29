@@ -127,7 +127,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `cli`: -n style flags, one-letter names, subcommands (decode_from)
 - [x] channels: try_receive (a timeout: time.timeout around receive); select: not yet
 - [x] `-> Never` in user code
-- [ ] constants (`const`): to raise with Vlad (a fixed value is a function for now)
+- [x] constants: top-level `let` (Vlad chose it over `const`)
+- [ ] top-level `let` of a list, map or interpolated string is rebuilt at each use: cache it if it shows up in profiles
 - [x] signals: Ctrl-C cancels main's tasks; process.interrupted()
 - [x] a field default can't use a type declared later in the file
 - [x] Float.format: NaN text (width: use pad_start)

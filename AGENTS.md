@@ -26,10 +26,12 @@ reasons behind the rules are in `DESIGN.md`.
 - Without `pub`, a function or type is private to its file.
 - A local variable can't have the name of an imported module (`let path = ...`
   with `import path` is an error).
-- The top level holds only `import`, `type`, `enum`, `interface`, `fn` and
-  `test`. **No global variables or constants**: a fixed value is a function
-  (`fn usage() -> String { return """...""" }`); state shared between
-  tasks is a `Shared<T>` made in `main` and passed along.
+- The top level holds `import`, `type`, `enum`, `interface`, `fn`, `test`
+  and **`let` for fixed values**: `let max_retries = 5`,
+  `pub let default_port = 8080`, `let usage = """..."""`. The value is
+  made of literals, other top-level `let`s, and lists, maps and records of
+  them; no function calls. **There are no global variables**: state shared
+  between tasks is a `Shared<T>` made in `main` and passed along.
 - Files: `files.read` / `write` / `append` (whole files), `files.open` /
   `create` / `open_append` (streams, with `with`), `list`, `walk`, `glob`,
   `exists`, `is_dir`, `make_dir`, `copy`, `rename`, `delete`, `delete_all`,
@@ -416,7 +418,8 @@ see private functions.
 |---|---|
 | `a \`Stream\` must be closed: get it with \`with\`` | `with f = try ... { }` |
 | `/` on two `Int`s is not allowed | `a.div(b)` or `a.to_float() / b.to_float()` |
-| there are no global variables or constants | a function: `fn limit() -> Int { return 10 }` |
+| there are no global variables | a fixed value: top-level `let`; changing state: `Shared<T>` made in `main` |
+| a top-level `let` holds a fixed value | compute it in a function or in `main` |
 | there is no `?.` | `if x is some(v) { v.field }` or `??` |
 | `catch` needs `try` before the call | `try f(x) catch err { ... }` |
 | this call can fail | put `try` in front |

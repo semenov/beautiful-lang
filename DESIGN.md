@@ -202,8 +202,15 @@ used result is always a mutation or an action. The rule also catches the
   `import billing.users as billing_users` (the compiler asks for it).
 - Imports are always qualified: no `from x import y`, no `*`. Every name in
   the code is either declared in this file or has a module prefix.
-- **Private by default:** without `pub`, a function, type or method is
-  visible only inside its file. Fields are visible wherever the type is.
+- **Top-level `let` for fixed values** (`let max_retries = 5`,
+  `pub let default_port = 8080`), and no global variables. The value is
+  literals, other top-level `let`s, and lists, maps and records of them:
+  no function calls, so nothing runs before `main`, and there is no
+  initialization order to think about. `let` already means "can't change",
+  so there is no second keyword like `const`. Shared state is still a
+  `Shared<T>` made in `main`.
+- **Private by default:** without `pub`, a function, type, method or
+  top-level `let` is visible only inside its file. Fields are visible wherever the type is.
 - **No cyclic imports:** the error shows the cycle (`a → b → a`) and
   suggests moving the shared part into a third module.
 - The main file can't be imported.

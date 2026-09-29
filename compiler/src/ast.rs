@@ -51,6 +51,9 @@ pub struct FnDecl {
     pub body: Option<Block>, // None for interface method signatures
     // builtin (prelude) function implemented by the runtime
     pub intrinsic: bool,
+    // a top-level `let`: a fixed value, kept as a function without
+    // parameters whose body returns it
+    pub is_const: bool,
 }
 
 #[derive(Debug, Clone)]

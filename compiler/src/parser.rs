@@ -176,9 +176,33 @@ impl Parser {
                 let body = self.block()?;
                 Ok(Item::Test(TestDecl { name, span: sp, body }))
             }
-            Tok::Let | Tok::Var => Err(self
-                .err_here("there are no global variables or constants")
-                .help("a fixed value is a function: `fn usage() -> String { return \"...\" }`; state shared between tasks is a `Shared<T>` created in `main` and passed along")),
+            Tok::Var => Err(self
+                .err_here("there are no global variables")
+                .help("a fixed value is a top-level `let`; state shared between tasks is a `Shared<T>` created in `main` and passed along")),
+            Tok::Let => {
+                // `let name: T = value`: a fixed value
+                self.bump();
+                let (name, nsp) = self.ident("a name")?;
+                let ty = if self.eat(&Tok::Colon) { Some(self.type_expr()?) } else { None };
+                self.expect(&Tok::Eq, "`=`")?;
+                let value = self.expr()?;
+                let vsp = value.span;
+                Ok(Item::Fn(FnDecl {
+                    name,
+                    span: nsp,
+                    is_pub,
+                    generics: vec![],
+                    has_self: false,
+                    mutating: false,
+                    params: vec![],
+                    ret: ty,
+                    throws: false,
+                    rethrows: false,
+                    body: Some(Block { stmts: vec![Stmt::Return(Some(value), vsp)], span: vsp }),
+                    intrinsic: false,
+                    is_const: true,
+                }))
+            }
             Tok::Mutating => Err(self.err_here("`mutating fn` is only allowed inside a type")),
             t => {
                 let d = Self::describe(&t);
@@ -287,6 +311,7 @@ impl Parser {
             rethrows,
             body,
             intrinsic,
+            is_const: false,
         })
     }
 
