@@ -26,6 +26,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] other runtime buffers that grow with realloc and are freed to malloc
         (lt_grow for HTTP bodies, readers): same treatment where big
   - [ ] lt_dyn is 80 bytes per JSON node: a union would halve it
+- [ ] **A realistic backend vs Go** (Vlad, 2026-09-29): a service shaped
+      like a real app's backend (JSON API with routing, middleware, auth
+      header, validation, a database (SQLite/Postgres), templates or JSON
+      responses, logging), written idiomatically in both; load it and
+      compare req/s, latency, CPU per request and memory. Wherever we're
+      slower or use more memory: find out why and fix it
 - [ ] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
       pool of OS threads, stacks, parking, I/O and timers; its strengths and
       its possible weak spots
