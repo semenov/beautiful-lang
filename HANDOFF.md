@@ -1,5 +1,9 @@
 # Handoff: where the work stands (2026-09-29, evening)
 
+The project lives in ~/Dev/plumb (renamed from ~/Dev/beautiful-lang;
+the GitHub repo is github.com/semenov/plumb). The language is Plumb:
+command `plumb`, files `.plumb`.
+
 For the next session. The full backlog is in `TODO.md`; this file is the
 short version: what's in flight, what waits for Vlad, and what to do next.
 
