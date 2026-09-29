@@ -1141,6 +1141,7 @@ static lt_texts *lt_regex_split(lt_handle *h, lt_text *t) {
 
 static lt_text *lt_float_format(double v, int64_t decimals, int line) {
     if (decimals < 0 || decimals > 20) lt_panic_at("format: decimals must be 0 to 20", line);
+    if (isnan(v) || isinf(v)) return lt_float_to_text(v); // NaN, Infinity: as to_text
     char buf[400];
     int n = snprintf(buf, sizeof buf, "%.*f", (int)decimals, v);
     if (n < 0 || n >= (int)sizeof buf) return lt_float_to_text(v);

@@ -1242,7 +1242,11 @@ type Failure implements Error {
   fn message(self) -> Text
 }
 
+// A line to standard output.
 fn print(text: Text)
+// A line to standard error: errors and messages for people, kept apart from
+// the program's output (see also the `log` module).
+fn eprint(text: Text)
 fn min<T>(a: T, b: T) -> T
 fn max<T>(a: T, b: T) -> T
 fn assert(condition: Bool)

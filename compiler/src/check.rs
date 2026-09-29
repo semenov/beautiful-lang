@@ -746,8 +746,34 @@ impl Checker {
     }
 
     fn check_defaults(&mut self, astm: &ast::Module, md: usize) {
-        for item in &astm.items {
-            if let ast::Item::Record(r) = item {
+        // a default may build another record with its defaults
+        // (`timing: Timing = Timing()`): check that one first
+        let records: Vec<&ast::RecordDecl> = astm.items.iter().filter_map(|i| if let ast::Item::Record(r) = i { Some(r) } else { None }).collect();
+        let mentions = |r: &ast::RecordDecl, name: &str| {
+            let needle = format!("\"{}\"", name);
+            r.fields.iter().any(|f| f.default.as_ref().map(|d| format!("{:?}", d).contains(&needle)).unwrap_or(false))
+        };
+        let mut order: Vec<usize> = vec![];
+        let mut state = vec![0u8; records.len()];
+        fn visit(i: usize, records: &[&ast::RecordDecl], state: &mut Vec<u8>, order: &mut Vec<usize>, mentions: &dyn Fn(&ast::RecordDecl, &str) -> bool) {
+            if state[i] != 0 {
+                return;
+            }
+            state[i] = 1;
+            for j in 0..records.len() {
+                if j != i && mentions(records[i], &records[j].name) {
+                    visit(j, records, state, order, mentions);
+                }
+            }
+            state[i] = 2;
+            order.push(i);
+        }
+        for i in 0..records.len() {
+            visit(i, &records, &mut state, &mut order, &mentions);
+        }
+        for i in order {
+            let r = records[i];
+            {
                 if r.builtin {
                     continue;
                 }
@@ -1947,6 +1973,15 @@ impl Checker {
                 if !hit && call.ty != Ty::Err {
                     self.err_help(span, "nothing here can fail", "remove `try`");
                 }
+                // `let x: Int? = try t.to_int() catch err { none }`: the value
+                // becomes optional, so the catch block can give `none`
+                let call = match (expected.map(|e| self.resolve(e)), self.resolve(&call.ty)) {
+                    (Some(Ty::Opt(inner)), got) if catch.is_some() && !matches!(got, Ty::Opt(_) | Ty::Err | Ty::Never) && self.try_unify(&got, &inner) => {
+                        let want = Ty::Opt(inner);
+                        self.coerce(call, &want)
+                    }
+                    _ => call,
+                };
                 let ty = call.ty.clone();
                 match catch {
                     None => {
@@ -3127,6 +3162,21 @@ impl Checker {
     // ---- if / match ----
 
     fn if_expr(&mut self, cond: &Expr, then: &ast::Block, els: Option<&Expr>, span: Span, expected: Option<&Ty>, want: bool) -> TExpr {
+        // `if ready and x is some(v) { }`: test `ready`, then `x is some(v)`;
+        // the else part is reached from either test
+        if let ExprKind::Binary(BinOp::And, l, r) = &cond.kind {
+            if matches!(&r.kind, ExprKind::Is(_, p) if pattern_binds(p)) && !matches!(l.kind, ExprKind::Is(..)) {
+                let c = self.expr_coerce(l, &Ty::Bool);
+                let inner = self.if_expr(r, then, els, span, expected, want);
+                let ty = inner.ty.clone();
+                let els_e = els.map(|e| {
+                    let e2 = self.expr(e, expected);
+                    Box::new(self.coerce_branch(e2, &ty))
+                });
+                let tb = TBlock { stmts: vec![], tail: Some(Box::new(inner)), ty: ty.clone() };
+                return TExpr { kind: TK::If { cond: Box::new(c), then: tb, els: els_e }, ty, span };
+            }
+        }
         // `if x is P { } else { }` and `if x is P and c { }` become a match
         let (is_part, guard) = match &cond.kind {
             ExprKind::Is(..) => (Some(cond), None),

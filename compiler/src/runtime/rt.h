@@ -1061,6 +1061,15 @@ static lt_err lt_hex_decode(lt_text *t, lt_bytes **out) {
 
 // ---------------------------------------------------------------- output
 
+// to standard error: messages for people (`eprint`), not program output
+static void lt_eprint(lt_text *t) {
+    fflush(stdout);
+    flockfile(stderr);
+    fwrite(t->data, 1, (size_t)t->len, stderr);
+    putc_unlocked('\n', stderr);
+    funlockfile(stderr);
+}
+
 static void lt_print(lt_text *t) {
     flockfile(stdout);
     fwrite(t->data, 1, (size_t)t->len, stdout);

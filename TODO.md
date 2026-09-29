@@ -86,16 +86,16 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] HTTP client: connection reuse (keep-alive), a thread pool, total
       `timeout: Duration`, `follow_redirects`, HEAD, timings, detailed errors
 - [x] writing to a closed pipe (`| head`) exits quietly (status 141)
-- [ ] `eprint(text)` for standard error without `with`
-- [ ] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
+- [x] `eprint(text)` for standard error without `with`
+- [x] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
 - [ ] `time`: parse_duration, Duration text and arithmetic, precise timers
       (macOS: sleep(10ms) takes ~70ms), a ticker
 - [ ] `cli`: -n style flags and one-letter names
 - [ ] channels: try_receive, receive with a timeout, select
 - [ ] `-> Never` in user code; constants (`const`)
 - [ ] signals: Ctrl-C handling for tools (with the npm item above)
-- [ ] a field default can't use a type declared later in the file
-- [ ] Float.format: width; NaN text
+- [x] a field default can't use a type declared later in the file
+- [x] Float.format: NaN text (width: use pad_start)
 
 ## Then: my own review of what's missing or weak
 

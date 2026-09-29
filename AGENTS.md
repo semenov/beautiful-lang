@@ -37,6 +37,11 @@ total += x
 let name: Text = "Ada"         // types: Int, Float, Bool, Text, Bytes,
                                // List<T>, Map<K, V>, Set<T>, T?
 let greeting = "Hi ${name}!"   // interpolation is ${...}
+let long = """
+  Text over several lines
+  """                          // multi-line text: triple quotes
+print(greeting)                // a line to standard output
+eprint("warning: ...")         // a line to standard error
 let ok = a > 0 and not done or b // and / or / not, never && || !
 
 if x > 3 {
@@ -48,6 +53,7 @@ if x > 3 {
 }
 
 for item in items { ... }
+if ready and user is some(u) { ... }   // `is some(...)` also after `and`
 for i in 0..<10 { ... }        // 0..<n excludes n, 1..=n includes it
 while running { ... }
 for entry in map { print("${entry.key}: ${entry.value}") }

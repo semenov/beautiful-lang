@@ -2738,6 +2738,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.totext_expr(t, &a[0], name == "debug_text")
             }
             "print" => format!("lt_print({})", a[0]),
+            "eprint" => format!("lt_eprint({})", a[0]),
             "scope_new" => {
                 self.threads = true;
                 "((int64_t)(intptr_t)lt_scope_new())".to_string()
