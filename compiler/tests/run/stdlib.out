@@ -16,3 +16,4 @@ dice ok: true, token length 16
 shuffled keeps items: true
 year ok: true, iso length 20
 1970-01-01T00:00:00Z 2026-01-01
+report.tar a/c /y ["usr", "local", "bin"] false

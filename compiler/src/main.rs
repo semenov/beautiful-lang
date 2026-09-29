@@ -76,6 +76,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "csv" => include_str!("std/csv.lang"),
         "url" => include_str!("std/url.lang"),
         "math" => include_str!("std/math.lang"),
+        "path" => include_str!("std/path.lang"),
         _ => return None,
     })
 }

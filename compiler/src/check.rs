@@ -884,6 +884,10 @@ impl Checker {
 
     fn declare(&mut self, span: Span, name: &str, ty: Ty, mutable: bool) -> LocalId {
         if name != "self" && name != "_" {
+            let md = self.fc().module;
+            if self.modules[md].imports.contains_key(name) {
+                self.err_help(span, format!("`{}` is the name of an imported module", name), format!("pick another name, like `{}_value`", name));
+            }
             let exists = self.fc().scopes.iter().any(|s| s.contains_key(name));
             if exists {
                 self.err_help(span, format!("`{}` is already declared", name), "names can't be redeclared (no shadowing): pick another name, or use `var` and assign");

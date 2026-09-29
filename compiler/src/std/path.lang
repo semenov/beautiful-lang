@@ -1,0 +1,54 @@
+// path: the text of file paths ("a/b/c.txt"). Nothing here touches the
+// disk; reading and writing is in `files`.
+
+// "a/b" + "c.txt" -> "a/b/c.txt"; an absolute `name` replaces `dir`
+pub fn join(dir: Text, name: Text) -> Text
+// "a/b/c.txt" -> "c.txt"
+pub fn name(path: Text) -> Text
+// "a/b/c.txt" -> "a/b"
+pub fn parent(path: Text) -> Text
+// "a/b/c.txt" -> "txt"; none without a dot
+pub fn extension(path: Text) -> Text?
+
+// "a/b/c.txt" -> "c"
+pub fn stem(path: Text) -> Text {
+  let n = name(path)
+  let parts = n.split(".")
+  if parts.length < 2 or parts[0].is_empty() {
+    return n
+  }
+  return parts.take(parts.length - 1).join(".")
+}
+
+pub fn is_absolute(path: Text) -> Bool {
+  return path.starts_with("/")
+}
+
+// "/a/b/c.txt" -> ["a", "b", "c.txt"]
+pub fn parts(path: Text) -> List<Text> {
+  return path.split("/").filter(p => not p.is_empty() and p != ".")
+}
+
+// Removes "." and resolves "..": "a/./b/../c" -> "a/c"
+pub fn clean(path: Text) -> Text {
+  var out: List<Text> = []
+  for p in parts(path) {
+    if p == ".." {
+      if not out.is_empty() and out.last() != "..".to_text() {
+        let _ = out.pop()
+      } else if not is_absolute(path) {
+        out.append("..")
+      }
+    } else {
+      out.append(p)
+    }
+  }
+  let joined = out.join("/")
+  if is_absolute(path) {
+    return "/${joined}"
+  }
+  if joined.is_empty() {
+    return "."
+  }
+  return joined
+}

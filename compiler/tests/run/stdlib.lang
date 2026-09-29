@@ -1,4 +1,5 @@
 import files
+import path
 import process
 import env
 import log
@@ -7,24 +8,24 @@ import time
 
 fn main() throws {
   with dir = try files.temp_dir() {
-    let path = files.join(dir.path, "notes.txt")
-    try files.write(path, "first\nsecond\n")
-    try files.append(path, "third\n")
-    print(try files.read(path))
-    with f = try files.open(path) {
+    let file = path.join(dir.path, "notes.txt")
+    try files.write(file, "first\nsecond\n")
+    try files.append(file, "third\n")
+    print(try files.read(file))
+    with f = try files.open(file) {
       var n = 0
       while try f.read_line() is some(line) {
         n += 1
         print("${n}: ${line}")
       }
     }
-    with out = try files.create(files.join(dir.path, "out.txt")) {
+    with out = try files.create(path.join(dir.path, "out.txt")) {
       try out.write("written piece by piece")
     }
-    try files.make_dir(files.join(dir.path, "a/b/c"))
+    try files.make_dir(path.join(dir.path, "a/b/c"))
     print("${try files.list(dir.path)}")
-    print("${files.name(path)} in ${files.name(files.parent(path)).starts_with("program-")}, ext ${files.extension(path) ?? "-"}")
-    let missing = try files.read(files.join(dir.path, "nope.txt")) catch err {
+    print("${path.name(file)} in ${path.name(path.parent(file)).starts_with("program-")}, ext ${path.extension(file) ?? "-"}")
+    let missing = try files.read(path.join(dir.path, "nope.txt")) catch err {
       print("error: ${err.message().contains("No such file")}")
       ""
     }
@@ -41,5 +42,6 @@ fn main() throws {
   let now = time.utc_now()
   print("year ok: ${now.year >= 2025}, iso length ${now.iso().length}")
   print("${time.from_unix(0).iso()} ${time.from_unix(1767225600).date()}")
+  print("${path.stem("a/b/report.tar.gz")} ${path.clean("a/./b/../c")} ${path.clean("/x/../../y")} ${path.parts("/usr/local/bin")} ${path.is_absolute("rel/x")}")
   log.info("done")
 }

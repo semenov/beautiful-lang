@@ -2,6 +2,7 @@ import crypto
 import encoding
 import random
 import files
+import path
 import json
 
 type Blob {
@@ -34,9 +35,9 @@ fn main() throws {
   print(j)
   print("${(try json.decode<Blob>(j)) == blob}")
   with dir = try files.temp_dir() {
-    let p = files.join(dir.path, "b.bin")
-    try files.write_bytes(p, Bytes([0, 1, 2, 250]))
-    print("${try files.read_bytes(p)}")
+    let file = path.join(dir.path, "b.bin")
+    try files.write_bytes(file, Bytes([0, 1, 2, 250]))
+    print("${try files.read_bytes(file)}")
   }
   let invalid = try Bytes([255, 254]).text() catch err {
     err.message()

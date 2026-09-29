@@ -20,14 +20,7 @@ pub fn delete(path: Text) throws
 pub fn make_dir(path: Text) throws
 pub fn copy(from: Text, to: Text) throws
 pub fn rename(from: Text, to: Text) throws
-// "a/b" + "c.txt" -> "a/b/c.txt"
-pub fn join(dir: Text, name: Text) -> Text
-// "a/b/c.txt" -> "c.txt"
-pub fn name(path: Text) -> Text
-// "a/b/c.txt" -> "a/b"
-pub fn parent(path: Text) -> Text
-// "a/b/c.txt" -> "txt" (none without a dot)
-pub fn extension(path: Text) -> Text?
+// Working with the text of paths: see the `path` module.
 
 // An open file, for reading or writing it piece by piece.
 // Get one with `with f = try files.open(path) { ... }`.
