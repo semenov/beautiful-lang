@@ -30,8 +30,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         69 MB (one global run queue behind a mutex: now per-worker queues
         with stealing; waited tasks stayed in their function's scope list
         until it returned)
-  - [ ] channels: 4.8x slower than Go (0.63 s vs 0.13 s)
-  - [ ] spawn: 2.8x slower than Go (0.17 s vs 0.06 s)
+  - [x] channels: 4.8x slower than Go (0.63 s vs 0.13 s; partly a stray
+        process): now 0.09 s, faster than Go (a task woken by a channel
+        runs next on the same worker, like Go's runnext)
+  - [ ] spawn: 0.18 s vs Go 0.06 s (~0.9 us per task: calloc, the stack
+        pool lock, queue, wake, switch, finish); idle workers spin ~1 s of
+        CPU in that benchmark
   - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), json 332 vs
         247 MB (80-byte lt_dyn nodes), maps 59 vs 43 MB
   - [ ] other runtime buffers that grow with realloc and are freed to malloc

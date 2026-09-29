@@ -163,6 +163,12 @@ typedef struct lt_task {
 #define LT_LOCALQ 256
 typedef struct lt_worker {
     lt_spin lock;
+    // the task made ready last on this worker runs next, here: a task that
+    // wakes another (a channel, a lock) usually waits right after, and the
+    // pair then stays on one core. Others may take it only once it has
+    // waited a few microseconds (the owner is busy).
+    lt_task *next;
+    int64_t next_at;
     uint32_t head, tail; // take at head, add at tail
     lt_task *q[LT_LOCALQ];
     uint32_t tick;       // schedules, to look at the global queue now and then
@@ -305,13 +311,25 @@ static void lt_wake_one(void) {
     pthread_mutex_unlock(&lt_park_mu);
 }
 
-static void lt_ready(lt_task *t) {
+// `next`: a task woken by a channel, which usually hands work back and
+// forth with the one waking it (it runs next on this worker); other tasks
+// go to the queue, where idle workers take them at once.
+static void lt_ready_on(lt_task *t, bool next) {
     __atomic_store_n(&t->state, LT_READY, __ATOMIC_RELAXED);
     t->next = NULL;
     lt_worker *w = lt_self_worker();
     if (w) {
         lt_spin_lock(&w->lock);
-        if (w->tail - w->head < LT_LOCALQ) {
+        if (next) {
+            // the new one runs next; the one it replaces joins the queue
+            lt_task *old = w->next;
+            w->next = t;
+            w->next_at = lt_monotonic_nanos();
+            t = old;
+        }
+        if (!t) {
+            lt_spin_unlock(&w->lock);
+        } else if (w->tail - w->head < LT_LOCALQ) {
             w->q[w->tail % LT_LOCALQ] = t;
             __atomic_store_n(&w->tail, w->tail + 1, __ATOMIC_SEQ_CST);
             lt_spin_unlock(&w->lock);
@@ -334,12 +352,14 @@ static void lt_ready(lt_task *t) {
     }
     lt_wake_one();
 }
+static void lt_ready(lt_task *t) { lt_ready_on(t, false); }
 
 static lt_task *lt_local_pop(lt_worker *w) {
-    if (__atomic_load_n(&w->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&w->tail, __ATOMIC_SEQ_CST)) return NULL;
+    if (!__atomic_load_n(&w->next, __ATOMIC_SEQ_CST) && __atomic_load_n(&w->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&w->tail, __ATOMIC_SEQ_CST)) return NULL;
     lt_spin_lock(&w->lock);
-    lt_task *t = NULL;
-    if (w->head != w->tail) t = w->q[w->head++ % LT_LOCALQ];
+    lt_task *t = w->next;
+    if (t) w->next = NULL;
+    else if (w->head != w->tail) t = w->q[w->head++ % LT_LOCALQ];
     lt_spin_unlock(&w->lock);
     return t;
 }
@@ -397,7 +417,17 @@ static lt_task *lt_steal(lt_worker *w) {
     for (int k = 0; k < n; k++) {
         lt_worker *v = &lt_ws[(start + k) % n];
         if (v == w) continue;
-        if (__atomic_load_n(&v->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&v->tail, __ATOMIC_SEQ_CST)) continue;
+        if (__atomic_load_n(&v->head, __ATOMIC_SEQ_CST) == __atomic_load_n(&v->tail, __ATOMIC_SEQ_CST)) {
+            // only a next task: take it if its worker has kept it waiting
+            if (!__atomic_load_n(&v->next, __ATOMIC_SEQ_CST)) continue;
+            if (lt_monotonic_nanos() - __atomic_load_n(&v->next_at, __ATOMIC_SEQ_CST) < 5000) continue;
+            lt_spin_lock(&v->lock);
+            lt_task *t = v->head == v->tail ? v->next : NULL;
+            if (t) v->next = NULL;
+            lt_spin_unlock(&v->lock);
+            if (t) return t;
+            continue;
+        }
         lt_task *got[LT_LOCALQ / 2];
         uint32_t m = 0;
         lt_spin_lock(&v->lock);
@@ -423,7 +453,7 @@ static lt_task *lt_steal(lt_worker *w) {
 static bool lt_any_work(void) {
     if (__atomic_load_n(&lt_gq_n, __ATOMIC_SEQ_CST) > 0) return true;
     for (int i = 0; i < lt_workers; i++)
-        if (__atomic_load_n(&lt_ws[i].head, __ATOMIC_SEQ_CST) != __atomic_load_n(&lt_ws[i].tail, __ATOMIC_SEQ_CST)) return true;
+        if (__atomic_load_n(&lt_ws[i].next, __ATOMIC_SEQ_CST) || __atomic_load_n(&lt_ws[i].head, __ATOMIC_SEQ_CST) != __atomic_load_n(&lt_ws[i].tail, __ATOMIC_SEQ_CST)) return true;
     return false;
 }
 
@@ -868,7 +898,7 @@ static lt_task *lt_spawn(lt_scope *s, lt_fn fn, size_t result_size, void (*run)(
     s->tasks = t;
     if (me) lt_spin_unlock(&me->lock);
     if (me && __atomic_load_n(&me->cancelled, __ATOMIC_ACQUIRE)) lt_task_cancel(t);
-    lt_ready(t);
+    lt_ready_on(t, false);
     return t;
 }
 
@@ -1049,7 +1079,7 @@ static lt_err lt_chan_send(lt_chan *c, void *item) {
             c->count++;
             lt_task *r = lt_wq_pop(&c->recv_q);
             lt_spin_unlock(&c->spin);
-            if (r) lt_ready(r);
+            if (r) lt_ready_on(r, true);
             return (lt_err){ 0 };
         }
         lt_park_on(&c->send_q, true);
@@ -1069,7 +1099,7 @@ static bool lt_chan_try_send(lt_chan *c, void *item) {
     c->count++;
     lt_task *r = lt_wq_pop(&c->recv_q);
     lt_spin_unlock(&c->spin);
-    if (r) lt_ready(r);
+    if (r) lt_ready_on(r, true);
     return true;
 }
 
@@ -1083,7 +1113,7 @@ static int lt_chan_recv(lt_chan *c, void *out) {
             c->count--;
             lt_task *s = lt_wq_pop(&c->send_q);
             lt_spin_unlock(&c->spin);
-            if (s) lt_ready(s);
+            if (s) lt_ready_on(s, true);
             return 1;
         }
         if (c->closed || lt_is_cancelled()) {
@@ -1106,7 +1136,7 @@ static int lt_chan_try_recv(lt_chan *c, void *out) {
     c->count--;
     lt_task *s = lt_wq_pop(&c->send_q);
     lt_spin_unlock(&c->spin);
-    if (s) lt_ready(s);
+    if (s) lt_ready_on(s, true);
     return 1;
 }
 
