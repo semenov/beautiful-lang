@@ -224,6 +224,10 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
   `let _ = f()`. `list.sort()` changes the list in place; `list.sorted()`
   returns a new one.
 - No `return` inside a lambda: its last line is its value.
+- A lambda gets a copy of each value it uses, made when the lambda is
+  made. So it can't change them, and a `var` it uses can't change after
+  it (an error: the lambda would keep seeing the old value). Put the value
+  in a `let` first: `let id = user.id` then `() => save(id)`.
 - A function kept in a field is called like a method: `rule.test(x)`. A
   named function type (`type Check = fn(Int) -> Bool`) takes any function
   or lambda of that type.

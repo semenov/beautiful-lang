@@ -51,6 +51,13 @@ struct FnCtx {
     resource_ok: bool,
     lock_depth: usize,
     module: usize,
+    // for "a lambda would see an old value": where each local is declared,
+    // the loops around the code being checked, the `var`s lambdas capture
+    // (with the loops around each lambda), and every change of a local
+    decl_at: Vec<u32>,
+    loop_spans: Vec<Span>,
+    var_captures: Vec<(LocalId, Span, Vec<Span>)>,
+    writes: Vec<(LocalId, Span)>,
 }
 
 pub struct ModScope {
@@ -875,7 +882,37 @@ impl Checker {
             resource_ok: false,
             lock_depth: 0,
             module: md,
+            decl_at: vec![],
+            loop_spans: vec![],
+            var_captures: vec![],
+            writes: vec![],
         });
+    }
+
+    // A lambda captures a copy of each value it uses when it's made: a `var`
+    // that changes afterwards would look unchanged to it. After the lambda,
+    // or anywhere in a loop around it (the next time round is after it),
+    // unless the `var` is declared inside that loop.
+    fn check_stale_captures(&mut self) {
+        let caps = std::mem::take(&mut self.fcx().var_captures);
+        let writes = std::mem::take(&mut self.fcx().writes);
+        let mut reported = std::collections::HashSet::new();
+        for (id, lam, loops) in &caps {
+            let decl = self.fc().decl_at.get(*id).copied().unwrap_or(0);
+            for (w, at) in &writes {
+                if w != id || (at.lo >= lam.lo && at.hi <= lam.hi) || !reported.insert(at.lo) {
+                    continue;
+                }
+                let later = at.lo > lam.hi;
+                let in_loop = loops.iter().any(|l| l.lo <= at.lo && at.hi <= l.hi && decl < l.lo);
+                if later || in_loop {
+                    let name = self.fc().locals[*id].name.clone();
+                    self.err_help(*at, format!("`{}` changes here, but a lambda made earlier uses it: the lambda keeps the value `{}` had when it was made", name, name), format!("give the lambda the value it should see: `let {n}_now = {n}` before it, or pass it in as an argument", n = name));
+                } else {
+                    reported.remove(&at.lo);
+                }
+            }
+        }
     }
 
     fn fcx(&mut self) -> &mut FnCtx {
@@ -886,6 +923,7 @@ impl Checker {
     }
 
     fn end_fn(&mut self, mut block: TBlock) -> TBody {
+        self.check_stale_captures();
         let mut locals = self.fcx().locals.clone();
         let mut unresolved: Option<Span> = None;
         self.zonk_block(&mut block, &mut unresolved);
@@ -1055,6 +1093,7 @@ impl Checker {
         let fc = self.fcx();
         fc.locals.push(LocalDef { name: name.to_string(), ty, mutable });
         fc.level.push(level);
+        fc.decl_at.push(span.lo);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1067,6 +1106,7 @@ impl Checker {
         let fc = self.fcx();
         fc.locals.push(LocalDef { name: name.to_string(), ty, mutable: false });
         fc.level.push(level);
+        fc.decl_at.push(0);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1611,6 +1651,7 @@ impl Checker {
                 };
                 let lvl = self.fc().lambdas.len();
                 self.fcx().loops.push(lvl);
+                self.fcx().loop_spans.push(*span);
                 let s = self.expr(scrut, None);
                 let sty = s.ty.clone();
                 self.fcx().scopes.push(HashMap::new());
@@ -1618,6 +1659,7 @@ impl Checker {
                 let b = self.block(body, false, None);
                 self.fcx().scopes.pop();
                 self.fcx().loops.pop();
+                self.fcx().loop_spans.pop();
                 let sp = *span;
                 let body_e = TExpr { ty: Ty::Unit, kind: TK::Block(b), span: sp };
                 let brk = TExpr { kind: TK::Diverge(Box::new(TStmt::Break)), ty: Ty::Never, span: sp };
@@ -1629,12 +1671,14 @@ impl Checker {
                 let loop_body = TBlock { stmts: vec![TStmt::Expr(m)], tail: None, ty: Ty::Unit };
                 TStmt::While(TExpr { kind: TK::Bool(true), ty: Ty::Bool, span: sp }, loop_body)
             }
-            Stmt::While { cond, body, .. } => {
+            Stmt::While { cond, body, span } => {
+                self.fcx().loop_spans.push(*span);
                 let c = self.expr_coerce(cond, &Ty::Bool);
                 let lvl = self.fc().lambdas.len();
                 self.fcx().loops.push(lvl);
                 let b = self.block(body, false, None);
                 self.fcx().loops.pop();
+                self.fcx().loop_spans.pop();
                 TStmt::While(c, b)
             }
             Stmt::For { var, iter, body, span } => {
@@ -1645,8 +1689,10 @@ impl Checker {
                     let v = self.declare(*span, var, Ty::Int, false);
                     let lvl = self.fc().lambdas.len();
                     self.fcx().loops.push(lvl);
+                    self.fcx().loop_spans.push(*span);
                     let b = self.block(body, false, None);
                     self.fcx().loops.pop();
+                    self.fcx().loop_spans.pop();
                     self.fcx().scopes.pop();
                     return TStmt::ForRange { var: v, lo, hi, inclusive: *inclusive, body: b };
                 }
@@ -1672,8 +1718,10 @@ impl Checker {
                 let v = self.declare(*span, var, elem, false);
                 let lvl = self.fc().lambdas.len();
                 self.fcx().loops.push(lvl);
+                self.fcx().loop_spans.push(*span);
                 let b = self.block(body, false, None);
                 self.fcx().loops.pop();
+                self.fcx().loop_spans.pop();
                 self.fcx().scopes.pop();
                 match kind {
                     0 => TStmt::ForList { var: v, list: it, body: b },
@@ -1775,6 +1823,7 @@ impl Checker {
                 };
                 let l = self.fc().locals[id].clone();
                 if write {
+                    self.fcx().writes.push((id, e.span));
                     if self.is_captured(id) {
                         self.err_help(e.span, format!("can't change `{}` inside a lambda: lambdas capture a copy", name), "compute the value with the lambda's result (`map`, `fold`, `filter`), or share it through `Shared<T>` and change it in `with v = s.lock() { }`");
                         return None;
@@ -3445,6 +3494,10 @@ impl Checker {
         // captures that belong to this lambda (declared outside of it)
         let captures: Vec<LocalId> = lc.captures.iter().copied().filter(|c| self.fc().level[*c] < level).collect();
         for c in &captures {
+            if self.fc().locals[*c].mutable {
+                let loops = self.fc().loop_spans.clone();
+                self.fcx().var_captures.push((*c, span, loops));
+            }
             let ct = self.resolve(&self.fc().locals[*c].ty);
             if self.contains_task(&ct) {
                 let n = self.fc().locals[*c].name.clone();

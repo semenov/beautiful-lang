@@ -54,7 +54,8 @@ pub fn follow(req: http.Request, app: api.App) throws -> http.Response {
   if user.id == viewer {
     throw api.invalid("profile", problem: "can't follow yourself")
   }
-  try app.write(() => try app.conn.execute("insert or ignore into follows (follower_id, followed_id) values (?, ?)", [viewer, user.id]))
+  let followed = user.id
+  try app.write(() => try app.conn.execute("insert or ignore into follows (follower_id, followed_id) values (?, ?)", [viewer, followed]))
   user.following = true
   return answer(user)
 }
@@ -63,7 +64,8 @@ pub fn follow(req: http.Request, app: api.App) throws -> http.Response {
 pub fn unfollow(req: http.Request, app: api.App) throws -> http.Response {
   let viewer = try auth.require(req, app)
   var user = try find(app, username: req.param("username") ?? "", viewer: viewer)
-  try app.write(() => try app.conn.execute("delete from follows where follower_id = ? and followed_id = ?", [viewer, user.id]))
+  let followed = user.id
+  try app.write(() => try app.conn.execute("delete from follows where follower_id = ? and followed_id = ?", [viewer, followed]))
   user.following = false
   return answer(user)
 }
