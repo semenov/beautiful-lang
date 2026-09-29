@@ -246,7 +246,8 @@ used result is always a mutation or an action. The rule also catches the
   (`router/router.plumb` → `import router`); its other files are
   `import router.middleware`. One version of each package per build: two
   different sources for the same name are an error.
-- `plumb new <name>` creates a project (`plumb.toml`, `main.plumb`).
+- `plumb init` makes the current directory a project (`plumb.toml`, and
+  `main.plumb` unless there is one); the name is the directory's.
 
 ### Numbers
 

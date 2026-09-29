@@ -145,7 +145,7 @@ A package is a git repository (or a directory inside one), pinned by commit
 in `plumb.lock`:
 
 ```
-plumb new shop && cd shop
+mkdir shop && cd shop && plumb init
 plumb add postgres https://github.com/semenov/plumb --path packages/postgres
 ```
 
@@ -183,7 +183,7 @@ plumb test app.plumb           # run the `test` blocks
 plumb check app.plumb          # only check for errors
 plumb fmt                     # lay out every .plumb file the standard way
 plumb run --debug app.plumb    # with memory checking and a leak count
-plumb new / add / fetch / update   # projects and packages
+plumb init / add / fetch / update   # projects and packages
 ```
 
 It needs `cc` (clang or gcc), plus libcurl, SQLite and zlib for the modules

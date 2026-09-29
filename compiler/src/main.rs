@@ -34,7 +34,7 @@ Programs:
   plumb check <file.plumb>          only check for errors (fast)
 
 Projects and packages:
-  plumb new <name>                  create a project (plumb.toml, main.plumb)
+  plumb init [name]                 make this directory a project (plumb.toml, main.plumb)
   plumb add <name> <git-url> [--version <tag>] [--path <dir in the repository>]
   plumb add <name> --path <dir>     a package on this disk
   plumb fetch                       download the packages in plumb.lock
@@ -545,7 +545,7 @@ fn merge_can_fail(ds: Vec<diag::Diag>, texts: &[String]) -> Vec<diag::Diag> {
     out
 }
 
-// `plumb new`, `plumb add`, `plumb fetch`, `plumb update`
+// `plumb init`, `plumb add`, `plumb fetch`, `plumb update`
 fn project_command(args: &[String]) -> Option<ExitCode> {
     let cmd = args.first()?.as_str();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -554,26 +554,29 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
         Some(ExitCode::from(1))
     };
     match cmd {
-        "new" => {
+        "init" => {
+            // the project is the current directory; its name, the directory's
             let name = match args.get(1) {
                 Some(n) => n.clone(),
-                None => return fail("usage: plumb new <name>".into()),
+                None => cwd.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "app".into()),
             };
-            let dir = cwd.join(&name);
-            if dir.exists() {
-                return fail(format!("{} already exists", dir.display()));
-            }
-            if std::fs::create_dir_all(&dir).is_err() {
-                return fail(format!("can't create {}", dir.display()));
+            if cwd.join("plumb.toml").exists() {
+                return fail(format!("{} already has a plumb.toml", cwd.display()));
             }
             let m = project::Manifest { name: name.clone(), version: "0.1.0".into(), deps: Default::default() };
-            if let Err(e) = project::write_manifest(&dir, &m) {
+            if let Err(e) = project::write_manifest(&cwd, &m) {
                 return fail(e);
             }
-            let _ = std::fs::write(dir.join("main.plumb"), format!("fn main() {{\n  print(\"hello from {}\")\n}}\n", name));
-            println!("created {}/ (plumb.toml, main.plumb)\nrun it: cd {} && plumb run main.plumb", name, name);
+            let main = cwd.join("main.plumb");
+            let mut made = vec!["plumb.toml"];
+            if !main.exists() {
+                let _ = std::fs::write(&main, format!("fn main() {{\n  print(\"hello from {}\")\n}}\n", name));
+                made.push("main.plumb");
+            }
+            println!("created {}: project \"{}\"\nrun it: plumb run main.plumb", made.join(", "), name);
             Some(ExitCode::SUCCESS)
         }
+        "new" => fail("`plumb new` is now `plumb init`, run inside the project's directory: mkdir shop && cd shop && plumb init".into()),
         "add" => {
             let opt = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
             let version = opt("--version");
@@ -586,17 +589,21 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
             let root = project::find_root(&cwd.join("x.plumb"));
             let mut m = match project::read_manifest(&root) {
                 Ok(Some(m)) => m,
-                Ok(None) => return fail("there is no plumb.toml here; create a project with `plumb new <name>`".into()),
+                Ok(None) => return fail("there is no plumb.toml here; make this directory a project with `plumb init`".into()),
                 Err(e) => return fail(e),
             };
-            m.deps.insert(name.clone(), project::Dep { git, version, path });
+            m.deps.insert(name.clone(), project::Dep { git: git.clone(), version, path: path.clone() });
             if let Err(e) = project::write_manifest(&root, &m) {
                 return fail(e);
             }
             match project::resolve(&root, false) {
                 Ok(dirs) => {
-                    println!("added {} ({} package(s) pinned in plumb.lock)
-use it: import {}", name, dirs.len(), name);
+                    // a package on this disk isn't pinned: it's used as it is
+                    if git.is_empty() {
+                        println!("added {} (from {}, used as it is: not pinned)\nuse it: import {}", name, path, name);
+                    } else {
+                        println!("added {} ({} package(s) pinned in plumb.lock)\nuse it: import {}", name, dirs.len(), name);
+                    }
                     Some(ExitCode::SUCCESS)
                 }
                 Err(e) => fail(e),

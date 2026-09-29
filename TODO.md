@@ -164,8 +164,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [ ] `expect` only directly inside `test`, not in helpers
     - [ ] slugs: no transliteration, no trimming of given characters
     - [ ] jwt errors untyped (expired vs forged)
-    - [ ] `plumb add --path` says "pinned in plumb.lock" but writes none;
-          `plumb fmt --check` exits 0 on a file that doesn't parse
+    - [x] `plumb add --path` says "pinned in plumb.lock" but writes none
+    - [ ] `plumb fmt --check` exits 0 on a file that doesn't parse
     - [ ] docs: cli `T?` without `= none`; `plumb doc String` shows
           `__find`; db sharing; route order; sql `none`
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
