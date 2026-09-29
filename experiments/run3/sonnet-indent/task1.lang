@@ -1,17 +1,17 @@
 // Task 1: Inventory tracking for a simple store.
 
 pub type Product
-  name: Text
+  name: String
   price: Decimal
   stock: Int
 
 pub type LowStockReport
-  low_stock_names: List<Text>
+  low_stock_names: List<String>
   average_stock: Float
 
 // Restocks the product with the given name by `amount`, mutating the
 // caller's list in place. Fails if no product with that name exists.
-fn restock(products: var List<Product>, name: Text, amount: Int) throws
+fn restock(products: var List<Product>, name: String, amount: Int) throws
   for i in 0..<products.length
     if products[i].name == name
       products[i].stock += amount

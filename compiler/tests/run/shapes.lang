@@ -12,7 +12,7 @@ fn area(shape: Shape) -> Float {
   }
 }
 
-fn label(shape: Shape) -> Text {
+fn label(shape: Shape) -> String {
   let a = area(shape)
   if a < 10.0 {
     return "small"

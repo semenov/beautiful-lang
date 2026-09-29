@@ -10,23 +10,23 @@
 
 pub type Match {
   // the matched text
-  text: Text
+  text: String
   start: Int
   end: Int
   // the parenthesized groups; none for a group that didn't take part
-  groups: List<Text?>
+  groups: List<String?>
 }
 
 pub builtin type Regex {
   // Does the whole text match?
-  fn matches(self, text: Text) -> Bool
+  fn matches(self, text: String) -> Bool
   // The first match anywhere in the text.
-  fn find(self, text: Text) -> Match?
-  fn find_all(self, text: Text) -> List<Match>
+  fn find(self, text: String) -> Match?
+  fn find_all(self, text: String) -> List<Match>
   // Replaces every match; "$1" in `replacement` is the first group, "$0" the match.
-  fn replace(self, text: Text, replacement: Text) -> Text
+  fn replace(self, text: String, replacement: String) -> String
   // The pieces between matches.
-  fn split(self, text: Text) -> List<Text>
+  fn split(self, text: String) -> List<String>
 }
 
-pub fn compile(pattern: Text) throws -> Regex
+pub fn compile(pattern: String) throws -> Regex

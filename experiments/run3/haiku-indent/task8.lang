@@ -3,13 +3,13 @@ import tasks
 import cli
 
 type Options
-  args: List<Text>
+  args: List<String>
 
 type LogLine
-  service: Text
+  service: String
   is_error: Bool
 
-fn parse_log_line(line: Text) -> LogLine?
+fn parse_log_line(line: String) -> LogLine?
   let parts = line.split(" ")
 
   if parts.length < 2
@@ -20,7 +20,7 @@ fn parse_log_line(line: Text) -> LogLine?
 
   return LogLine(service: service, is_error: is_error)
 
-fn process_worker(var jobs: Channel<Text>, var results: Shared<Map<Text, Int>>) throws
+fn process_worker(var jobs: Channel<String>, var results: Shared<Map<String, Int>>) throws
   for line in jobs
     if line.is_empty()
       continue
@@ -43,8 +43,8 @@ fn main() throws
 
   let log_file = opts.args[0]
 
-  let jobs = Channel<Text>(capacity: 100)
-  let results = Shared<Map<Text, Int>>({})
+  let jobs = Channel<String>(capacity: 100)
+  let results = Shared<Map<String, Int>>({})
 
   with group = try tasks.group()
     for i in 0..<4

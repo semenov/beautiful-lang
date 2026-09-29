@@ -9,7 +9,7 @@ type Account {
 type InsufficientFunds implements Error {
   account_id: AccountId
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "Account ${self.account_id.value} has insufficient funds"
   }
 }
@@ -17,7 +17,7 @@ type InsufficientFunds implements Error {
 type AccountNotFound implements Error {
   account_id: AccountId
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "Account ${self.account_id.value} not found"
   }
 }

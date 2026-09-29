@@ -2,7 +2,7 @@ import json
 import sql
 
 type Item {
-  name: Text
+  name: String
   price: Decimal
   qty: Int
 }
@@ -40,7 +40,7 @@ fn main() throws {
     print(err.message())
     0
   }
-  var m: Map<Decimal, Text> = {}
+  var m: Map<Decimal, String> = {}
   m[big] = "one and a half"
   print("${m[1.5] ?? "?"} ${json.schema<Item>()}")
 }

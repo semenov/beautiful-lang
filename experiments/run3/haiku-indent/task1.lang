@@ -2,17 +2,17 @@ import files
 import json
 
 pub type Product
-  name: Text
+  name: String
   price: Decimal
   stock: Int
 
-fn restock(var products: List<Product>, product_name: Text, amount: Int)
+fn restock(var products: List<Product>, product_name: String, amount: Int)
   for i in 0..<products.length
     if products[i].name == product_name
       products[i].stock += amount
       return
 
-fn low_stock_products(products: List<Product>) -> List<Text>
+fn low_stock_products(products: List<Product>) -> List<String>
   let low = products.filter(p => p.stock < 5)
   let sorted = low.sorted_by(p => p.stock)
   return sorted.map(p => p.name)

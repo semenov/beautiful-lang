@@ -122,7 +122,7 @@ Changing a value in place is done by a `mutating` method on your own type:
 - **Records, enums with data, exhaustive `match`.**
 - **Automatic equality and hashing.** `==` and hashing are structural for
   every type except functions and handles. Any record can be a `Map` key or a
-  `Set` element. Ordering (`<`) is built in only for numbers, `Text` and
+  `Set` element. Ordering (`<`) is built in only for numbers, `String` and
   time. Anything else is sorted with `sort_by(x => x.key)`.
 - **Generics without bounds.** `<T>` means "any type, the same one
   everywhere." It doesn't need bounds: `==`, hashing and `sort_by` work for
@@ -252,7 +252,7 @@ used result is always a mutation or an action. The rule also catches the
 
 - A function that can fail says `throws` (without a list of types). Every call
   to it starts with `try`.
-- `Error` is an interface (`fn message(self) -> Text`) that any record can
+- `Error` is an interface (`fn message(self) -> String`) that any record can
   implement. Handling checks the type: `if err is NotFound`.
 - **`try` covers the whole expression after it** (like Swift): in
   `try encoding.from_hex(t).text()` both calls may fail. The reader still
@@ -477,8 +477,8 @@ decode key naming, converting between interface combinations (see
   the destination as `Storage`, so the caller loses its concrete type
   (`FileStorage`). Options: generics with interface bounds (removed earlier),
   or accept it.
-- **Text representation:** `split`/`lines`/`words` allocate every piece
+- **String representation:** `split`/`lines`/`words` allocate every piece
   (5 million small allocations in the `words` benchmark, where Go returns
-  views into the original text). Making `Text` a view (pointer + length +
+  views into the original text). Making `String` a view (pointer + length +
   owner) would make slicing free, at the cost of 24 bytes per value.
 

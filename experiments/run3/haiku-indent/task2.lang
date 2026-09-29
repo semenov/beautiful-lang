@@ -1,14 +1,14 @@
 type Person
-  name: Text
+  name: String
   age: Int
 
 type ParseError implements Error
-  message: Text
+  message: String
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return self.message
 
-fn parse_csv(text: Text) throws -> List<Person>
+fn parse_csv(text: String) throws -> List<Person>
   let lines = text.lines()
 
   if lines.is_empty()

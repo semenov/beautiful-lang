@@ -11,7 +11,7 @@ type Account {
 type AccountNotFound implements Error {
   id: AccountId
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "account ${self.id.value} does not exist"
   }
 }
@@ -21,7 +21,7 @@ type InsufficientFunds implements Error {
   balance: Decimal
   amount: Decimal
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "account ${self.id.value} has ${self.balance} but the transfer needs ${self.amount}"
   }
 }
@@ -29,7 +29,7 @@ type InsufficientFunds implements Error {
 type InvalidAmount implements Error {
   amount: Decimal
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "transfer amount must be positive, got ${self.amount}"
   }
 }

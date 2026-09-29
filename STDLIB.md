@@ -15,25 +15,25 @@ which path failed and why.
 
 ```
 // The whole file as text.
-pub fn read(path: Text) throws -> Text
+pub fn read(path: String) throws -> String
 // The whole file as bytes.
-pub fn read_bytes(path: Text) throws -> Bytes
+pub fn read_bytes(path: String) throws -> Bytes
 // Creates or replaces the file.
-pub fn write(path: Text, text: Text) throws
-pub fn write_bytes(path: Text, data: Bytes) throws
+pub fn write(path: String, text: String) throws
+pub fn write_bytes(path: String, data: Bytes) throws
 // Adds to the end of the file, creating it if needed.
-pub fn append(path: Text, text: Text) throws
-pub fn exists(path: Text) -> Bool
-pub fn is_dir(path: Text) -> Bool
+pub fn append(path: String, text: String) throws
+pub fn exists(path: String) -> Bool
+pub fn is_dir(path: String) -> Bool
 // Names of the entries in a directory, sorted.
-pub fn list(dir: Text) throws -> List<Text>
+pub fn list(dir: String) throws -> List<String>
 // Every file under a directory, at any depth, as paths starting with
 // `dir` ("src/a/b.lang"; for "." just "a/b.lang"), sorted. Symlinked
 // directories aren't followed.
-pub fn walk(dir: Text) throws -> List<Text>
+pub fn walk(dir: String) throws -> List<String>
 // The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
 // "logs/2026-*.{log,gz}" (see `path.matches`).
-pub fn glob(pattern: Text) throws -> List<Text>
+pub fn glob(pattern: String) throws -> List<String>
 ```
 
 ## path
@@ -43,30 +43,30 @@ disk; reading and writing is in `files`.
 
 ```
 // "a/b" + "c.txt" -> "a/b/c.txt"; an absolute `name` replaces `dir`
-pub fn join(dir: Text, name: Text) -> Text
+pub fn join(dir: String, name: String) -> String
 // "a/b/c.txt" -> "c.txt"
-pub fn name(path: Text) -> Text
+pub fn name(path: String) -> String
 // "a/b/c.txt" -> "a/b"
-pub fn parent(path: Text) -> Text
+pub fn parent(path: String) -> String
 // "a/b/c.txt" -> "txt"; none without a dot
-pub fn extension(path: Text) -> Text?
+pub fn extension(path: String) -> String?
 
 // "a/b/c.txt" -> "c"
-pub fn stem(path: Text) -> Text
+pub fn stem(path: String) -> String
 
-pub fn is_absolute(path: Text) -> Bool
+pub fn is_absolute(path: String) -> Bool
 
 // "/a/b/c.txt" -> ["a", "b", "c.txt"]
-pub fn parts(path: Text) -> List<Text>
+pub fn parts(path: String) -> List<String>
 
 // Removes "." and resolves "..": "a/./b/../c" -> "a/c"
-pub fn clean(path: Text) -> Text
+pub fn clean(path: String) -> String
 
 // Whether a path matches a glob pattern: `*` is any text within one part of
 // the path, `?` one character, `**` any number of parts (including none),
 // `[a-z]` / `[!a-z]` one character from a set, `{a,b}` either text.
 //   matches("src/net/tcp.lang", pattern: "src/**/*.lang") == true
-pub fn matches(path: Text, pattern: Text) -> Bool
+pub fn matches(path: String, pattern: String) -> Bool
 ```
 
 ## io
@@ -100,14 +100,14 @@ pub builtin type Stream {
   // Exactly `count` bytes; an error if the stream ends first.
   fn read_exact(self, count: Int) throws -> Bytes
   // The next line without "\n" (or "\r\n"); none at the end.
-  fn read_line(self) throws -> Text?
+  fn read_line(self) throws -> String?
   // Everything up to the end.
   fn read_all(self) throws -> Bytes
   fn write(self, data: Bytes) throws
-  fn write_text(self, text: Text) throws
+  fn write_text(self, text: String) throws
   // For network connections, the other side's address: "93.184.215.14:80";
   // empty for other streams.
-  fn peer(self) -> Text
+  fn peer(self) -> String
   // Writes what is still buffered and closes the stream.
   fn close(self) throws
 }
@@ -118,7 +118,7 @@ pub fn stdout() -> Stream
 pub fn stderr() -> Stream
 
 // The next line of standard input; none at the end.
-pub fn read_line() throws -> Text?
+pub fn read_line() throws -> String?
 // All of standard input.
 pub fn read_all() throws -> Bytes
 
@@ -135,14 +135,14 @@ process: this program, and running other programs.
 pub type Output {
   // the exit status: 0 means success
   status: Int
-  stdout: Text
-  stderr: Text
+  stdout: String
+  stderr: String
 }
 
 // Runs a program and waits for it to finish. The arguments are passed as
 // they are: there is no shell, so nothing needs quoting. A program that
 // exits with a non-zero status is not an error: check `output.status`.
-pub fn run(program: Text, args: List<Text>) throws -> Output
+pub fn run(program: String, args: List<String>) throws -> Output
 
 // A running program; get one with `with p = try process.start(...)`.
 // Reading reads its output (stdout); writing writes to its input (stdin).
@@ -156,10 +156,10 @@ pub fn run(program: Text, args: List<Text>) throws -> Output
 //   }
 pub builtin type Process {
   fn read(self, max: Int) throws -> Bytes
-  fn read_line(self) throws -> Text?
+  fn read_line(self) throws -> String?
   fn read_all(self) throws -> Bytes
   fn write(self, data: Bytes) throws
-  fn write_text(self, text: Text) throws
+  fn write_text(self, text: String) throws
   // Tells the program there is no more input.
   fn close_input(self) throws
   // Waits for the program to finish and returns its exit status. Output it
@@ -169,18 +169,18 @@ pub builtin type Process {
 }
 
 // Starts a program without waiting for it (see `run` for the arguments).
-pub fn start(program: Text, args: List<Text>) throws -> Process
+pub fn start(program: String, args: List<String>) throws -> Process
 
 // A program to run with more settings than `run` takes.
 pub type Command {
-  program: Text
-  args: List<Text> = []
+  program: String
+  args: List<String> = []
   // the directory to run it in; "" for the current one
-  dir: Text = ""
+  dir: String = ""
   // environment variables it gets on top of this program's
-  env: Map<Text, Text> = {}
+  env: Map<String, String> = {}
   // given as its standard input
-  input: Text = ""
+  input: String = ""
 }
 
 // Runs a `Command` to the end, like `run`:
@@ -189,10 +189,10 @@ pub fn run_command(command: Command) throws -> Output
 
 // Where a program is on PATH ("/usr/bin/git"), like `which`; none if it
 // isn't installed.
-pub fn find(program: Text) -> Text?
+pub fn find(program: String) -> String?
 
 // The command-line arguments, without the program's name.
-pub fn args() -> List<Text>
+pub fn args() -> List<String>
 
 // Stops the program with an exit status.
 pub fn exit(status: Int) -> Never
@@ -203,7 +203,7 @@ pub fn exit(status: Int) -> Never
 env: environment variables.
 
 ```
-pub fn get(name: Text) -> Text?
+pub fn get(name: String) -> String?
 
 // Reads environment variables into a record: the field `database_url` comes
 // from DATABASE_URL. Numbers and true/false are converted; a missing variable
@@ -214,7 +214,7 @@ pub fn decode<T>() throws -> T
 // starts a comment; values may be in "double" quotes, with \n, or 'single'
 // quotes, as they are). Variables already set are kept: the real
 // environment wins. A missing file is fine. Call it at the start of `main`.
-pub fn load(path: Text) throws
+pub fn load(path: String) throws
 ```
 
 ## cli
@@ -223,11 +223,11 @@ cli: command-line arguments into a record.
 
 ```
 type Options {
-  input: Text              // --input notes.txt (required)
+  input: String              // --input notes.txt (required)
   top: Int = 10            // --top 5 (optional: it has a default)
   verbose: Bool = false    // --verbose (a flag without a value)
-  output_dir: Text?        // --output-dir out (optional)
-  args: List<Text> = []    // everything that isn't an option
+  output_dir: String?        // --output-dir out (optional)
+  args: List<String> = []    // everything that isn't an option
 }
 let opts = try cli.decode<Options>()
 ```
@@ -258,49 +258,49 @@ program gives plain text.
 // Whether standard output is a terminal (not a file or a pipe).
 pub fn is_terminal() -> Bool
 
-pub fn bold(text: Text) -> Text
-pub fn dim(text: Text) -> Text
-pub fn italic(text: Text) -> Text
-pub fn underline(text: Text) -> Text
-pub fn red(text: Text) -> Text
-pub fn green(text: Text) -> Text
-pub fn yellow(text: Text) -> Text
-pub fn blue(text: Text) -> Text
-pub fn magenta(text: Text) -> Text
-pub fn cyan(text: Text) -> Text
-pub fn gray(text: Text) -> Text
+pub fn bold(text: String) -> String
+pub fn dim(text: String) -> String
+pub fn italic(text: String) -> String
+pub fn underline(text: String) -> String
+pub fn red(text: String) -> String
+pub fn green(text: String) -> String
+pub fn yellow(text: String) -> String
+pub fn blue(text: String) -> String
+pub fn magenta(text: String) -> String
+pub fn cyan(text: String) -> String
+pub fn gray(text: String) -> String
 
 // The text without color codes.
-pub fn strip(text: Text) -> Text
+pub fn strip(text: String) -> String
 
 // How many columns the text takes on screen: wide characters (Chinese,
 // emoji) take 2, color codes none.
-pub fn width(text: Text) -> Int
+pub fn width(text: String) -> Int
 
 // The text padded with spaces to `columns` on screen.
-pub fn pad(text: Text, columns: Int) -> Text
+pub fn pad(text: String, columns: Int) -> String
 
 // Rows as aligned columns; the first row is the header (underlined when
 // colors are on). Lines end without trailing spaces.
-pub fn table(rows: List<List<Text>>) -> Text
+pub fn table(rows: List<List<String>>) -> String
 
 // A size in bytes for people: 512 B, 1.5 KB, 23.4 MB, 1.2 GB (1 KB = 1024 B).
-pub fn size(bytes: Int) -> Text
+pub fn size(bytes: Int) -> String
 
 // Asks a question on the terminal and returns the answer (without the line
 // break); an error if the input has ended.
-pub fn ask(question: Text) throws -> Text
+pub fn ask(question: String) throws -> String
 
 // Asks until the answer is yes or no (y / n; an empty answer is no).
-pub fn confirm(question: Text) throws -> Bool
+pub fn confirm(question: String) throws -> Bool
 
 // Asks without showing what's typed: passwords.
-pub fn secret(question: Text) throws -> Text
+pub fn secret(question: String) throws -> String
 
 // Draws a progress line on standard error: [#########.....]  60% label.
 // Call it as work advances; at `done == total` it ends the line. Nothing is
 // drawn when standard error isn't a terminal.
-pub fn progress(done: Int, total: Int, label: Text)
+pub fn progress(done: Int, total: Int, label: String)
 ```
 
 ## log
@@ -309,10 +309,10 @@ log: messages for people running the program, on standard error, with the
 time: `2026-09-29T12:00:00Z INFO server started`.
 
 ```
-pub fn debug(message: Text)
-pub fn info(message: Text)
-pub fn warn(message: Text)
-pub fn error(message: Text)
+pub fn debug(message: String)
+pub fn info(message: String)
+pub fn warn(message: String)
+pub fn error(message: String)
 ```
 
 ## time
@@ -329,7 +329,7 @@ pub type Duration {
   pub fn times(self, n: Int) -> Duration
   pub fn is_longer_than(self, other: Duration) -> Bool
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
-  pub fn text(self) -> Text
+  pub fn text(self) -> String
 }
 
 pub fn minutes(n: Int) -> Duration
@@ -339,7 +339,7 @@ pub fn hours(n: Int) -> Duration
 pub fn days(n: Int) -> Duration
 
 // "1h30m", "90s", "1.5s", "250ms", "10us" (or µs), "10ns", "2d", "-5m".
-pub fn parse_duration(text: Text) throws -> Duration
+pub fn parse_duration(text: String) throws -> Duration
 
 pub fn seconds(n: Int) -> Duration
 
@@ -390,10 +390,10 @@ pub type DateTime {
   minute: Int
   second: Int
   // "2026-09-29T12:00:00Z"
-  pub fn iso(self) -> Text
+  pub fn iso(self) -> String
   // The same moment on the wall clock of a time zone:
   //   let berlin = try moment.in_zone("Europe/Berlin")   // 14:05 UTC -> 16:05 +02:00
-  pub fn in_zone(self, zone: Text) throws -> Zoned
+  pub fn in_zone(self, zone: String) throws -> Zoned
   // The calendar day.
   pub fn date(self) -> Date
   pub fn weekday(self) -> Weekday
@@ -402,7 +402,7 @@ pub type DateTime {
   // year, %e day without zero, %I hour 1-12, %p AM/PM, %B September, %b Sep,
   // %A Tuesday, %a Tue, %j day of the year, %s Unix seconds, %z +0000,
   // %Z UTC, %% a percent sign.
-  pub fn format(self, pattern: Text) -> Text
+  pub fn format(self, pattern: String) -> String
   pub fn is_before(self, other: DateTime) -> Bool
   pub fn is_after(self, other: DateTime) -> Bool
   // The same day and time `n` months later; the day is clamped to the
@@ -417,7 +417,7 @@ pub type DateTime {
 
 // Reads "2026-09-29", "2026-09-29T12:30:00Z" or "2026-09-29 12:30:00"
 // (UTC; an offset like +02:00 is converted to UTC).
-pub fn parse_iso(text: Text) throws -> DateTime
+pub fn parse_iso(text: String) throws -> DateTime
 
 // The current date and time in UTC.
 pub fn utc_now() -> DateTime
@@ -444,7 +444,7 @@ pub type Date {
   month: Int
   day: Int
   // "2026-09-29"
-  pub fn iso(self) -> Text
+  pub fn iso(self) -> String
   // Days since 1970-01-01 (negative before).
   pub fn to_days(self) -> Int
   pub fn plus_days(self, n: Int) -> Date
@@ -457,20 +457,20 @@ pub type Date {
   pub fn is_after(self, other: Date) -> Bool
   // This day at a time of day, in UTC.
   pub fn at(self, hour: Int, minute: Int, second: Int) -> DateTime
-  pub fn format(self, pattern: Text) -> Text
+  pub fn format(self, pattern: String) -> String
 }
 
 // Today in UTC.
 pub fn today() -> Date
 
 // "2026-09-29"
-pub fn parse_date(text: Text) throws -> Date
+pub fn parse_date(text: String) throws -> Date
 
 // Reads a date and time written as `pattern` says (see `DateTime.format`):
 //   try time.parse("29/09/2026 14:05", pattern: "%d/%m/%Y %H:%M")
 // Fields the pattern doesn't have are 0 (or 1 for month and day); with %z
 // the result is converted to UTC.
-pub fn parse(text: Text, pattern: Text) throws -> DateTime
+pub fn parse(text: String, pattern: String) throws -> DateTime
 
 // A moment as the wall clock of a time zone shows it.
 pub type Zoned {
@@ -483,13 +483,13 @@ pub type Zoned {
   // seconds east of UTC: 7200 for Berlin in summer, -18000 for New York in winter
   offset: Int
   // "Europe/Berlin"
-  zone: Text
+  zone: String
   // "CEST"
-  abbreviation: Text
+  abbreviation: String
   // "2026-09-29T16:05:09+02:00"
-  pub fn iso(self) -> Text
+  pub fn iso(self) -> String
   // As `DateTime.format`; %z gives the offset (+0200), %Z the abbreviation.
-  pub fn format(self, pattern: Text) -> Text
+  pub fn format(self, pattern: String) -> String
   // The same moment in UTC.
   pub fn utc(self) -> DateTime
   pub fn date(self) -> Date
@@ -499,14 +499,14 @@ pub type Zoned {
 //   let meeting = try time.in_zone("Europe/Berlin", date: d, hour: 9, minute: 30)
 // A time skipped by a clock change moves forward; a repeated one takes
 // the first.
-pub fn in_zone(zone: Text, date: Date, hour: Int, minute: Int) throws -> DateTime
+pub fn in_zone(zone: String, date: Date, hour: Int, minute: Int) throws -> DateTime
 
 // Now, on the wall clock of `zone`.
-pub fn now_in(zone: Text) throws -> Zoned
+pub fn now_in(zone: String) throws -> Zoned
 
 // This machine's zone ("Europe/Berlin"): TZ, else the system setting,
 // else "UTC".
-pub fn local_zone() -> Text
+pub fn local_zone() -> String
 ```
 
 ## json
@@ -520,33 +520,33 @@ name under "type": {"type": "Circle", "radius": 2.0}.
 
 ```
 // The value as compact JSON.
-pub fn encode<T>(value: T) -> Text
+pub fn encode<T>(value: T) -> String
 // The value as indented JSON, for people.
-pub fn encode_pretty<T>(value: T) -> Text
+pub fn encode_pretty<T>(value: T) -> String
 
 // Reads JSON into a T, checking every field. A missing field is an error
 // unless it's optional (`T?`) or has a default. Extra fields are ignored.
 // Errors say where: `json: at $.users[2].age: expected a whole number`.
-pub fn decode<T>(text: Text) throws -> T
+pub fn decode<T>(text: String) throws -> T
 
 // A JSON Schema of T's JSON form: for describing data to other programs,
 // and for asking language models for typed answers (see the llm package).
 // Every field is listed as required (optional fields accept null), extra
 // fields are not allowed: the "strict" form OpenAI-style APIs want.
-pub fn schema<T>() -> Text
+pub fn schema<T>() -> String
 
 // JSON of a shape that isn't known in advance.
 pub enum Value {
   Null
   Bool(value: Bool)
   Number(value: Float)
-  String(value: Text)
+  String(value: String)
   Array(items: List<Value>)
-  Object(fields: Map<Text, Value>)
+  Object(fields: Map<String, Value>)
 }
 
 // Reads any JSON into a `Value`.
-pub fn parse(text: Text) throws -> Value
+pub fn parse(text: String) throws -> Value
 ```
 
 ## http
@@ -572,29 +572,29 @@ request.
 
 ```
 pub type Request {
-  method: Text
+  method: String
   // without the query: "/notes/7"
-  path: Text
+  path: String
   // header names in lower case
-  headers: Map<Text, Text>
+  headers: Map<String, String>
   body: Bytes
   // from the route pattern: "/notes/:id" gives "id"
-  params: Map<Text, Text> = {}
+  params: Map<String, String> = {}
   // from "?q=word&page=2"
-  query_params: Map<Text, Text> = {}
+  query_params: Map<String, String> = {}
   // A part of the path matched by `:name` in the route.
-  pub fn param(self, name: Text) -> Text?
+  pub fn param(self, name: String) -> String?
   // A value from the query: `?page=2` gives query("page") == "2".
-  pub fn query(self, name: Text) -> Text?
+  pub fn query(self, name: String) -> String?
   // A header, by its name in any case.
-  pub fn header(self, name: Text) -> Text?
+  pub fn header(self, name: String) -> String?
   // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> Text
+  pub fn text(self) throws -> String
   // A cookie the client sent.
-  pub fn cookie(self, name: Text) -> Text?
+  pub fn cookie(self, name: String) -> String?
   // The fields of an HTML form (application/x-www-form-urlencoded).
   // For forms with files, see `parts`.
-  pub fn form(self) throws -> Map<Text, Text>
+  pub fn form(self) throws -> Map<String, String>
   // The parts of a multipart/form-data body: form fields and uploaded
   // files. A field has `filename` none; `text()` reads its value.
   pub fn parts(self) throws -> List<Part>
@@ -602,27 +602,27 @@ pub type Request {
 
 // A part of a multipart form: a field or an uploaded file.
 pub type Part {
-  name: Text
+  name: String
   // the file's name, for uploads
-  filename: Text? = none
-  content_type: Text = "text/plain"
+  filename: String? = none
+  content_type: String = "text/plain"
   data: Bytes
-  pub fn text(self) throws -> Text
+  pub fn text(self) throws -> String
 }
 
 // A cookie to set with `Response.with_cookie`.
 pub type Cookie {
-  name: Text
-  value: Text
+  name: String
+  value: String
   // seconds until it expires; none: when the browser closes; 0: delete it now
   max_age: Int? = none
-  path: Text = "/"
+  path: String = "/"
   // not readable from JavaScript
   http_only: Bool = true
   // only over HTTPS
   secure: Bool = false
   // "Lax", "Strict" or "None"
-  same_site: Text = "Lax"
+  same_site: String = "Lax"
 }
 
 // How long a client request took, each from its start. Connections are
@@ -641,32 +641,32 @@ pub type Timing {
 pub type Response {
   status: Int
   body: Bytes
-  headers: Map<Text, Text> = {}
+  headers: Map<String, String> = {}
   // When set, the server sends this file as the body (see `file`).
-  file: Text = ""
+  file: String = ""
   // When set, the server calls it to write the body (see `stream`).
   writer: (fn(io.Stream) throws)? = none
   // Client responses: how long the parts of the request took.
   timing: Timing = Timing()
   // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> Text
+  pub fn text(self) throws -> String
   // A copy with one more header.
-  pub fn with_header(self, name: Text, value: Text) -> Response
+  pub fn with_header(self, name: String, value: String) -> Response
   // A copy that sets a cookie (several can be set).
   pub fn with_cookie(self, cookie: Cookie) -> Response
   // The cookies a client response sets, as name -> value.
-  pub fn cookies(self) -> Map<Text, Text>
+  pub fn cookies(self) -> Map<String, String>
 }
 
-pub fn text(status: Int, body: Text) -> Response
+pub fn text(status: Int, body: String) -> Response
 
-pub fn html(status: Int, body: Text) -> Response
+pub fn html(status: Int, body: String) -> Response
 
 // The value as JSON (see the `json` module).
 pub fn json<T>(status: Int, value: T) -> Response
 
 // Any bytes: `http.bytes(200, png, content_type: "image/png")`.
-pub fn bytes(status: Int, data: Bytes, content_type: Text) -> Response
+pub fn bytes(status: Int, data: Bytes, content_type: String) -> Response
 
 // A body written piece by piece while the client already receives it:
 // live events, big exports. Each write reaches the client at once.
@@ -685,16 +685,16 @@ pub fn bytes(status: Int, data: Bytes, content_type: Text) -> Response
 // The writer runs after the status and headers are sent, so an error in it
 // can't become a 500: it is logged and the connection is cut. When the
 // client goes away, the next write fails, which ends the writer.
-pub fn stream(status: Int, content_type: Text, writer: fn(io.Stream) throws) -> Response
+pub fn stream(status: Int, content_type: String, writer: fn(io.Stream) throws) -> Response
 
-pub fn redirect(to: Text) -> Response
+pub fn redirect(to: String) -> Response
 
 // A file from the disk. The server sends it straight from the disk
 // (sendfile), whatever its size; sets the content type from the extension;
 // answers 304 when the client has this version cached and serves parts
 // (`Range`) for resuming downloads and video. 404 if there is no such file;
 // for a directory, its index.html.
-pub fn file(path: Text) -> Response
+pub fn file(path: String) -> Response
 
 // Runs around every request: gets the request and `next` (the rest of the
 // chain: other middleware, then the route) and returns a response.
@@ -708,14 +708,14 @@ pub type Router {
   middleware: List<Middleware> = []
   // Adds middleware: the first added runs first (outermost).
   pub mutating fn use(m: Middleware)
-  pub mutating fn get(pattern: Text, handler: fn(Request) throws -> Response)
-  pub mutating fn post(pattern: Text, handler: fn(Request) throws -> Response)
-  pub mutating fn put(pattern: Text, handler: fn(Request) throws -> Response)
-  pub mutating fn delete(pattern: Text, handler: fn(Request) throws -> Response)
+  pub mutating fn get(pattern: String, handler: fn(Request) throws -> Response)
+  pub mutating fn post(pattern: String, handler: fn(Request) throws -> Response)
+  pub mutating fn put(pattern: String, handler: fn(Request) throws -> Response)
+  pub mutating fn delete(pattern: String, handler: fn(Request) throws -> Response)
   // Serves the files in `dir` under `prefix`: files("/static", dir: "public")
   // answers /static/css/site.css with public/css/site.css. Paths can't leave
   // `dir`, and hidden files (".env", ".git") are not served.
-  pub mutating fn files(prefix: Text, dir: Text)
+  pub mutating fn files(prefix: String, dir: String)
   // Finds the route for a request and runs its handler: 404 when no route
   // has this path, 405 when one has it for another method. A pattern part
   // `*name` matches the rest of the path. HEAD is answered by GET routes.
@@ -728,15 +728,15 @@ pub fn log_requests() -> Middleware
 // Middleware for calls from web pages on other sites (CORS): answers the
 // browser's OPTIONS question and marks responses as allowed for `origins`
 // (["*"] for any site).
-pub fn cors(origins: List<Text>) -> Middleware
+pub fn cors(origins: List<String>) -> Middleware
 
 // The content type for a file name: "a.png" -> "image/png".
-pub fn mime_type(path: Text) -> Text
+pub fn mime_type(path: String) -> String
 
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 // With a body: `var req = http.request("POST", "/notes")`, then
 // `req.body = "{\"title\": \"x\"}".bytes()`.
-pub fn request(method: Text, path: Text) -> Request
+pub fn request(method: String, path: String) -> Request
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
 // It logs "listening on http://localhost:<port>" when ready, and "stopped".
@@ -744,9 +744,9 @@ pub fn serve(router: Router, port: Int) throws
 
 // A request to send: http.send(http.ClientRequest(url: u, headers: {...}))
 pub type ClientRequest {
-  url: Text
-  method: Text = "GET"
-  headers: Map<Text, Text> = {}
+  url: String
+  method: String = "GET"
+  headers: Map<String, String> = {}
   // Without a "content-type" header, one starting with { or [ is sent as
   // JSON, other text as plain text.
   body: Bytes = Bytes()
@@ -760,13 +760,13 @@ pub type ClientRequest {
 
 pub fn send(request: ClientRequest) throws -> Response
 
-pub fn get(url: Text) throws -> Response
+pub fn get(url: String) throws -> Response
 
-pub fn post(url: Text, body: Text) throws -> Response
+pub fn post(url: String, body: String) throws -> Response
 
-pub fn put(url: Text, body: Text) throws -> Response
+pub fn put(url: String, body: String) throws -> Response
 
-pub fn delete(url: Text) throws -> Response
+pub fn delete(url: String) throws -> Response
 
 // Sends a request and returns as soon as the status and headers arrive; the
 // body is then read piece by piece: event streams, streamed answers of AI
@@ -780,11 +780,11 @@ pub fn open(request: ClientRequest) throws -> ResponseStream
 pub builtin type ResponseStream {
   fn status(self) -> Int
   // A header, by its name in any case.
-  fn header(self, name: Text) -> Text?
+  fn header(self, name: String) -> String?
   // Reading the body works as for `io.Stream`. An error at the end means
   // the body was cut off.
   fn read(self, max: Int) throws -> Bytes
-  fn read_line(self) throws -> Text?
+  fn read_line(self) throws -> String?
   fn read_all(self) throws -> Bytes
   // How long the request took up to the headers (`total` is filled in
   // once the body has been read).
@@ -796,7 +796,7 @@ pub builtin type ResponseStream {
 // Saves what `url` answers into the file `to`, without holding it in memory.
 // The response has the status and headers and an empty body. The file is
 // written only for a 2xx status.
-pub fn download(url: Text, to: Text) throws -> Response
+pub fn download(url: String, to: String) throws -> Response
 ```
 
 ## net
@@ -818,18 +818,18 @@ try net.serve(7000, conn => try echo(conn))     // a task per connection
 // A TCP connection is an `io.Stream`. Get one with
 // `with conn = try net.connect(...)`, or in the handler of `net.serve`
 // (which closes it when the handler returns).
-pub fn connect(host: Text, port: Int) throws -> io.Stream
+pub fn connect(host: String, port: Int) throws -> io.Stream
 
 // A TLS (encrypted) connection; the server's certificate is checked against
 // the system's trusted certificates and the host name. Reading and writing
 // work as for `connect`. (Serving TLS: put the program behind a proxy that
 // terminates TLS, such as nginx or a cloud load balancer.)
-pub fn connect_tls(host: Text, port: Int) throws -> io.Stream
+pub fn connect_tls(host: String, port: Int) throws -> io.Stream
 
 // Switches an open connection to TLS, for protocols that start plain and
 // then upgrade (Postgres, SMTP's STARTTLS). `host` is the name the
 // certificate must be for.
-pub fn start_tls(conn: io.Stream, host: Text) throws
+pub fn start_tls(conn: io.Stream, host: String) throws
 
 // Accepts connections on `port` until the program is stopped (Ctrl-C),
 // running `handler` for each in its own task. An error from a handler is
@@ -839,14 +839,14 @@ pub fn serve(port: Int, handler: fn(io.Stream) throws) throws
 pub type Datagram {
   data: Bytes
   // "host:port" of the sender
-  from: Text
+  from: String
 }
 
 // A UDP socket. Get one with `with sock = try net.udp(port)`; port 0 picks
 // a free one.
 pub builtin type UdpSocket {
   // Sends to "host:port".
-  fn send_to(self, data: Bytes, address: Text) throws
+  fn send_to(self, data: Bytes, address: String) throws
   // Waits for the next datagram.
   fn receive(self) throws -> Datagram
   // The local port.
@@ -872,7 +872,7 @@ can't happen: values go in as parameters.
 - Parameters are written as plain values: `[name, 36, true]` becomes a
 
 ```
-`List<Value>` by itself (Int, Float, Text, Bool, Bytes, new types over
+`List<Value>` by itself (Int, Float, String, Bool, Bytes, new types over
 them, and `none`).
 ```
 
@@ -881,14 +881,14 @@ them, and `none`).
 ```
 // SQL text. Only a literal becomes a `Query`; a database package reads the
 // text with `query.value`.
-pub type Query = Text
+pub type Query = String
 
 // A parameter or column value.
 pub enum Value {
   Null
   Integer(value: Int)
   Real(value: Float)
-  String(value: Text)
+  String(value: String)
   Blob(value: Bytes)
   Boolean(value: Bool)
 }
@@ -897,7 +897,7 @@ pub enum Value {
 // by name. Numbers and true/false convert as in `json.decode`; Null is
 // "missing" (fine for optional fields and fields with defaults). For
 // database packages.
-pub fn decode<T>(columns: List<Text>, rows: List<List<Value>>) throws -> List<T>
+pub fn decode<T>(columns: List<String>, rows: List<List<Value>>) throws -> List<T>
 ```
 
 ## db
@@ -914,7 +914,7 @@ with conn = try db.open("app.db") {
 
 SQL is always a literal with `?` for values: building SQL from pieces of
 text is a compile error, so SQL injection can't happen. Parameters can be
-Int, Float, Text, Bool and Bytes, and new types over them (see `sql`).
+Int, Float, String, Bool and Bytes, and new types over them (see `sql`).
 `query<T>` fills records by column name (like `json.decode`).
 
 ```
@@ -935,7 +935,7 @@ pub builtin type Connection {
 
 // Opens (or creates) a database file; ":memory:" for one that lives only
 // while the program runs.
-pub fn open(path: Text) throws -> Connection
+pub fn open(path: String) throws -> Connection
 ```
 
 ## crypto
@@ -961,10 +961,10 @@ pub fn equal(a: Bytes, b: Bytes) -> Bool
 
 // A salted, slow hash of a password, safe to store:
 // "pbkdf2-sha256$210000$<salt>$<hash>".
-pub fn hash_password(password: Text) -> Text
+pub fn hash_password(password: String) -> String
 
 // Checks a password against the result of `hash_password`.
-pub fn verify_password(password: Text, stored: Text) -> Bool
+pub fn verify_password(password: String, stored: String) -> Bool
 ```
 
 ## encoding
@@ -974,11 +974,11 @@ encoding: bytes as text and back. (Bytes to text: `data.hex()`,
 
 ```
 // "68656c6c6f" -> the bytes of "hello"
-pub fn from_hex(text: Text) throws -> Bytes
+pub fn from_hex(text: String) throws -> Bytes
 // Standard or URL-safe base64, with or without padding.
-pub fn from_base64(text: Text) throws -> Bytes
+pub fn from_base64(text: String) throws -> Bytes
 // URL-safe base64 without padding (tokens, JWT).
-pub fn base64_url(data: Bytes) -> Text
+pub fn base64_url(data: Bytes) -> String
 ```
 
 ## random
@@ -995,12 +995,12 @@ pub fn pick<T>(items: List<T>) -> T?
 // The items in a random order.
 pub fn shuffle<T>(items: List<T>) -> List<T>
 // Random letters and digits, for ids and secrets.
-pub fn token(length: Int) -> Text
+pub fn token(length: Int) -> String
 // A random UUID (version 4): "3f0b6c5e-...".
-pub fn uuid() -> Text
+pub fn uuid() -> String
 // A UUID that starts with the time (version 7): ids made later sort later,
 // which keeps database indexes compact. Use it for primary keys.
-pub fn uuid_v7() -> Text
+pub fn uuid_v7() -> String
 ```
 
 ## regex
@@ -1020,26 +1020,26 @@ Extended regular expressions (POSIX), plus \d \w \s (and \D \W \S);
 ```
 pub type Match {
   // the matched text
-  text: Text
+  text: String
   start: Int
   end: Int
   // the parenthesized groups; none for a group that didn't take part
-  groups: List<Text?>
+  groups: List<String?>
 }
 
 pub builtin type Regex {
   // Does the whole text match?
-  fn matches(self, text: Text) -> Bool
+  fn matches(self, text: String) -> Bool
   // The first match anywhere in the text.
-  fn find(self, text: Text) -> Match?
-  fn find_all(self, text: Text) -> List<Match>
+  fn find(self, text: String) -> Match?
+  fn find_all(self, text: String) -> List<Match>
   // Replaces every match; "$1" in `replacement` is the first group, "$0" the match.
-  fn replace(self, text: Text, replacement: Text) -> Text
+  fn replace(self, text: String, replacement: String) -> String
   // The pieces between matches.
-  fn split(self, text: Text) -> List<Text>
+  fn split(self, text: String) -> List<String>
 }
 
-pub fn compile(pattern: Text) throws -> Regex
+pub fn compile(pattern: String) throws -> Regex
 ```
 
 ## csv
@@ -1049,15 +1049,15 @@ inside quoted fields).
 
 ```
 // Rows of fields.
-pub fn parse(text: Text) throws -> List<List<Text>>
+pub fn parse(text: String) throws -> List<List<String>>
 
 // Rows as records: the first row names the columns, which are matched to
 // fields by name. Numbers and true/false are converted; an empty field is
 // "missing" (fine for optional fields and fields with defaults).
-pub fn decode<T>(text: Text) throws -> List<T>
+pub fn decode<T>(text: String) throws -> List<T>
 
 // Rows to CSV text, quoting fields where needed.
-pub fn encode(rows: List<List<Text>>) -> Text
+pub fn encode(rows: List<List<String>>) -> String
 ```
 
 ## xml
@@ -1078,39 +1078,39 @@ prefix are kept whole: "soap:Envelope".
 
 ```
 pub type Element {
-  name: Text
-  attributes: Map<Text, Text> = {}
+  name: String
+  attributes: Map<String, String> = {}
   children: List<Node> = []
-  pub fn attribute(self, name: Text) -> Text?
+  pub fn attribute(self, name: String) -> String?
   // The first child element with this name.
-  pub fn child(self, name: Text) -> Element?
+  pub fn child(self, name: String) -> Element?
   // The text of the first child element with this name.
-  pub fn child_text(self, name: Text) -> Text?
+  pub fn child_text(self, name: String) -> String?
   // The child elements, without the text between them.
   pub fn elements(self) -> List<Element>
-  pub fn elements_named(self, name: Text) -> List<Element>
+  pub fn elements_named(self, name: String) -> List<Element>
   // All the text inside, from every level: <p>a <b>b</b></p> gives "a b".
-  pub fn text(self) -> Text
+  pub fn text(self) -> String
   // A copy with one more child element (for building documents).
   pub fn add(self, element: Element) -> Element
   // A copy with text added at the end.
-  pub fn add_text(self, text: Text) -> Element
+  pub fn add_text(self, text: String) -> Element
 }
 
 pub enum Node {
   ElementNode(element: Element)
-  TextNode(text: Text)
+  TextNode(text: String)
 }
 
 // Reads a document; errors say where: `xml: line 3: the closing tag doesn't
 // match the open element`.
-pub fn parse(text: Text) throws -> Element
+pub fn parse(text: String) throws -> Element
 
 // The element as XML text, without the `<?xml ...?>` line.
-pub fn render(element: Element) -> Text
+pub fn render(element: Element) -> String
 
 // Text safe inside an element or a quoted attribute: `<` becomes `&lt;` etc.
-pub fn escape(text: Text) -> Text
+pub fn escape(text: String) -> String
 ```
 
 ## url
@@ -1119,28 +1119,28 @@ url: parts of URLs, and percent-encoding.
 
 ```
 pub type Url {
-  scheme: Text
-  host: Text
+  scheme: String
+  host: String
   port: Int?
-  path: Text
-  query: Map<Text, Text>
-  fragment: Text?
+  path: String
+  query: Map<String, String>
+  fragment: String?
   // "postgres://ada:secret@db:5432/app": "ada" and "secret" (decoded)
-  user: Text? = none
-  password: Text? = none
+  user: String? = none
+  password: String? = none
 }
 
 // "https://example.com:8080/a/b?x=1#top"
-pub fn parse(text: Text) throws -> Url
+pub fn parse(text: String) throws -> Url
 
 // Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"
-pub fn encode(text: Text) -> Text
+pub fn encode(text: String) -> String
 
 // "a%20b" -> "a b"
-pub fn decode(text: Text) throws -> Text
+pub fn decode(text: String) throws -> String
 
 // {"q": "a b", "page": "2"} -> "q=a%20b&page=2"
-pub fn query_text(params: Map<Text, Text>) -> Text
+pub fn query_text(params: Map<String, String>) -> String
 ```
 
 ## zlib
@@ -1158,10 +1158,10 @@ pub fn inflate(data: Bytes) throws -> Bytes
 
 // A .gz file as a stream (see `io`): reading gives the uncompressed data,
 // so `read_line` reads a compressed log line by line.
-pub fn open_gzip(path: Text) throws -> io.Stream
+pub fn open_gzip(path: String) throws -> io.Stream
 // Creates a .gz file: what you write is compressed. Closing it (the end of
 // `with`) writes the end of the file.
-pub fn create_gzip(path: Text) throws -> io.Stream
+pub fn create_gzip(path: String) throws -> io.Stream
 ```
 
 ## math
@@ -1198,7 +1198,7 @@ Types and functions available in every file.
 builtin type Int {
   fn to_float(self) -> Float
   fn to_decimal(self) -> Decimal
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   fn div(self, by: Int) -> Int
   fn abs(self) -> Int
   fn pow(self, exponent: Int) -> Int
@@ -1216,9 +1216,9 @@ builtin type Float {
   fn round(self) -> Int
   fn floor(self) -> Int
   fn ceil(self) -> Int
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   // With exactly `decimals` digits after the point: 3.14159.format(2) == "3.14"
-  fn format(self, decimals: Int) -> Text
+  fn format(self, decimals: Int) -> String
   fn abs(self) -> Float
   fn pow(self, exponent: Float) -> Float
   fn sqrt(self) -> Float
@@ -1238,41 +1238,41 @@ builtin type Decimal {
   fn abs(self) -> Decimal
   fn to_float(self) -> Float
   // "19.99"
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   // Rounded to `places` digits: 2.5.format(2) == "2.50"
-  fn format(self, places: Int) -> Text
+  fn format(self, places: Int) -> String
 }
 
-fn __decimal(text: Text) -> Decimal
+fn __decimal(text: String) -> Decimal
 
 builtin type Bool {
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
 }
 
-builtin type Text {
+builtin type String {
   length: Int
   fn is_empty(self) -> Bool
   fn byte_length(self) -> Int
-  fn lower(self) -> Text
-  fn upper(self) -> Text
-  fn trim(self) -> Text
-  fn split(self, separator: Text) -> List<Text>
-  fn lines(self) -> List<Text>
-  fn words(self) -> List<Text>
-  fn chars(self) -> List<Text>
-  fn contains(self, part: Text) -> Bool
-  fn starts_with(self, prefix: Text) -> Bool
-  fn ends_with(self, suffix: Text) -> Bool
-  fn replace(self, old: Text, new: Text) -> Text
-  fn slice(self, from: Int, to: Int) -> Text
-  fn repeat(self, times: Int) -> Text
-  fn pad_start(self, width: Int, fill: Text) -> Text
-  fn pad_end(self, width: Int, fill: Text) -> Text
+  fn lower(self) -> String
+  fn upper(self) -> String
+  fn trim(self) -> String
+  fn split(self, separator: String) -> List<String>
+  fn lines(self) -> List<String>
+  fn words(self) -> List<String>
+  fn chars(self) -> List<String>
+  fn contains(self, part: String) -> Bool
+  fn starts_with(self, prefix: String) -> Bool
+  fn ends_with(self, suffix: String) -> Bool
+  fn replace(self, old: String, new: String) -> String
+  fn slice(self, from: Int, to: Int) -> String
+  fn repeat(self, times: Int) -> String
+  fn pad_start(self, width: Int, fill: String) -> String
+  fn pad_end(self, width: Int, fill: String) -> String
   fn to_int(self) throws -> Int
   fn to_float(self) throws -> Float
   // "19.99" -> 19.99 exactly
   fn to_decimal(self) throws -> Decimal
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   // The text as UTF-8 bytes.
   fn bytes(self) -> Bytes
 }
@@ -1283,19 +1283,19 @@ builtin type Bytes {
   length: Int
   fn is_empty(self) -> Bool
   // The text these bytes encode (UTF-8); an error if they aren't valid UTF-8.
-  fn text(self) throws -> Text
+  fn text(self) throws -> String
   fn slice(self, from: Int, to: Int) -> Bytes
   fn concat(self, other: Bytes) -> Bytes
   fn index_of(self, part: Bytes) -> Int?
-  fn hex(self) -> Text
-  fn base64(self) -> Text
+  fn hex(self) -> String
+  fn base64(self) -> String
   fn to_list(self) -> List<Int>
   // An unsigned big-endian number of `size` bytes (1-8) at `offset`
   // (network protocols).
   fn int_at(self, offset: Int, size: Int) -> Int
   mutating fn append(byte: Int)
   mutating fn append_all(other: Bytes)
-  mutating fn append_text(text: Text)
+  mutating fn append_text(text: String)
   // Adds `value` as `size` big-endian bytes.
   mutating fn append_int(value: Int, size: Int)
 }
@@ -1340,7 +1340,7 @@ builtin type List<T> {
   fn max(self) -> T?
   fn min_by<K>(self, key: fn(T) throws -> K) rethrows -> T?
   fn max_by<K>(self, key: fn(T) throws -> K) rethrows -> T?
-  fn join(self, separator: Text) -> Text
+  fn join(self, separator: String) -> String
   fn parallel_map<R>(self, limit: Int, transform: fn(T) throws -> R) rethrows -> List<R>
   fn group_by<K>(self, key: fn(T) throws -> K) rethrows -> Map<K, List<T>>
   fn count_each(self) -> Map<T, Int>
@@ -1411,12 +1411,12 @@ builtin type Channel<T> {
 
 // Raised in a task that was cancelled, at its next wait.
 type Cancelled implements Error {
-  fn message(self) -> Text
+  fn message(self) -> String
 }
 
 // Raised by `send` on a closed channel.
 type ChannelClosed implements Error {
-  fn message(self) -> Text
+  fn message(self) -> String
 }
 
 type Entry<K, V> {
@@ -1441,20 +1441,20 @@ type Pair<A, B> {
 }
 
 type Failure implements Error {
-  message: Text
+  message: String
   cause: Error? = none
-  fn message(self) -> Text
+  fn message(self) -> String
 }
 
 // A line to standard output.
-fn print(text: Text)
+fn print(text: String)
 // A line to standard error: errors and messages for people, kept apart from
 // the program's output (see also the `log` module).
-fn eprint(text: Text)
+fn eprint(text: String)
 fn min<T>(a: T, b: T) -> T
 fn max<T>(a: T, b: T) -> T
 fn assert(condition: Bool)
-fn panic(message: Text) -> Never
+fn panic(message: String) -> Never
 
 fn __list_with_capacity<T>(capacity: Int) -> List<T>
 fn __less<T>(a: T, b: T) -> Bool

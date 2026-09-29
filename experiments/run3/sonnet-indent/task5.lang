@@ -5,12 +5,12 @@ import json
 
 pub type Note
   id: Int
-  title: Text
-  text: Text
+  title: String
+  text: String
 
 pub type NewNote
-  title: Text
-  text: Text
+  title: String
+  text: String
 
 // Bundles the two pieces of shared mutable state the handlers need, so each
 // handler function still only takes two arguments (the store and the

@@ -6,17 +6,17 @@ import tasks
 import time
 
 type GithubUser {
-  login: Text
-  name: Text? = none
-  bio: Text? = none
+  login: String
+  name: String? = none
+  bio: String? = none
 }
 
-fn fetch_user(username: Text) throws -> GithubUser {
+fn fetch_user(username: String) throws -> GithubUser {
   let response = try http.get("https://api.github.com/users/${username}")
   return try json.decode<GithubUser>(response.body)
 }
 
-fn describe(username: Text, user: GithubUser?) -> Text {
+fn describe(username: String, user: GithubUser?) -> String {
   return match user {
     some(u) => "${u.login}: ${u.name ?? "(no name)"} - ${u.bio ?? "(no bio)"}"
     none => "${username}: could not be fetched"

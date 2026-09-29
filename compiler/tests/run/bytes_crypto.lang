@@ -6,7 +6,7 @@ import path
 import json
 
 type Blob {
-  name: Text
+  name: String
   data: Bytes
 }
 

@@ -25,9 +25,9 @@ pub fn shuffle<T>(items: List<T>) -> List<T> {
   return out
 }
 // Random letters and digits, for ids and secrets.
-pub fn token(length: Int) -> Text
+pub fn token(length: Int) -> String
 // A random UUID (version 4): "3f0b6c5e-...".
-pub fn uuid() -> Text
+pub fn uuid() -> String
 // A UUID that starts with the time (version 7): ids made later sort later,
 // which keeps database indexes compact. Use it for primary keys.
-pub fn uuid_v7() -> Text
+pub fn uuid_v7() -> String

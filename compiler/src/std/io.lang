@@ -22,14 +22,14 @@ pub builtin type Stream {
   // Exactly `count` bytes; an error if the stream ends first.
   fn read_exact(self, count: Int) throws -> Bytes
   // The next line without "\n" (or "\r\n"); none at the end.
-  fn read_line(self) throws -> Text?
+  fn read_line(self) throws -> String?
   // Everything up to the end.
   fn read_all(self) throws -> Bytes
   fn write(self, data: Bytes) throws
-  fn write_text(self, text: Text) throws
+  fn write_text(self, text: String) throws
   // For network connections, the other side's address: "93.184.215.14:80";
   // empty for other streams.
-  fn peer(self) -> Text
+  fn peer(self) -> String
   // Writes what is still buffered and closes the stream.
   fn close(self) throws
 }
@@ -40,7 +40,7 @@ pub fn stdout() -> Stream
 pub fn stderr() -> Stream
 
 // The next line of standard input; none at the end.
-pub fn read_line() throws -> Text?
+pub fn read_line() throws -> String?
 // All of standard input.
 pub fn read_all() throws -> Bytes
 

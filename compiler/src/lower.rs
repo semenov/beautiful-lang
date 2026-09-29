@@ -899,7 +899,7 @@ impl<'a> Lowerer<'a> {
                 let bty = self.ty(&b.ty);
                 let v = self.expr(b);
                 let owner = match &bty {
-                    Ty::Text => "Text".to_string(),
+                    Ty::Text => "String".to_string(),
                     Ty::Adt(d, _) => {
                         let def = &self.prog.defs[*d];
                         if def.module != 0 {
@@ -1098,7 +1098,7 @@ impl<'a> Lowerer<'a> {
             TK::Spawn(call) => self.spawn(call, ty),
             TK::Interp(parts) => {
                 let ops: Vec<Op> = parts.iter().map(|p| self.expr(p)).collect();
-                self.assign(Ty::Text, Rv::Call(MCallee::Intrinsic("Text.concat".into(), vec![]), ops))
+                self.assign(Ty::Text, Rv::Call(MCallee::Intrinsic("String.concat".into(), vec![]), ops))
             }
             TK::ToText(x) => {
                 let xty = self.ty(&x.ty);
@@ -1427,7 +1427,7 @@ impl<'a> Lowerer<'a> {
                 self.ensure_defaults(&t);
             }
         }
-        let panics = matches!(name.as_str(), "assert" | "Int.div" | "panic" | "Text.slice" | "List.get");
+        let panics = matches!(name.as_str(), "assert" | "Int.div" | "panic" | "String.slice" | "List.get");
         if panics {
             // the panic message needs the line; `Line` markers carry it
         }

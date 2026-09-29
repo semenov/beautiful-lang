@@ -3,13 +3,13 @@ import json
 
 type Note {
   id: Int
-  title: Text
-  text: Text
+  title: String
+  text: String
 }
 
 type CreateNoteRequest {
-  title: Text
-  text: Text
+  title: String
+  text: String
 }
 
 var note_counter = 1

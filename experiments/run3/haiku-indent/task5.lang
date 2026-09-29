@@ -3,12 +3,12 @@ import json
 
 type Note
   id: Int
-  title: Text
-  text: Text
+  title: String
+  text: String
 
 type NoteInput
-  title: Text
-  text: Text
+  title: String
+  text: String
 
 fn get_note(req: http.Request, notes: Map<Int, Note>) throws -> http.Response
   let id_text = req.param("id") ?? ""

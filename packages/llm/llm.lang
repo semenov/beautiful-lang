@@ -28,10 +28,10 @@ import time
 // Where to send requests.
 pub type Client {
   // up to and including /v1
-  base_url: Text = "https://api.openai.com/v1"
-  api_key: Text = ""
+  base_url: String = "https://api.openai.com/v1"
+  api_key: String = ""
   // more headers for every request (OpenRouter: "HTTP-Referer", "X-Title")
-  headers: Map<Text, Text> = {}
+  headers: Map<String, String> = {}
   // seconds without progress before giving up
   timeout: time.Duration = time.seconds(300)
 
@@ -49,7 +49,7 @@ pub type Client {
   }
 
   // The shortest way: one question, the text of the answer.
-  pub fn ask(self, model: Text, prompt: Text) throws -> Text {
+  pub fn ask(self, model: String, prompt: String) throws -> String {
     return (try self.chat(Chat(model: model, messages: [user(prompt)]))).text
   }
 
@@ -97,14 +97,14 @@ pub type Client {
   }
 
   // Embeddings: a vector of numbers per input text.
-  pub fn embed(self, model: Text, inputs: List<Text>) throws -> List<List<Float>> {
+  pub fn embed(self, model: String, inputs: List<String>) throws -> List<List<Float>> {
     let body = json.Value.Object(fields: {"model": text_value(model), "input": json.Value.Array(items: inputs.map(t => text_value(t)))})
     let res = try self.post("/embeddings", body: body)
     let parsed = try json.decode<EmbeddingResponse>(try res.text())
     return parsed.data.sorted_by(d => d.index).map(d => d.embedding)
   }
 
-  fn request(self, path: Text, body: json.Value) -> http.ClientRequest {
+  fn request(self, path: String, body: json.Value) -> http.ClientRequest {
     var headers = self.headers
     headers["content-type"] = "application/json"
     if not self.api_key.is_empty() {
@@ -113,7 +113,7 @@ pub type Client {
     return http.ClientRequest(url: "${self.base_url}${path}", method: "POST", headers: headers, body: json.encode(body).bytes(), timeout: self.timeout)
   }
 
-  fn post(self, path: Text, body: json.Value) throws -> http.Response {
+  fn post(self, path: String, body: json.Value) throws -> http.Response {
     let res = try http.send(self.request(path, body: body))
     if res.status >= 400 {
       throw api_error(res.status, body: try res.text())
@@ -122,11 +122,11 @@ pub type Client {
   }
 }
 
-pub fn openai(api_key: Text) -> Client {
+pub fn openai(api_key: String) -> Client {
   return Client(api_key: api_key)
 }
 
-pub fn openrouter(api_key: Text) -> Client {
+pub fn openrouter(api_key: String) -> Client {
   return Client(base_url: "https://openrouter.ai/api/v1", api_key: api_key)
 }
 
@@ -154,42 +154,42 @@ pub fn from_env() throws -> Client {
 
 pub type Message {
   // "system", "user", "assistant" or "tool"
-  role: Text
-  content: Text
+  role: String
+  content: String
   // assistant messages: the tools the model wants called
   tool_calls: List<ToolCall> = []
   // tool messages: which call this is the result of
-  tool_call_id: Text = ""
+  tool_call_id: String = ""
 }
 
-pub fn system(text: Text) -> Message {
+pub fn system(text: String) -> Message {
   return Message(role: "system", content: text)
 }
 
-pub fn user(text: Text) -> Message {
+pub fn user(text: String) -> Message {
   return Message(role: "user", content: text)
 }
 
-pub fn assistant(text: Text) -> Message {
+pub fn assistant(text: String) -> Message {
   return Message(role: "assistant", content: text)
 }
 
 pub type ToolCall {
-  id: Text
-  name: Text
+  id: String
+  name: String
   // JSON text
-  arguments: Text
+  arguments: String
 }
 
 pub type Chat {
   // "gpt-4o-mini", "anthropic/claude-sonnet-4" (OpenRouter), "llama3.2" (Ollama)
-  model: Text
+  model: String
   messages: List<Message>
   temperature: Float? = none
   max_tokens: Int? = none
   tools: List<Tool> = []
   // more request fields, sent as they are: {"top_p": ..., "reasoning": ...}
-  extra: Map<Text, json.Value> = {}
+  extra: Map<String, json.Value> = {}
 }
 
 pub type Usage {
@@ -199,10 +199,10 @@ pub type Usage {
 }
 
 pub type Reply {
-  text: Text
+  text: String
   tool_calls: List<ToolCall>
   // "stop", "length", "tool_calls", ...
-  finish_reason: Text
+  finish_reason: String
   usage: Usage
   // the conversation with this answer added: continue it with more messages
   messages: List<Message>
@@ -210,17 +210,17 @@ pub type Reply {
 
 // A function the model may call. Build it with `llm.tool<Args>(...)`.
 pub type Tool {
-  name: Text
-  description: Text
+  name: String
+  description: String
   // JSON Schema of the arguments
-  schema: Text
-  handler: fn(Text) throws -> Text
+  schema: String
+  handler: fn(String) throws -> String
 }
 
 // A tool whose arguments are an `A` record: the model sees A's JSON Schema;
 // its arguments are decoded into an A for `handler`, whose text goes back
 // to the model.
-pub fn tool<A>(name: Text, description: Text, handler: fn(A) throws -> Text) -> Tool {
+pub fn tool<A>(name: String, description: String, handler: fn(A) throws -> String) -> Tool {
   return Tool(name: name, description: description, schema: json.schema<A>(), handler: args => try handler(try json.decode<A>(args)))
 }
 
@@ -229,7 +229,7 @@ pub type TextStream {
   response: http.ResponseStream
 
   // The next piece of text; none at the end.
-  pub fn next(self) throws -> Text? {
+  pub fn next(self) throws -> String? {
     while try self.response.read_line() is some(line) {
       if not line.starts_with("data:") {
         continue
@@ -264,22 +264,22 @@ type ChatResponse {
 
 type Choice {
   message: ResponseMessage
-  finish_reason: Text?
+  finish_reason: String?
 }
 
 type ResponseMessage {
-  content: Text?
+  content: String?
   tool_calls: List<ResponseToolCall>?
 }
 
 type ResponseToolCall {
-  id: Text
+  id: String
   function: ResponseFunction
 }
 
 type ResponseFunction {
-  name: Text
-  arguments: Text
+  name: String
+  arguments: String
 }
 
 type StreamChunk {
@@ -291,7 +291,7 @@ type StreamChoice {
 }
 
 type Delta {
-  content: Text?
+  content: String?
 }
 
 type EmbeddingResponse {
@@ -308,15 +308,15 @@ type ErrorResponse {
 }
 
 type ErrorBody {
-  message: Text
+  message: String
 }
 
-fn text_value(t: Text) -> json.Value {
+fn text_value(t: String) -> json.Value {
   return json.Value.String(value: t)
 }
 
-fn request_json(chat: Chat, stream: Bool, schema: Text?) -> json.Value {
-  var fields: Map<Text, json.Value> = {}
+fn request_json(chat: Chat, stream: Bool, schema: String?) -> json.Value {
+  var fields: Map<String, json.Value> = {}
   fields["model"] = text_value(chat.model)
   fields["messages"] = json.Value.Array(items: chat.messages.map(m => message_json(m)))
   if chat.temperature is some(t) {
@@ -342,7 +342,7 @@ fn request_json(chat: Chat, stream: Bool, schema: Text?) -> json.Value {
 }
 
 fn message_json(m: Message) -> json.Value {
-  var fields: Map<Text, json.Value> = {"role": text_value(m.role)}
+  var fields: Map<String, json.Value> = {"role": text_value(m.role)}
   if m.content.is_empty() and not m.tool_calls.is_empty() {
     fields["content"] = json.Value.Null
   } else {
@@ -366,14 +366,14 @@ fn tool_json(t: Tool) -> json.Value {
   return json.Value.Object(fields: {"type": text_value("function"), "function": function})
 }
 
-fn parse_schema(s: Text) -> json.Value {
+fn parse_schema(s: String) -> json.Value {
   // generated by json.schema: always valid
   return try json.parse(s) catch err {
     return json.Value.Object(fields: {})
   }
 }
 
-fn call_tool(tools: List<Tool>, call: ToolCall) throws -> Text {
+fn call_tool(tools: List<Tool>, call: ToolCall) throws -> String {
   let t = tools.find(t => t.name == call.name) ?? throw Failure(message: "llm: the model called an unknown tool `${call.name}`")
   let handler = t.handler
   return try handler(call.arguments) catch err {
@@ -381,7 +381,7 @@ fn call_tool(tools: List<Tool>, call: ToolCall) throws -> Text {
   }
 }
 
-fn api_error(status: Int, body: Text) -> Error {
+fn api_error(status: Int, body: String) -> Error {
   let message = try json.decode<ErrorResponse>(body) catch err {
     return Failure(message: "llm: HTTP ${status}: ${body.slice(from: 0, to: min(body.length, 300))}")
   }
@@ -389,7 +389,7 @@ fn api_error(status: Int, body: Text) -> Error {
 }
 
 // Some models wrap JSON in ```json fences even when asked not to.
-fn strip_fences(text: Text) -> Text {
+fn strip_fences(text: String) -> String {
   let t = text.trim()
   if t.starts_with("```") {
     let lines = t.lines()

@@ -98,7 +98,7 @@ fn synonym(name: &str) -> Option<&'static str> {
         "size" | "len" | "count_of" => "length",
         "push" | "add_item" | "push_back" => "append",
         "skip" => "drop",
-        "toString" | "to_string" | "str" => "to_text",
+        "toString" | "to_text" | "str" => "to_string",
         "reduce" | "inject" => "fold",
         "includes" | "has" => "contains",
         "extend" => "append_all",
@@ -235,7 +235,7 @@ impl Checker {
             int: pl(self, "Int"),
             float: pl(self, "Float"),
             bool_: pl(self, "Bool"),
-            text: pl(self, "Text"),
+            text: pl(self, "String"),
             list: pl(self, "List"),
             map: pl(self, "Map"),
             set: pl(self, "Set"),
@@ -435,7 +435,7 @@ impl Checker {
                     }
                     _ => {
                         let hint = match name.as_str() {
-                            "String" | "str" | "string" => Some("Text"),
+                            "Text" | "str" | "string" => Some("String"),
                             "int" | "i64" | "Integer" | "Long" => Some("Int"),
                             "float" | "Double" | "double" | "f64" | "Number" => Some("Float"),
                             "bool" | "Boolean" => Some("Bool"),
@@ -1170,7 +1170,7 @@ impl Checker {
         let help: Option<String> = match (&exp, &act) {
             (Ty::Float, Ty::Int) => Some("convert explicitly: `x.to_float()`".into()),
             (Ty::Int, Ty::Float) => Some("convert explicitly: `x.round()`, `x.floor()` or `x.ceil()`".into()),
-            (Ty::Text, Ty::Int) | (Ty::Text, Ty::Float) | (Ty::Text, Ty::Bool) => Some("use interpolation: `\"${x}\"`, or `x.to_text()`".into()),
+            (Ty::Text, Ty::Int) | (Ty::Text, Ty::Float) | (Ty::Text, Ty::Bool) => Some("use interpolation: `\"${x}\"`, or `x.to_string()`".into()),
             (Ty::Int, Ty::Text) => Some("parse it: `try text.to_int()`".into()),
             (t, Ty::Opt(inner)) if **inner == *t => Some("the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`".into()),
             (Ty::Adt(d, _), _) if matches!(self.prog.defs[*d].kind, TypeKind::Newtype(_)) => {
@@ -1493,7 +1493,7 @@ impl Checker {
                     Ty::Adt(d, a) if *d == self.prog.b.channel => (3, a[0].clone()),
                     Ty::Err => (0, Ty::Err),
                     Ty::Text => {
-                        self.err_help(iter.span, "can't loop over `Text` directly", "use `text.chars()`, `text.words()` or `text.lines()`");
+                        self.err_help(iter.span, "can't loop over `String` directly", "use `text.chars()`, `text.words()` or `text.lines()`");
                         (0, Ty::Err)
                     }
                     t => {
@@ -2296,7 +2296,7 @@ impl Checker {
                 if self.prog.defs[tdef].methods.contains_key(name) {
                     self.err_help(nsp, format!("`{}` is a method", name), format!("call it: `.{}()`", name));
                 } else {
-                    self.err(nsp, format!("`Text` has no field `{}`", name));
+                    self.err(nsp, format!("`String` has no field `{}`", name));
                 }
                 mk(TK::Unit, Ty::Err)
             }
@@ -2636,7 +2636,7 @@ impl Checker {
             ("List", "min") | ("List", "max") | ("List", "sort") | ("List", "sorted") => {
                 need(self, t0, orderable, "values that can be ordered (numbers or text); for other types use `sort_by(x => x.key)`")
             }
-            ("List", "join") => need(self, t0, |t| *t == Ty::Text, "a list of `Text`"),
+            ("List", "join") => need(self, t0, |t| *t == Ty::Text, "a list of `String`"),
             ("List", "sort_by") | ("List", "sorted_by") | ("List", "min_by") | ("List", "max_by") => {
                 need(self, last, orderable, "a key that can be ordered (a number or text)")
             }

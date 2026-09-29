@@ -3,10 +3,10 @@
 import files
 
 pub type Person
-  name: Text
+  name: String
   age: Int
 
-fn parse_people(text: Text) throws -> List<Person>
+fn parse_people(text: String) throws -> List<Person>
   let lines = text.lines()
   match lines.first()
     none => throw Failure(message: "missing header line")

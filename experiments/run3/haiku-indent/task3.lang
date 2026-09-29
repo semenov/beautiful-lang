@@ -6,15 +6,15 @@ type Account
   balance: Decimal
 
 type InsufficientFunds implements Error
-  message: Text
+  message: String
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return self.message
 
 type AccountNotFound implements Error
-  message: Text
+  message: String
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return self.message
 
 fn transfer(var accounts: Map<AccountId, Account>, from_id: AccountId, to_id: AccountId, amount: Decimal) throws

@@ -1,17 +1,17 @@
 type Person {
-  name: Text
+  name: String
   age: Int
 }
 
 type BadHeader implements Error {
-  actual: Text
+  actual: String
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "expected header \"name,age\", got \"${self.actual}\""
   }
 }
 
-fn parse_people(text: Text) throws -> List<Person> {
+fn parse_people(text: String) throws -> List<Person> {
   let lines = text.lines()
   let header = lines.first() ?? throw Failure(message: "the CSV is missing its header line")
   if header != "name,age" {

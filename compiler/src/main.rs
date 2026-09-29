@@ -153,7 +153,7 @@ fn doc_command(args: &[String]) -> ExitCode {
                 }
                 return show_item(&m.items, &parts[1..], q);
             }
-            // a prelude type: List, List.map, Text.split
+            // a prelude type: List, List.map, String.split
             let prelude = &find_module("prelude").unwrap().1;
             if prelude.items.iter().any(|i| i.name == parts[0]) {
                 return show_item(&prelude.items, &parts, q);

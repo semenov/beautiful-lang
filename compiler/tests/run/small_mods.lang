@@ -4,9 +4,9 @@ import math
 import time
 
 type Person {
-  name: Text
+  name: String
   age: Int
-  email: Text?
+  email: String?
 }
 
 fn main() throws {

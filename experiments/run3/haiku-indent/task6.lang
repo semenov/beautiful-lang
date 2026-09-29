@@ -4,11 +4,11 @@ import time
 import tasks
 
 type GitHubUser
-  login: Text
-  name: Text? = none
-  bio: Text? = none
+  login: String
+  name: String? = none
+  bio: String? = none
 
-fn format_user(user: GitHubUser?) -> Text
+fn format_user(user: GitHubUser?) -> String
   if user is some(u)
     let name_text = u.name ?? "(no name)"
     let bio_text = u.bio ?? "(no bio)"
@@ -16,7 +16,7 @@ fn format_user(user: GitHubUser?) -> Text
   else
     return "(failed to fetch user)"
 
-fn fetch_user(username: Text) throws -> GitHubUser
+fn fetch_user(username: String) throws -> GitHubUser
   let url = "https://api.github.com/users/${username}"
   let response = try http.get(url)
   let user = try json.decode<GitHubUser>(response.body)

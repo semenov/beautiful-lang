@@ -1,12 +1,12 @@
 // 1. Inventory
 
 type Product {
-  name: Text
+  name: String
   price: Decimal
   stock: Int
 }
 
-fn restock(products: var List<Product>, name: Text, amount: Int) {
+fn restock(products: var List<Product>, name: String, amount: Int) {
   for i in 0..<products.length {
     if products[i].name == name {
       products[i].stock += amount
@@ -15,7 +15,7 @@ fn restock(products: var List<Product>, name: Text, amount: Int) {
   }
 }
 
-fn low_stock_names(products: List<Product>) -> List<Text> {
+fn low_stock_names(products: List<Product>) -> List<String> {
   let low = products.filter(p => p.stock < 5)
   let sorted = low.sorted_by(p => p.stock)
   return sorted.map(p => p.name)

@@ -3,10 +3,10 @@ import cli
 import tasks
 
 type Options {
-  file: Text
+  file: String
 }
 
-fn process_lines(var counts: Map<Text, Int>, lines: List<Text>) {
+fn process_lines(var counts: Map<String, Int>, lines: List<String>) {
   for line in lines {
     if line.contains("ERROR") {
       let parts = line.split(" ")
@@ -26,7 +26,7 @@ fn main() throws {
 
   let lines_per_worker = (all_lines.length + 3) / 4
 
-  var counts: Map<Text, Int> = {}
+  var counts: Map<String, Int> = {}
 
   with group = try tasks.group() {
     let batch1 = all_lines.take(lines_per_worker)

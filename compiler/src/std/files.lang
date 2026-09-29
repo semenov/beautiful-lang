@@ -5,27 +5,27 @@ import io
 import path
 
 // The whole file as text.
-pub fn read(path: Text) throws -> Text
+pub fn read(path: String) throws -> String
 // The whole file as bytes.
-pub fn read_bytes(path: Text) throws -> Bytes
+pub fn read_bytes(path: String) throws -> Bytes
 // Creates or replaces the file.
-pub fn write(path: Text, text: Text) throws
-pub fn write_bytes(path: Text, data: Bytes) throws
+pub fn write(path: String, text: String) throws
+pub fn write_bytes(path: String, data: Bytes) throws
 // Adds to the end of the file, creating it if needed.
-pub fn append(path: Text, text: Text) throws
-pub fn exists(path: Text) -> Bool
-pub fn is_dir(path: Text) -> Bool
+pub fn append(path: String, text: String) throws
+pub fn exists(path: String) -> Bool
+pub fn is_dir(path: String) -> Bool
 // Names of the entries in a directory, sorted.
-pub fn list(dir: Text) throws -> List<Text>
+pub fn list(dir: String) throws -> List<String>
 // Every file under a directory, at any depth, as paths starting with
 // `dir` ("src/a/b.lang"; for "." just "a/b.lang"), sorted. Symlinked
 // directories aren't followed.
-pub fn walk(dir: Text) throws -> List<Text>
+pub fn walk(dir: String) throws -> List<String>
 // The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
 // "logs/2026-*.{log,gz}" (see `path.matches`).
-pub fn glob(pattern: Text) throws -> List<Text> {
+pub fn glob(pattern: String) throws -> List<String> {
   let parts = pattern.split("/")
-  var fixed: List<Text> = []
+  var fixed: List<String> = []
   for part in parts {
     if part.contains("*") or part.contains("?") or part.contains("[") or part.contains("{") {
       break
@@ -48,27 +48,27 @@ pub fn glob(pattern: Text) throws -> List<Text> {
   return (try walk(dir)).filter(f => path.matches(f, pattern: pattern))
 }
 // Deletes a file or an empty directory.
-pub fn delete(path: Text) throws
+pub fn delete(path: String) throws
 // Deletes a file, or a directory with everything in it (like `rm -rf`).
 // Nothing at `path` is fine.
-pub fn delete_all(path: Text) throws
+pub fn delete_all(path: String) throws
 // Creates a directory and any missing parents.
-pub fn make_dir(path: Text) throws
-pub fn copy(from: Text, to: Text) throws
-pub fn rename(from: Text, to: Text) throws
+pub fn make_dir(path: String) throws
+pub fn copy(from: String, to: String) throws
+pub fn rename(from: String, to: String) throws
 // Working with the text of paths: see the `path` module.
 
 // A file as a stream (see the `io` module), for reading or writing it
 // piece by piece: `with f = try files.open(path) { ... }`.
-pub fn open(path: Text) throws -> io.Stream
+pub fn open(path: String) throws -> io.Stream
 // Creates (or empties) a file for writing.
-pub fn create(path: Text) throws -> io.Stream
+pub fn create(path: String) throws -> io.Stream
 // Opens a file for writing at its end, creating it if needed.
-pub fn open_append(path: Text) throws -> io.Stream
+pub fn open_append(path: String) throws -> io.Stream
 
 // A new empty directory, deleted with everything in it at the end of `with`.
 pub builtin type TempDir {
-  path: Text
+  path: String
   fn close(self) throws
 }
 

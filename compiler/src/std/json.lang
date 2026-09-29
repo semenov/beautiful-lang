@@ -6,32 +6,32 @@
 // name under "type": {"type": "Circle", "radius": 2.0}.
 
 // The value as compact JSON.
-pub fn encode<T>(value: T) -> Text
+pub fn encode<T>(value: T) -> String
 // The value as indented JSON, for people.
-pub fn encode_pretty<T>(value: T) -> Text
+pub fn encode_pretty<T>(value: T) -> String
 
 // Reads JSON into a T, checking every field. A missing field is an error
 // unless it's optional (`T?`) or has a default. Extra fields are ignored.
 // Errors say where: `json: at $.users[2].age: expected a whole number`.
-pub fn decode<T>(text: Text) throws -> T
+pub fn decode<T>(text: String) throws -> T
 
 // A JSON Schema of T's JSON form: for describing data to other programs,
 // and for asking language models for typed answers (see the llm package).
 // Every field is listed as required (optional fields accept null), extra
 // fields are not allowed: the "strict" form OpenAI-style APIs want.
-pub fn schema<T>() -> Text
+pub fn schema<T>() -> String
 
 // JSON of a shape that isn't known in advance.
 pub enum Value {
   Null
   Bool(value: Bool)
   Number(value: Float)
-  String(value: Text)
+  String(value: String)
   Array(items: List<Value>)
-  Object(fields: Map<Text, Value>)
+  Object(fields: Map<String, Value>)
 }
 
 // Reads any JSON into a `Value`.
-pub fn parse(text: Text) throws -> Value {
+pub fn parse(text: String) throws -> Value {
   return try decode<Value>(text)
 }

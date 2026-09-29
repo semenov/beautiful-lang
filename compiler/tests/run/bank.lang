@@ -8,7 +8,7 @@ type Account {
 type AccountNotFound implements Error {
   id: AccountId
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "account ${self.id.value} does not exist"
   }
 }
@@ -18,7 +18,7 @@ type InsufficientFunds implements Error {
   balance: Int
   amount: Int
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "account ${self.id.value} has ${self.balance} but the transfer needs ${self.amount}"
   }
 }

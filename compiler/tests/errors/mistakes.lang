@@ -1,9 +1,9 @@
 type User {
-  name: Text
+  name: String
   age: Int
 }
 
-fn load(path: Text) throws -> User {
+fn load(path: String) throws -> User {
   throw Failure(message: "nope")
 }
 
@@ -18,7 +18,7 @@ fn main() {
   xs.sorted()
   let n = xs.size
   let t = "a" + "b"
-  let m: Map<Text, Int> = {}
+  let m: Map<String, Int> = {}
   let x = m["a"] + 1
   let f = User("Ada", 3)
   let s = u.nme

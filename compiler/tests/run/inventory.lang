@@ -1,10 +1,10 @@
 type Product {
-  name: Text
+  name: String
   price: Float
   stock: Int
 }
 
-fn restock(products: List<Product>, name: Text, amount: Int) -> List<Product> {
+fn restock(products: List<Product>, name: String, amount: Int) -> List<Product> {
   var result = products
   for i in 0..<result.length {
     if result[i].name == name {
@@ -14,7 +14,7 @@ fn restock(products: List<Product>, name: Text, amount: Int) -> List<Product> {
   return result
 }
 
-fn low_stock_names(products: List<Product>) -> List<Text> {
+fn low_stock_names(products: List<Product>) -> List<String> {
   return products
     .filter(p => p.stock < 5)
     .sorted_by(p => p.stock)

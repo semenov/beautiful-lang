@@ -13,30 +13,30 @@ enum Shape {
 }
 
 type Address {
-  city: Text
-  zip: Text? = none
+  city: String
+  zip: String? = none
 }
 
 type User {
   id: Int
-  name: Text
+  name: String
   role: Role = Member
-  tags: List<Text> = []
+  tags: List<String> = []
   address: Address?
-  scores: Map<Text, Int> = {}
+  scores: Map<String, Int> = {}
 }
 
 type Config {
   port: Int = 8080
   debug: Bool = false
-  name: Text
+  name: String
 }
 
 type Options {
-  input: Text
+  input: String
   top: Int = 10
   verbose: Bool = false
-  args: List<Text> = []
+  args: List<String> = []
 }
 
 fn main() throws {

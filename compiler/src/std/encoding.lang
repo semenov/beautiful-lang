@@ -2,8 +2,8 @@
 // `data.base64()`.)
 
 // "68656c6c6f" -> the bytes of "hello"
-pub fn from_hex(text: Text) throws -> Bytes
+pub fn from_hex(text: String) throws -> Bytes
 // Standard or URL-safe base64, with or without padding.
-pub fn from_base64(text: Text) throws -> Bytes
+pub fn from_base64(text: String) throws -> Bytes
 // URL-safe base64 without padding (tokens, JWT).
-pub fn base64_url(data: Bytes) -> Text
+pub fn base64_url(data: Bytes) -> String

@@ -1,23 +1,23 @@
 // 10. Pricing rules
 
 interface Describable {
-  fn describe(self) -> Text
+  fn describe(self) -> String
 }
 
 type Order implements Describable {
   id: Int
   total: Decimal
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Order #${self.id}: ${self.total}"
   }
 }
 
 type Customer implements Describable {
-  name: Text
-  email: Text
+  name: String
+  email: String
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Customer ${self.name} <${self.email}>"
   }
 }

@@ -4,11 +4,11 @@ import cli
 
 type User
   id: Int
-  name: Text
+  name: String
   age: Int
 
 type Options
-  args: List<Text>
+  args: List<String>
 
 fn main() throws
   let opts = try cli.decode<Options>()

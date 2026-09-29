@@ -11,12 +11,12 @@ import json
 
 type Note {
   id: Int
-  title: Text
+  title: String
   done: Bool = false
 }
 
 type NewNote {
-  title: Text
+  title: String
 }
 
 fn list_notes(conn: db.Connection) throws -> http.Response {
@@ -91,7 +91,7 @@ fn area(s: Shape) -> Float {
 }
 
 // Errors: `throws`, `try`, `catch`
-fn load(path: Text) throws -> Config {
+fn load(path: String) throws -> Config {
   let text = try files.read(path) catch err {
     log.warn("no config, using defaults: ${err.message()}")
     return Config()

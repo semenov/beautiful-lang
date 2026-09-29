@@ -4,12 +4,12 @@ import cli
 import files
 
 pub type Options
-  args: List<Text> = []
+  args: List<String> = []
   top: Int = 10
   min_length: Int = 1
 
 pub type WordCountEntry
-  word: Text
+  word: String
   count: Int
 
 pub type WordReport
@@ -18,7 +18,7 @@ pub type WordReport
 
 // The `top` most common words with at least `min_length` letters, plus the
 // average length of the qualifying words.
-fn word_report(text: Text, top: Int, min_length: Int) -> WordReport
+fn word_report(text: String, top: Int, min_length: Int) -> WordReport
   let words = text.words().filter(w => w.length >= min_length)
   let counts_map = words.count_each()
   let by_count = counts_map.entries().map(e => WordCountEntry(word: e.key, count: e.value)).sorted_by(e => e.count)

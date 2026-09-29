@@ -11,16 +11,16 @@
 // prefix are kept whole: "soap:Envelope".
 
 pub type Element {
-  name: Text
-  attributes: Map<Text, Text> = {}
+  name: String
+  attributes: Map<String, String> = {}
   children: List<Node> = []
 
-  pub fn attribute(self, name: Text) -> Text? {
+  pub fn attribute(self, name: String) -> String? {
     return self.attributes[name]
   }
 
   // The first child element with this name.
-  pub fn child(self, name: Text) -> Element? {
+  pub fn child(self, name: String) -> Element? {
     for node in self.children {
       if node is ElementNode(element) and element.name == name {
         return element
@@ -30,7 +30,7 @@ pub type Element {
   }
 
   // The text of the first child element with this name.
-  pub fn child_text(self, name: Text) -> Text? {
+  pub fn child_text(self, name: String) -> String? {
     if self.child(name) is some(element) {
       return element.text()
     }
@@ -48,13 +48,13 @@ pub type Element {
     return out
   }
 
-  pub fn elements_named(self, name: Text) -> List<Element> {
+  pub fn elements_named(self, name: String) -> List<Element> {
     return self.elements().filter(e => e.name == name)
   }
 
   // All the text inside, from every level: <p>a <b>b</b></p> gives "a b".
-  pub fn text(self) -> Text {
-    var parts: List<Text> = []
+  pub fn text(self) -> String {
+    var parts: List<String> = []
     for node in self.children {
       match node {
         TextNode(text) => parts.append(text)
@@ -72,7 +72,7 @@ pub type Element {
   }
 
   // A copy with text added at the end.
-  pub fn add_text(self, text: Text) -> Element {
+  pub fn add_text(self, text: String) -> Element {
     var e = self
     e.children.append(TextNode(text: text))
     return e
@@ -81,12 +81,12 @@ pub type Element {
 
 pub enum Node {
   ElementNode(element: Element)
-  TextNode(text: Text)
+  TextNode(text: String)
 }
 
 // Reads a document; errors say where: `xml: line 3: the closing tag doesn't
 // match the open element`.
-pub fn parse(text: Text) throws -> Element {
+pub fn parse(text: String) throws -> Element {
   let events = try __scan(text)
   var open: List<Element> = []
   var i = 0
@@ -114,7 +114,7 @@ pub fn parse(text: Text) throws -> Element {
 }
 
 // The element as XML text, without the `<?xml ...?>` line.
-pub fn render(element: Element) -> Text {
+pub fn render(element: Element) -> String {
   var out = "<${element.name}"
   for entry in element.attributes.entries() {
     out = "${out} ${entry.key}=\"${escape(entry.value)}\""
@@ -134,6 +134,6 @@ pub fn render(element: Element) -> Text {
 }
 
 // Text safe inside an element or a quoted attribute: `<` becomes `&lt;` etc.
-pub fn escape(text: Text) -> Text
+pub fn escape(text: String) -> String
 
-fn __scan(text: Text) throws -> List<Text>
+fn __scan(text: String) throws -> List<String>

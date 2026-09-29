@@ -4,7 +4,7 @@ import env
 
 type User {
   id: Int
-  name: Text
+  name: String
   age: Int
 }
 

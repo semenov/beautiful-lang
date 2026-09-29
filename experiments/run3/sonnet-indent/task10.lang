@@ -1,7 +1,7 @@
 // Task 10: Composable pricing rules, plus two unrelated describable types.
 
 pub interface Describable
-  fn describe(self) -> Text
+  fn describe(self) -> String
 
 // A pricing rule turns an order total into a new total.
 fn percent_off(percent: Decimal) -> fn(Decimal) -> Decimal
@@ -19,17 +19,17 @@ fn combine(rules: List<fn(Decimal) -> Decimal>) -> fn(Decimal) -> Decimal
     result
 
 pub type Invoice implements Describable
-  number: Text
+  number: String
   amount: Decimal
 
-  fn describe(self) -> Text
+  fn describe(self) -> String
     return "invoice ${self.number} for ${self.amount}"
 
 pub type WeatherReading implements Describable
-  city: Text
+  city: String
   celsius: Float
 
-  fn describe(self) -> Text
+  fn describe(self) -> String
     return "weather in ${self.city}: ${self.celsius}C"
 
 fn print_report(items: List<Describable>)

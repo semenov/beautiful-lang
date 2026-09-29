@@ -5,20 +5,20 @@
 //   Building SQL from pieces of text is a compile error, so SQL injection
 //   can't happen: values go in as parameters.
 // - Parameters are written as plain values: `[name, 36, true]` becomes a
-//   `List<Value>` by itself (Int, Float, Text, Bool, Bytes, new types over
+//   `List<Value>` by itself (Int, Float, String, Bool, Bytes, new types over
 //   them, and `none`).
 // - Rows become records by column name, like `json.decode`.
 
 // SQL text. Only a literal becomes a `Query`; a database package reads the
 // text with `query.value`.
-pub type Query = Text
+pub type Query = String
 
 // A parameter or column value.
 pub enum Value {
   Null
   Integer(value: Int)
   Real(value: Float)
-  String(value: Text)
+  String(value: String)
   Blob(value: Bytes)
   Boolean(value: Bool)
 }
@@ -27,4 +27,4 @@ pub enum Value {
 // by name. Numbers and true/false convert as in `json.decode`; Null is
 // "missing" (fine for optional fields and fields with defaults). For
 // database packages.
-pub fn decode<T>(columns: List<Text>, rows: List<List<Value>>) throws -> List<T>
+pub fn decode<T>(columns: List<String>, rows: List<List<Value>>) throws -> List<T>

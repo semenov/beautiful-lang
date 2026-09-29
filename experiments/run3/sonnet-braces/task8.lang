@@ -5,10 +5,10 @@ import files
 import tasks
 
 type Options {
-  args: List<Text> = []
+  args: List<String> = []
 }
 
-fn count_line(line: Text, totals: Shared<Map<Text, Int>>) {
+fn count_line(line: String, totals: Shared<Map<String, Int>>) {
   if not line.contains("ERROR") {
     return
   }
@@ -24,15 +24,15 @@ fn count_line(line: Text, totals: Shared<Map<Text, Int>>) {
   })
 }
 
-fn worker(jobs: Channel<Text>, totals: Shared<Map<Text, Int>>) {
+fn worker(jobs: Channel<String>, totals: Shared<Map<String, Int>>) {
   for line in jobs {
     count_line(line, totals)
   }
 }
 
-fn process_log(path: Text) throws -> Map<Text, Int> {
-  let totals = Shared<Map<Text, Int>>({})
-  let jobs = Channel<Text>(capacity: 100)
+fn process_log(path: String) throws -> Map<String, Int> {
+  let totals = Shared<Map<String, Int>>({})
+  let jobs = Channel<String>(capacity: 100)
 
   with group = try tasks.group() {
     for i in 0..<4 {

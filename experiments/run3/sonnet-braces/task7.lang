@@ -6,16 +6,16 @@ import env
 
 type User {
   id: Int
-  name: Text
+  name: String
   age: Int
 }
 
 type Config {
-  database_url: Text
+  database_url: String
 }
 
 type Options {
-  args: List<Text> = []
+  args: List<String> = []
 }
 
 fn seed_users(conn: db.Connection) throws {

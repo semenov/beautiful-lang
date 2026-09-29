@@ -4,19 +4,19 @@ import cli
 import files
 
 type Options {
-  args: List<Text> = []
+  args: List<String> = []
   top: Int = 10
   min_length: Int = 1
 }
 
-fn word_counts(text: Text, min_length: Int) -> Map<Text, Int> {
+fn word_counts(text: String, min_length: Int) -> Map<String, Int> {
   let words = text.words()
   let lowercased = words.map(w => w.lower())
   let long_enough = lowercased.filter(w => w.length >= min_length)
   return long_enough.count_each()
 }
 
-fn average_word_length(text: Text) -> Float {
+fn average_word_length(text: String) -> Float {
   let words = text.words()
   if words.is_empty() {
     return 0.0

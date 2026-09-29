@@ -8,7 +8,7 @@
 //
 // SQL is always a literal with `?` for values: building SQL from pieces of
 // text is a compile error, so SQL injection can't happen. Parameters can be
-// Int, Float, Text, Bool and Bytes, and new types over them (see `sql`).
+// Int, Float, String, Bool and Bytes, and new types over them (see `sql`).
 // `query<T>` fills records by column name (like `json.decode`).
 
 import sql
@@ -39,4 +39,4 @@ pub builtin type Connection {
 
 // Opens (or creates) a database file; ":memory:" for one that lives only
 // while the program runs.
-pub fn open(path: Text) throws -> Connection
+pub fn open(path: String) throws -> Connection

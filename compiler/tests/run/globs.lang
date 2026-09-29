@@ -1,7 +1,7 @@
 import files
 import path
 
-fn short(root: Text, found: List<Text>) -> List<Text> {
+fn short(root: String, found: List<String>) -> List<String> {
   return found.map(f => f.slice(from: root.length + 1, to: f.length))
 }
 

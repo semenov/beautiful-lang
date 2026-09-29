@@ -5,7 +5,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 ## Now
 
-- [ ] **Rename `Text` to `String`** (the type, its methods' docs, messages,
+- [x] **Rename `Text` to `String`** (the type, its methods' docs, messages,
       the guide, stdlib, packages, tests)
 
 - [x] **Postgres package** (`packages/postgres`, not stdlib): wire protocol v3

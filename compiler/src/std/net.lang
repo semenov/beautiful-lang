@@ -12,18 +12,18 @@ import io
 // A TCP connection is an `io.Stream`. Get one with
 // `with conn = try net.connect(...)`, or in the handler of `net.serve`
 // (which closes it when the handler returns).
-pub fn connect(host: Text, port: Int) throws -> io.Stream
+pub fn connect(host: String, port: Int) throws -> io.Stream
 
 // A TLS (encrypted) connection; the server's certificate is checked against
 // the system's trusted certificates and the host name. Reading and writing
 // work as for `connect`. (Serving TLS: put the program behind a proxy that
 // terminates TLS, such as nginx or a cloud load balancer.)
-pub fn connect_tls(host: Text, port: Int) throws -> io.Stream
+pub fn connect_tls(host: String, port: Int) throws -> io.Stream
 
 // Switches an open connection to TLS, for protocols that start plain and
 // then upgrade (Postgres, SMTP's STARTTLS). `host` is the name the
 // certificate must be for.
-pub fn start_tls(conn: io.Stream, host: Text) throws
+pub fn start_tls(conn: io.Stream, host: String) throws
 
 // Accepts connections on `port` until the program is stopped (Ctrl-C),
 // running `handler` for each in its own task. An error from a handler is
@@ -33,14 +33,14 @@ pub fn serve(port: Int, handler: fn(io.Stream) throws) throws
 pub type Datagram {
   data: Bytes
   // "host:port" of the sender
-  from: Text
+  from: String
 }
 
 // A UDP socket. Get one with `with sock = try net.udp(port)`; port 0 picks
 // a free one.
 pub builtin type UdpSocket {
   // Sends to "host:port".
-  fn send_to(self, data: Bytes, address: Text) throws
+  fn send_to(self, data: Bytes, address: String) throws
   // Waits for the next datagram.
   fn receive(self) throws -> Datagram
   // The local port.

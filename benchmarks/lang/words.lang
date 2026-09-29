@@ -11,12 +11,12 @@ type Rng {
   }
 }
 
-fn make_vocab(size: Int) -> List<Text> {
+fn make_vocab(size: Int) -> List<String> {
   let letters = "abcdefghijklmnopqrstuvwxyz".chars()
-  var vocab: List<Text> = []
+  var vocab: List<String> = []
   for k in 0..<size {
     var v = k
-    var word: List<Text> = []
+    var word: List<String> = []
     word.append(letters[v % 26])
     v = v.div(26)
     while v != 0 {
@@ -32,7 +32,7 @@ fn main() {
   let vocab = make_vocab(50_000)
   var rng = Rng(state: 2463534242)
   for round in 0..<5 {
-    var parts: List<Text> = []
+    var parts: List<String> = []
     for i in 0..<5_000_000 {
       parts.append(vocab[rng.next() % vocab.length])
     }

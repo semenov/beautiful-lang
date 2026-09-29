@@ -2,16 +2,16 @@ import io
 import llm
 
 type Recipe {
-  name: Text
+  name: String
   minutes: Int
-  steps: List<Text>
+  steps: List<String>
 }
 
 type City {
-  city: Text
+  city: String
 }
 
-fn weather(c: City) throws -> Text {
+fn weather(c: City) throws -> String {
   return "rain in ${c.city}"
 }
 

@@ -5,25 +5,25 @@ import files
 import tasks
 
 pub type Options
-  args: List<Text> = []
+  args: List<String> = []
 
 pub type ServiceCount
-  service: Text
+  service: String
   count: Int
 
-fn bump(counts: var Map<Text, Int>, key: Text)
+fn bump(counts: var Map<String, Int>, key: String)
   counts[key] = (counts[key] ?? 0) + 1
 
 // Pure counting logic, reused by the concurrent pipeline below and easy to
 // exercise directly in tests.
-fn count_errors(lines: List<Text>) -> Map<Text, Int>
-  var counts: Map<Text, Int> = {}
+fn count_errors(lines: List<String>) -> Map<String, Int>
+  var counts: Map<String, Int> = {}
   for line in lines
     if line.contains("ERROR")
       bump(&counts, line.words()[1])
   return counts
 
-fn process_line(line: Text, counts: Shared<Map<Text, Int>>)
+fn process_line(line: String, counts: Shared<Map<String, Int>>)
   if not line.contains("ERROR")
     return
   let service = line.words()[1]
@@ -33,17 +33,17 @@ fn process_line(line: Text, counts: Shared<Map<Text, Int>>)
     updated
   )
 
-fn report_sorted_by_count(counts: Map<Text, Int>) -> List<ServiceCount>
+fn report_sorted_by_count(counts: Map<String, Int>) -> List<ServiceCount>
   let entries = counts.entries().map(e => ServiceCount(service: e.key, count: e.value))
   return entries.sorted_by(e => e.count).reversed()
 
 fn main() throws
   let options = try cli.decode<Options>()
   let path = options.args.first() ?? "app.log"
-  let counts = Shared<Map<Text, Int>>({})
+  let counts = Shared<Map<String, Int>>({})
   with file = try files.open(path)
     with group = try tasks.group()
-      let jobs = Channel<Text>(capacity: 100)
+      let jobs = Channel<String>(capacity: 100)
       for worker_index in 0..<4
         group.start(() =>
           for line in jobs
@@ -72,7 +72,7 @@ test "a line without ERROR is ignored"
   expect counts.length == 0
 
 test "the report is sorted by count, highest first"
-  let counts: Map<Text, Int> = {"auth": 1, "billing": 3, "cache": 2}
+  let counts: Map<String, Int> = {"auth": 1, "billing": 3, "cache": 2}
   let sorted = report_sorted_by_count(counts)
   expect sorted[0].service == "billing"
   expect sorted[1].service == "cache"

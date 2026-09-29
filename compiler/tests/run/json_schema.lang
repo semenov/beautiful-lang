@@ -3,14 +3,14 @@ import json
 enum Mood {
   Happy
   Sad
-  Other(reason: Text)
+  Other(reason: String)
 }
 
 type Person {
-  name: Text
+  name: String
   age: Int
-  tags: List<Text>
-  email: Text?
+  tags: List<String>
+  email: String?
   mood: Mood
 }
 

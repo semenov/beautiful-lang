@@ -2,7 +2,7 @@ import http
 import json
 
 fn upload(req: http.Request) throws -> http.Response {
-  var lines: List<Text> = []
+  var lines: List<String> = []
   for p in try req.parts() {
     lines.append("${p.name} ${p.filename ?? "-"} ${p.content_type} ${p.data.length}")
   }

@@ -12,27 +12,27 @@
 // Whether standard output is a terminal (not a file or a pipe).
 pub fn is_terminal() -> Bool
 
-pub fn bold(text: Text) -> Text
-pub fn dim(text: Text) -> Text
-pub fn italic(text: Text) -> Text
-pub fn underline(text: Text) -> Text
-pub fn red(text: Text) -> Text
-pub fn green(text: Text) -> Text
-pub fn yellow(text: Text) -> Text
-pub fn blue(text: Text) -> Text
-pub fn magenta(text: Text) -> Text
-pub fn cyan(text: Text) -> Text
-pub fn gray(text: Text) -> Text
+pub fn bold(text: String) -> String
+pub fn dim(text: String) -> String
+pub fn italic(text: String) -> String
+pub fn underline(text: String) -> String
+pub fn red(text: String) -> String
+pub fn green(text: String) -> String
+pub fn yellow(text: String) -> String
+pub fn blue(text: String) -> String
+pub fn magenta(text: String) -> String
+pub fn cyan(text: String) -> String
+pub fn gray(text: String) -> String
 
 // The text without color codes.
-pub fn strip(text: Text) -> Text
+pub fn strip(text: String) -> String
 
 // How many columns the text takes on screen: wide characters (Chinese,
 // emoji) take 2, color codes none.
-pub fn width(text: Text) -> Int
+pub fn width(text: String) -> Int
 
 // The text padded with spaces to `columns` on screen.
-pub fn pad(text: Text, columns: Int) -> Text {
+pub fn pad(text: String, columns: Int) -> String {
   let w = width(text)
   if w >= columns {
     return text
@@ -42,7 +42,7 @@ pub fn pad(text: Text, columns: Int) -> Text {
 
 // Rows as aligned columns; the first row is the header (underlined when
 // colors are on). Lines end without trailing spaces.
-pub fn table(rows: List<List<Text>>) -> Text {
+pub fn table(rows: List<List<String>>) -> String {
   var widths: List<Int> = []
   for row in rows {
     for i in 0..<row.length {
@@ -54,9 +54,9 @@ pub fn table(rows: List<List<Text>>) -> Text {
       }
     }
   }
-  var lines: List<Text> = []
+  var lines: List<String> = []
   for r in rows.indexed() {
-    var cells: List<Text> = []
+    var cells: List<String> = []
     for i in 0..<r.value.length {
       let cell = if r.index == 0 { bold(r.value[i]) } else { r.value[i] }
       cells.append(if i + 1 < r.value.length { pad(cell, columns: widths[i]) } else { cell })
@@ -71,7 +71,7 @@ pub fn table(rows: List<List<Text>>) -> Text {
 }
 
 // A size in bytes for people: 512 B, 1.5 KB, 23.4 MB, 1.2 GB (1 KB = 1024 B).
-pub fn size(bytes: Int) -> Text {
+pub fn size(bytes: Int) -> String {
   if bytes < 1024 {
     return "${bytes} B"
   }
@@ -87,10 +87,10 @@ pub fn size(bytes: Int) -> Text {
 
 // Asks a question on the terminal and returns the answer (without the line
 // break); an error if the input has ended.
-pub fn ask(question: Text) throws -> Text
+pub fn ask(question: String) throws -> String
 
 // Asks until the answer is yes or no (y / n; an empty answer is no).
-pub fn confirm(question: Text) throws -> Bool {
+pub fn confirm(question: String) throws -> Bool {
   while true {
     let answer = (try ask("${question} [y/N]")).trim().lower()
     if answer == "y" or answer == "yes" {
@@ -104,9 +104,9 @@ pub fn confirm(question: Text) throws -> Bool {
 }
 
 // Asks without showing what's typed: passwords.
-pub fn secret(question: Text) throws -> Text
+pub fn secret(question: String) throws -> String
 
 // Draws a progress line on standard error: [#########.....]  60% label.
 // Call it as work advances; at `done == total` it ends the line. Nothing is
 // drawn when standard error isn't a terminal.
-pub fn progress(done: Int, total: Int, label: Text)
+pub fn progress(done: Int, total: Int, label: String)

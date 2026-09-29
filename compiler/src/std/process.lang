@@ -3,14 +3,14 @@
 pub type Output {
   // the exit status: 0 means success
   status: Int
-  stdout: Text
-  stderr: Text
+  stdout: String
+  stderr: String
 }
 
 // Runs a program and waits for it to finish. The arguments are passed as
 // they are: there is no shell, so nothing needs quoting. A program that
 // exits with a non-zero status is not an error: check `output.status`.
-pub fn run(program: Text, args: List<Text>) throws -> Output
+pub fn run(program: String, args: List<String>) throws -> Output
 
 // A running program; get one with `with p = try process.start(...)`.
 // Reading reads its output (stdout); writing writes to its input (stdin).
@@ -24,10 +24,10 @@ pub fn run(program: Text, args: List<Text>) throws -> Output
 //   }
 pub builtin type Process {
   fn read(self, max: Int) throws -> Bytes
-  fn read_line(self) throws -> Text?
+  fn read_line(self) throws -> String?
   fn read_all(self) throws -> Bytes
   fn write(self, data: Bytes) throws
-  fn write_text(self, text: Text) throws
+  fn write_text(self, text: String) throws
   // Tells the program there is no more input.
   fn close_input(self) throws
   // Waits for the program to finish and returns its exit status. Output it
@@ -37,24 +37,24 @@ pub builtin type Process {
 }
 
 // Starts a program without waiting for it (see `run` for the arguments).
-pub fn start(program: Text, args: List<Text>) throws -> Process
+pub fn start(program: String, args: List<String>) throws -> Process
 
 // A program to run with more settings than `run` takes.
 pub type Command {
-  program: Text
-  args: List<Text> = []
+  program: String
+  args: List<String> = []
   // the directory to run it in; "" for the current one
-  dir: Text = ""
+  dir: String = ""
   // environment variables it gets on top of this program's
-  env: Map<Text, Text> = {}
+  env: Map<String, String> = {}
   // given as its standard input
-  input: Text = ""
+  input: String = ""
 }
 
 // Runs a `Command` to the end, like `run`:
 //   let out = try process.run_command(process.Command(program: "git", args: ["status"], dir: repo))
 pub fn run_command(command: Command) throws -> Output {
-  var pairs: List<Text> = []
+  var pairs: List<String> = []
   for entry in command.env {
     pairs.append(entry.key)
     pairs.append(entry.value)
@@ -62,14 +62,14 @@ pub fn run_command(command: Command) throws -> Output {
   return try __run(command.program, args: command.args, dir: command.dir, env: pairs, input: command.input)
 }
 
-fn __run(program: Text, args: List<Text>, dir: Text, env: List<Text>, input: Text) throws -> Output
+fn __run(program: String, args: List<String>, dir: String, env: List<String>, input: String) throws -> Output
 
 // Where a program is on PATH ("/usr/bin/git"), like `which`; none if it
 // isn't installed.
-pub fn find(program: Text) -> Text?
+pub fn find(program: String) -> String?
 
 // The command-line arguments, without the program's name.
-pub fn args() -> List<Text>
+pub fn args() -> List<String>
 
 // Stops the program with an exit status.
 pub fn exit(status: Int) -> Never

@@ -5,13 +5,13 @@ import json
 
 type Note {
   id: Int
-  title: Text
-  text: Text
+  title: String
+  text: String
 }
 
 type NewNote {
-  title: Text
-  text: Text
+  title: String
+  text: String
 }
 
 type NotesState {

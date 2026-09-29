@@ -1,5 +1,5 @@
 interface Describable {
-  fn describe(self) -> Text
+  fn describe(self) -> String
 }
 
 type PricingRule {
@@ -34,19 +34,19 @@ fn combine_rules(rules: List<PricingRule>) -> PricingRule {
 }
 
 type Product implements Describable {
-  name: Text
+  name: String
   price: Decimal
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Product: ${self.name} costs ${self.price}"
   }
 }
 
 type Service implements Describable {
-  name: Text
+  name: String
   hourly_rate: Decimal
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Service: ${self.name} at ${self.hourly_rate} per hour"
   }
 }

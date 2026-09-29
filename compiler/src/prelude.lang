@@ -6,7 +6,7 @@
 builtin type Int {
   fn to_float(self) -> Float
   fn to_decimal(self) -> Decimal
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   fn div(self, by: Int) -> Int
   fn abs(self) -> Int
   fn pow(self, exponent: Int) -> Int
@@ -24,9 +24,9 @@ builtin type Float {
   fn round(self) -> Int
   fn floor(self) -> Int
   fn ceil(self) -> Int
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   // With exactly `decimals` digits after the point: 3.14159.format(2) == "3.14"
-  fn format(self, decimals: Int) -> Text
+  fn format(self, decimals: Int) -> String
   fn abs(self) -> Float
   fn pow(self, exponent: Float) -> Float
   fn sqrt(self) -> Float
@@ -46,45 +46,45 @@ builtin type Decimal {
   fn abs(self) -> Decimal
   fn to_float(self) -> Float
   // "19.99"
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
   // Rounded to `places` digits: 2.5.format(2) == "2.50"
-  fn format(self, places: Int) -> Text {
-    return self.round(places).to_text()
+  fn format(self, places: Int) -> String {
+    return self.round(places).to_string()
   }
 }
 
-fn __decimal(text: Text) -> Decimal
+fn __decimal(text: String) -> Decimal
 
 builtin type Bool {
-  fn to_text(self) -> Text
+  fn to_string(self) -> String
 }
 
-builtin type Text {
+builtin type String {
   length: Int
   fn is_empty(self) -> Bool {
     return self.byte_length() == 0
   }
   fn byte_length(self) -> Int
-  fn lower(self) -> Text
-  fn upper(self) -> Text
-  fn trim(self) -> Text
-  fn split(self, separator: Text) -> List<Text>
-  fn lines(self) -> List<Text>
-  fn words(self) -> List<Text>
-  fn chars(self) -> List<Text>
-  fn contains(self, part: Text) -> Bool
-  fn starts_with(self, prefix: Text) -> Bool
-  fn ends_with(self, suffix: Text) -> Bool
-  fn replace(self, old: Text, new: Text) -> Text
-  fn slice(self, from: Int, to: Int) -> Text
-  fn repeat(self, times: Int) -> Text
-  fn pad_start(self, width: Int, fill: Text) -> Text
-  fn pad_end(self, width: Int, fill: Text) -> Text
+  fn lower(self) -> String
+  fn upper(self) -> String
+  fn trim(self) -> String
+  fn split(self, separator: String) -> List<String>
+  fn lines(self) -> List<String>
+  fn words(self) -> List<String>
+  fn chars(self) -> List<String>
+  fn contains(self, part: String) -> Bool
+  fn starts_with(self, prefix: String) -> Bool
+  fn ends_with(self, suffix: String) -> Bool
+  fn replace(self, old: String, new: String) -> String
+  fn slice(self, from: Int, to: Int) -> String
+  fn repeat(self, times: Int) -> String
+  fn pad_start(self, width: Int, fill: String) -> String
+  fn pad_end(self, width: Int, fill: String) -> String
   fn to_int(self) throws -> Int
   fn to_float(self) throws -> Float
   // "19.99" -> 19.99 exactly
   fn to_decimal(self) throws -> Decimal
-  fn to_text(self) -> Text {
+  fn to_string(self) -> String {
     return self
   }
   // The text as UTF-8 bytes.
@@ -100,12 +100,12 @@ builtin type Bytes {
     return self.length == 0
   }
   // The text these bytes encode (UTF-8); an error if they aren't valid UTF-8.
-  fn text(self) throws -> Text
+  fn text(self) throws -> String
   fn slice(self, from: Int, to: Int) -> Bytes
   fn concat(self, other: Bytes) -> Bytes
   fn index_of(self, part: Bytes) -> Int?
-  fn hex(self) -> Text
-  fn base64(self) -> Text
+  fn hex(self) -> String
+  fn base64(self) -> String
   fn to_list(self) -> List<Int>
   // An unsigned big-endian number of `size` bytes (1-8) at `offset`
   // (network protocols).
@@ -113,7 +113,7 @@ builtin type Bytes {
 
   mutating fn append(byte: Int)
   mutating fn append_all(other: Bytes)
-  mutating fn append_text(text: Text)
+  mutating fn append_text(text: String)
   // Adds `value` as `size` big-endian bytes.
   mutating fn append_int(value: Int, size: Int)
 }
@@ -336,7 +336,7 @@ builtin type List<T> {
     }
     return best
   }
-  fn join(self, separator: Text) -> Text
+  fn join(self, separator: String) -> String
   fn parallel_map<R>(self, limit: Int, transform: fn(T) throws -> R) rethrows -> List<R> {
     var out: List<R> = __list_with_capacity(self.length)
     var start = 0
@@ -443,14 +443,14 @@ builtin type Channel<T> {
 
 // Raised in a task that was cancelled, at its next wait.
 type Cancelled implements Error {
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "the task was cancelled"
   }
 }
 
 // Raised by `send` on a closed channel.
 type ChannelClosed implements Error {
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "the channel is closed"
   }
 }
@@ -477,14 +477,14 @@ type Pair<A, B> {
 }
 
 interface Error {
-  fn message(self) -> Text
+  fn message(self) -> String
 }
 
 type Failure implements Error {
-  message: Text
+  message: String
   cause: Error? = none
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     if self.cause is some(c) {
       return "${self.message}: ${c.message()}"
     }
@@ -493,14 +493,14 @@ type Failure implements Error {
 }
 
 // A line to standard output.
-fn print(text: Text)
+fn print(text: String)
 // A line to standard error: errors and messages for people, kept apart from
 // the program's output (see also the `log` module).
-fn eprint(text: Text)
+fn eprint(text: String)
 fn min<T>(a: T, b: T) -> T
 fn max<T>(a: T, b: T) -> T
 fn assert(condition: Bool)
-fn panic(message: Text) -> Never
+fn panic(message: String) -> Never
 
 fn __list_with_capacity<T>(capacity: Int) -> List<T>
 fn __less<T>(a: T, b: T) -> Bool

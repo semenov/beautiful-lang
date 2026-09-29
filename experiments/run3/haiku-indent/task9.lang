@@ -1,32 +1,32 @@
 import files
 
 interface Listable
-  fn list_keys(self) -> List<Text>
+  fn list_keys(self) -> List<String>
 
 interface Storage
-  fn get(self, key: Text) -> Text?
-  fn put(var self, key: Text, value: Text)
-  fn delete(var self, key: Text)
+  fn get(self, key: String) -> String?
+  fn put(var self, key: String, value: String)
+  fn delete(var self, key: String)
 
 type MemoryStorage implements Storage, Listable
-  data: Map<Text, Text> = {}
+  data: Map<String, String> = {}
 
-  fn get(self, key: Text) -> Text?
+  fn get(self, key: String) -> String?
     return self.data[key]
 
-  fn put(var self, key: Text, value: Text)
+  fn put(var self, key: String, value: String)
     self.data[key] = value
 
-  fn delete(var self, key: Text)
+  fn delete(var self, key: String)
     self.data.remove(key)
 
-  fn list_keys(self) -> List<Text>
+  fn list_keys(self) -> List<String>
     return self.data.keys()
 
 type FileStorage implements Storage, Listable
-  directory: Text
+  directory: String
 
-  fn get(self, key: Text) -> Text?
+  fn get(self, key: String) -> String?
     let path = "${self.directory}/${key}"
     if files.exists(path)
       let content = try files.read(path) catch err
@@ -35,20 +35,20 @@ type FileStorage implements Storage, Listable
     else
       return none
 
-  fn put(var self, key: Text, value: Text)
+  fn put(var self, key: String, value: String)
     let path = "${self.directory}/${key}"
     try files.write(path, value)
 
-  fn delete(var self, key: Text)
+  fn delete(var self, key: String)
     let path = "${self.directory}/${key}"
     try files.delete(path)
 
-  fn list_keys(self) -> List<Text>
+  fn list_keys(self) -> List<String>
     let all_files = try files.list(self.directory) catch err
       return []
     return all_files
 
-fn copy_with_prefix(var source: MemoryStorage, var dest: FileStorage, prefix: Text)
+fn copy_with_prefix(var source: MemoryStorage, var dest: FileStorage, prefix: String)
   let keys = source.list_keys()
 
   for key in keys

@@ -5,14 +5,14 @@ import db
 import env
 
 pub type Config
-  database_url: Text
+  database_url: String
 
 pub type Options
-  args: List<Text> = []
+  args: List<String> = []
 
 pub type User
   id: Int
-  name: Text
+  name: String
   age: Int
 
 fn main() throws

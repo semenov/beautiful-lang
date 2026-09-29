@@ -28,7 +28,7 @@ pub type Duration {
   }
 
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
-  pub fn text(self) -> Text {
+  pub fn text(self) -> String {
     let n = self.nanos
     if n < 0 {
       return "-${Duration(nanos: 0 - n).text()}"
@@ -63,7 +63,7 @@ pub type Duration {
   }
 }
 
-fn trim_zeros(t: Text) -> Text {
+fn trim_zeros(t: String) -> String {
   if not t.contains(".") {
     return t
   }
@@ -90,7 +90,7 @@ pub fn days(n: Int) -> Duration {
 }
 
 // "1h30m", "90s", "1.5s", "250ms", "10us" (or µs), "10ns", "2d", "-5m".
-pub fn parse_duration(text: Text) throws -> Duration {
+pub fn parse_duration(text: String) throws -> Duration {
   let bad = Failure(message: "time: \"${text}\" is not a duration like 1h30m, 90s or 250ms")
   var s = text.trim()
   var sign = 1
@@ -217,7 +217,7 @@ pub fn timeout<R>(duration: Duration, work: fn() throws -> R) throws -> R {
 pub type TimedOut implements Error {
   after: Duration
 
-  fn message(self) -> Text {
+  fn message(self) -> String {
     return "timed out after ${self.after.seconds()}s"
   }
 }
@@ -235,15 +235,15 @@ pub type DateTime {
   second: Int
 
   // "2026-09-29T12:00:00Z"
-  pub fn iso(self) -> Text {
+  pub fn iso(self) -> String {
     let d = "${self.year}-${pad(self.month)}-${pad(self.day)}"
     return "${d}T${pad(self.hour)}:${pad(self.minute)}:${pad(self.second)}Z"
   }
 
   // The same moment on the wall clock of a time zone:
   //   let berlin = try moment.in_zone("Europe/Berlin")   // 14:05 UTC -> 16:05 +02:00
-  pub fn in_zone(self, zone: Text) throws -> Zoned {
-    var abbr: List<Text> = []
+  pub fn in_zone(self, zone: String) throws -> Zoned {
+    var abbr: List<String> = []
     let f = try __zone_fields(zone, unix: self.to_unix(), abbreviation: abbr)
     return Zoned(year: f[0], month: f[1], day: f[2], hour: f[3], minute: f[4], second: f[5], offset: f[6], zone: zone, abbreviation: abbr.first() ?? zone)
   }
@@ -262,7 +262,7 @@ pub type DateTime {
   // year, %e day without zero, %I hour 1-12, %p AM/PM, %B September, %b Sep,
   // %A Tuesday, %a Tue, %j day of the year, %s Unix seconds, %z +0000,
   // %Z UTC, %% a percent sign.
-  pub fn format(self, pattern: Text) -> Text {
+  pub fn format(self, pattern: String) -> String {
     return format_parts(self, pattern: pattern, offset: 0, zone: "UTC")
   }
 
@@ -309,7 +309,7 @@ pub type DateTime {
 
 // Reads "2026-09-29", "2026-09-29T12:30:00Z" or "2026-09-29 12:30:00"
 // (UTC; an offset like +02:00 is converted to UTC).
-pub fn parse_iso(text: Text) throws -> DateTime {
+pub fn parse_iso(text: String) throws -> DateTime {
   let t = text.trim()
   let bad = Failure(message: "time: \"${text}\" is not a date like 2026-09-29 or 2026-09-29T12:30:00Z")
   if t.length < 10 {
@@ -377,8 +377,8 @@ pub fn parse_iso(text: Text) throws -> DateTime {
   throw bad
 }
 
-fn pad(n: Int) -> Text {
-  return n.to_text().pad_start(width: 2, fill: "0")
+fn pad(n: Int) -> String {
+  return n.to_string().pad_start(width: 2, fill: "0")
 }
 
 // The current date and time in UTC.
@@ -416,7 +416,7 @@ pub enum Weekday {
   Sunday
 }
 
-fn weekday_name(w: Weekday) -> Text {
+fn weekday_name(w: Weekday) -> String {
   return match w {
     Monday => "Monday"
     Tuesday => "Tuesday"
@@ -428,7 +428,7 @@ fn weekday_name(w: Weekday) -> Text {
   }
 }
 
-fn month_name(m: Int) -> Text {
+fn month_name(m: Int) -> String {
   let names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
   return names[m - 1]
 }
@@ -448,8 +448,8 @@ pub type Date {
   day: Int
 
   // "2026-09-29"
-  pub fn iso(self) -> Text {
-    return "${self.year.to_text().pad_start(width: 4, fill: "0")}-${pad(self.month)}-${pad(self.day)}"
+  pub fn iso(self) -> String {
+    return "${self.year.to_string().pad_start(width: 4, fill: "0")}-${pad(self.month)}-${pad(self.day)}"
   }
 
   // Days since 1970-01-01 (negative before).
@@ -494,7 +494,7 @@ pub type Date {
     return DateTime(year: self.year, month: self.month, day: self.day, hour: hour, minute: minute, second: second)
   }
 
-  pub fn format(self, pattern: Text) -> Text {
+  pub fn format(self, pattern: String) -> String {
     return self.at(0, minute: 0, second: 0).format(pattern)
   }
 }
@@ -505,12 +505,12 @@ pub fn today() -> Date {
 }
 
 // "2026-09-29"
-pub fn parse_date(text: Text) throws -> Date {
+pub fn parse_date(text: String) throws -> Date {
   return (try parse_iso(text.trim().slice(from: 0, to: min(text.trim().length, 10)))).date()
 }
 
-fn format_parts(dt: DateTime, pattern: Text, offset: Int, zone: Text) -> Text {
-  var out: List<Text> = []
+fn format_parts(dt: DateTime, pattern: String, offset: Int, zone: String) -> String {
+  var out: List<String> = []
   let chars = pattern.chars()
   var i = 0
   while i < chars.length {
@@ -526,10 +526,10 @@ fn format_parts(dt: DateTime, pattern: Text, offset: Int, zone: Text) -> Text {
     let sign = if offset < 0 { "-" } else { "+" }
     let off = if offset < 0 { 0 - offset } else { offset }
     out.append(match f {
-      "Y" => dt.year.to_text()
+      "Y" => dt.year.to_string()
       "m" => pad(dt.month)
       "d" => pad(dt.day)
-      "e" => dt.day.to_text()
+      "e" => dt.day.to_string()
       "H" => pad(dt.hour)
       "M" => pad(dt.minute)
       "S" => pad(dt.second)
@@ -540,8 +540,8 @@ fn format_parts(dt: DateTime, pattern: Text, offset: Int, zone: Text) -> Text {
       "b" => month_name(dt.month).slice(from: 0, to: 3)
       "A" => weekday_name(dt.weekday())
       "a" => weekday_name(dt.weekday()).slice(from: 0, to: 3)
-      "j" => (dt.date().to_days() - Date(year: dt.year, month: 1, day: 1).to_days() + 1).to_text().pad_start(width: 3, fill: "0")
-      "s" => (dt.to_unix() - offset).to_text()
+      "j" => (dt.date().to_days() - Date(year: dt.year, month: 1, day: 1).to_days() + 1).to_string().pad_start(width: 3, fill: "0")
+      "s" => (dt.to_unix() - offset).to_string()
       "z" => "${sign}${pad(off.div(3600))}${pad((off % 3600).div(60))}"
       "Z" => zone
       "%" => "%"
@@ -555,7 +555,7 @@ fn format_parts(dt: DateTime, pattern: Text, offset: Int, zone: Text) -> Text {
 //   try time.parse("29/09/2026 14:05", pattern: "%d/%m/%Y %H:%M")
 // Fields the pattern doesn't have are 0 (or 1 for month and day); with %z
 // the result is converted to UTC.
-pub fn parse(text: Text, pattern: Text) throws -> DateTime {
+pub fn parse(text: String, pattern: String) throws -> DateTime {
   let bad = Failure(message: "time: \"${text}\" doesn't match the pattern \"${pattern}\"")
   let s = text.chars()
   let p = pattern.chars()
@@ -685,19 +685,19 @@ pub type Zoned {
   // seconds east of UTC: 7200 for Berlin in summer, -18000 for New York in winter
   offset: Int
   // "Europe/Berlin"
-  zone: Text
+  zone: String
   // "CEST"
-  abbreviation: Text
+  abbreviation: String
 
   // "2026-09-29T16:05:09+02:00"
-  pub fn iso(self) -> Text {
+  pub fn iso(self) -> String {
     let sign = if self.offset < 0 { "-" } else { "+" }
     let off = if self.offset < 0 { 0 - self.offset } else { self.offset }
     return "${self.wall().iso().slice(from: 0, to: 19)}${sign}${pad(off.div(3600))}:${pad((off % 3600).div(60))}"
   }
 
   // As `DateTime.format`; %z gives the offset (+0200), %Z the abbreviation.
-  pub fn format(self, pattern: Text) -> Text {
+  pub fn format(self, pattern: String) -> String {
     return format_parts(self.wall(), pattern: pattern, offset: self.offset, zone: self.abbreviation)
   }
 
@@ -719,18 +719,18 @@ pub type Zoned {
 //   let meeting = try time.in_zone("Europe/Berlin", date: d, hour: 9, minute: 30)
 // A time skipped by a clock change moves forward; a repeated one takes
 // the first.
-pub fn in_zone(zone: Text, date: Date, hour: Int, minute: Int) throws -> DateTime {
+pub fn in_zone(zone: String, date: Date, hour: Int, minute: Int) throws -> DateTime {
   return from_unix(try __zone_unix(zone, fields: [date.year, date.month, date.day, hour, minute, 0]))
 }
 
 // Now, on the wall clock of `zone`.
-pub fn now_in(zone: Text) throws -> Zoned {
+pub fn now_in(zone: String) throws -> Zoned {
   return try utc_now().in_zone(zone)
 }
 
 // This machine's zone ("Europe/Berlin"): TZ, else the system setting,
 // else "UTC".
-pub fn local_zone() -> Text
+pub fn local_zone() -> String
 
-fn __zone_fields(zone: Text, unix: Int, abbreviation: List<Text>) throws -> List<Int>
-fn __zone_unix(zone: Text, fields: List<Int>) throws -> Int
+fn __zone_fields(zone: String, unix: Int, abbreviation: List<String>) throws -> List<Int>
+fn __zone_unix(zone: String, fields: List<Int>) throws -> Int

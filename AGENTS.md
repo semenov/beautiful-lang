@@ -7,7 +7,7 @@ prints this). Look up any library from the command line:
 lang doc                     the modules
 lang doc http                one module's API, with its comments
 lang doc http.Router         one type or function
-lang doc List.map            built-in types: List, Map, Set, Text, Bytes, Int, ...
+lang doc List.map            built-in types: List, Map, Set, String, Bytes, Int, ...
 lang doc --search gzip       find by name or description
 lang guide errors            one section of this guide
 ```
@@ -34,7 +34,7 @@ reasons behind the rules are in `DESIGN.md`.
 let x = 5                      // constant
 var total = 0                  // variable
 total += x
-let name: Text = "Ada"         // types: Int, Float, Bool, Text, Bytes,
+let name: String = "Ada"         // types: Int, Float, Bool, String, Bytes,
                                // List<T>, Map<K, V>, Set<T>, T?
 let greeting = "Hi ${name}!"   // interpolation is ${...}
 let long = """
@@ -59,13 +59,13 @@ while running { ... }
 for entry in map { print("${entry.key}: ${entry.value}") }
 for item in list.indexed() { print("${item.index}: ${item.value}") }
 
-var names: List<Text> = []     // empty literals need a type: [] and {}
+var names: List<String> = []     // empty literals need a type: [] and {}
 names.append("Ada")
-var ages: Map<Text, Int> = {}
+var ages: Map<String, Int> = {}
 ages["Ada"] = 36               // add or replace
 let age = ages["Ada"] ?? 0     // reading gives Int?
 ages.remove("Ada")
-let counts = words.count_each()               // Map<Text, Int>
+let counts = words.count_each()               // Map<String, Int>
 let top = counts.entries().sorted_by(e => e.value).reversed().take(10)
 
 let size = if n > 100 { "big" } else { "small" }   // if and match give values
@@ -82,15 +82,15 @@ No semicolons. Braces always. `if` conditions have no parentheses.
 ```
 type User {                    // a record: a value, copied on assignment
   id: Int
-  name: Text
-  email: Text? = none          // optional, with a default
+  name: String
+  email: String? = none          // optional, with a default
   active: Bool = true          // default: may be left out when building
 }
 let u = User(id: 1, name: "Ada")   // fields are always named
 
 enum Status {                  // variants, with or without data
   Draft
-  Published(at: Text)
+  Published(at: String)
 }
 let s = Published(at: "today")     // variants of your own enums: bare names
 let v = json.Value.Null            // from another module: module.Enum.Variant
@@ -100,11 +100,11 @@ type UserId = Int              // a NEW type, not an alias: UserId(5), id.value
 type User implements Describable { ... }   // interfaces are explicit
 
 interface Describable {
-  fn describe(self) -> Text
+  fn describe(self) -> String
 }
 ```
 
-- Methods go inside the type: `fn describe(self) -> Text { ... }`. A method
+- Methods go inside the type: `fn describe(self) -> String { ... }`. A method
   that changes the value is `mutating fn add(x: Int) { self.items.append(x) }`
   and needs a `var`.
 - No classes, inheritance, overloading, operator overloading, tuples or
@@ -115,7 +115,7 @@ interface Describable {
 ## Missing values
 
 ```
-let email: Text? = user.email
+let email: String? = user.email
 let shown = email ?? "(none)"                 // a fallback
 if email is some(e) { send(e) }               // unwrap
 if email is none { return }
@@ -128,7 +128,7 @@ let user = users[id] ?? throw NotFound(id: id)
 ## Errors
 
 ```
-fn load(path: Text) throws -> Config {          // can fail: `throws`
+fn load(path: String) throws -> Config {          // can fail: `throws`
   let text = try files.read(path)               // every failing call: `try`
   return try json.decode<Config>(text)
 }
@@ -146,7 +146,7 @@ let text = try files.read(path) catch err {     // handle it here
 - `try` covers the whole expression after it: `try (try f()).text()` is
   needless; `try f().text()` checks both calls.
 - Your own errors: `type NotFound implements Error { id: Int  fn message(self)
-  -> Text { return "no ${self.id}" } }`, or `Failure(message: "...")` from
+  -> String { return "no ${self.id}" } }`, or `Failure(message: "...")` from
   the prelude.
 - Bugs (`panic("...")`, `assert`, overflow, a bad index) can't be caught.
 
@@ -175,7 +175,7 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
 - **`/` on two `Int`s is an error.** Write `a.div(b)` (whole numbers) or
   `a.to_float() / b.to_float()`.
 - Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`.
-- Text to numbers: `try text.to_int()`, `try text.to_float()`.
+- String to numbers: `try text.to_int()`, `try text.to_float()`.
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
   `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;
   `n.to_decimal()` from an Int; `1.50` prints as `1.50` and equals `1.5`.
@@ -225,7 +225,7 @@ let counter = Shared<Int>(0)              // shared state: only through a lock
 with n = counter.lock() {
   n += 1
 }
-let jobs = Channel<Text>(capacity: 100)   // passing data between tasks
+let jobs = Channel<String>(capacity: 100)   // passing data between tasks
 ```
 
 A task can't be returned, put in a record or captured by a lambda (so no
@@ -354,4 +354,4 @@ see private functions.
 | the result is not used | `let _ = f()` |
 | `f` has 3 or more parameters: name every argument after the first | `f(a, b: 1, c: 2)` |
 | the SQL must be written right here | put values in the parameter list |
-| expected `Text`, found `Int` | `"${n}"` or `n.to_text()` |
+| expected `String`, found `Int` | `"${n}"` or `n.to_string()` |

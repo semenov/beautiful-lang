@@ -35,25 +35,25 @@ fn to_list(tree: Tree) -> List<Int> {
 }
 
 interface Storage {
-  fn get(self, key: Text) -> Text?
-  mutating fn put(key: Text, value: Text)
+  fn get(self, key: String) -> String?
+  mutating fn put(key: String, value: String)
 }
 
 type Memory implements Storage {
-  data: Map<Text, Text> = {}
+  data: Map<String, String> = {}
 
-  fn get(self, key: Text) -> Text? {
+  fn get(self, key: String) -> String? {
     return self.data[key]
   }
 
-  mutating fn put(key: Text, value: Text) {
+  mutating fn put(key: String, value: String) {
     self.data[key] = value
   }
 }
 
 type Order {
   id: Int
-  items: List<Text> = []
+  items: List<String> = []
 }
 
 type Point {
@@ -61,7 +61,7 @@ type Point {
   y: Int
 }
 
-fn parse_all(texts: List<Text>) throws -> List<Int> {
+fn parse_all(texts: List<String>) throws -> List<Int> {
   return try texts.map(t => try t.to_int())
 }
 
@@ -77,7 +77,7 @@ test "generic stack" {
   expect s.pop() == 2
   expect s.pop() == 1
   expect s.pop() == none
-  var names = Stack<Text>()
+  var names = Stack<String>()
   names.push("a")
   expect names.items == ["a"]
 }
@@ -139,7 +139,7 @@ test "maps, sets and grouping" {
   expect counts.keys() == ["b", "a", "c"]
   let groups = [1, 2, 3, 4, 5, 6].group_by(x => x % 3)
   expect groups[0] == [3, 6]
-  var seen = Set<Text>()
+  var seen = Set<String>()
   for w in words {
     seen.add(w)
   }
@@ -208,7 +208,7 @@ test "control flow" {
 }
 
 test "flow typing" {
-  let values: Map<Text, Int> = {"a": 1}
+  let values: Map<String, Int> = {"a": 1}
   let v = values["a"]
   if v is none {
     panic("missing")

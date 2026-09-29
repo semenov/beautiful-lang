@@ -7,8 +7,8 @@ type Count {
 
 type Note {
   id: Int
-  body: Text
-  created: Text
+  body: String
+  created: String
   data: Bytes?
 }
 

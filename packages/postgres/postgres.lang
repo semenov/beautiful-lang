@@ -75,7 +75,7 @@ pub type Connection {
 }
 
 // Connects to "postgres://user:password@host:port/database?sslmode=prefer".
-pub fn connect(address: Text) throws -> Connection {
+pub fn connect(address: String) throws -> Connection {
   let u = try url.parse(address)
   if u.scheme != "postgres" and u.scheme != "postgresql" {
     throw Failure(message: "postgres: the address must start with postgres://")
@@ -122,7 +122,7 @@ pub fn connect(address: Text) throws -> Connection {
 
 // ---- login
 
-fn authenticate(conn: io.Stream, user: Text, password: Text) throws {
+fn authenticate(conn: io.Stream, user: String, password: String) throws {
   var nonce = ""
   var first_bare = ""
   var salted = Bytes()
@@ -161,7 +161,7 @@ fn authenticate(conn: io.Stream, user: Text, password: Text) throws {
       try conn.write(message("p", body))
     } else if code == 11 {
       let server_first = try r.rest().text()
-      var fields: Map<Text, Text> = {}
+      var fields: Map<String, String> = {}
       for part in server_first.split(",") {
         if part.byte_length() > 2 {
           fields[part.slice(from: 0, to: 1)] = part.slice(from: 2, to: part.length)
@@ -204,13 +204,13 @@ fn authenticate(conn: io.Stream, user: Text, password: Text) throws {
 // ---- queries
 
 type Result {
-  columns: List<Text>
+  columns: List<String>
   types: List<Int>
   rows: List<List<sql.Value>>
-  tag: Text
+  tag: String
 }
 
-fn run(conn: io.Stream, query: Text, params: List<sql.Value>) throws -> Result {
+fn run(conn: io.Stream, query: String, params: List<sql.Value>) throws -> Result {
   var out = Bytes()
   // Parse: an unnamed statement, the server infers parameter types
   var parse = Bytes()
@@ -289,7 +289,7 @@ fn run(conn: io.Stream, query: Text, params: List<sql.Value>) throws -> Result {
   return result
 }
 
-fn param_text(v: sql.Value) -> Text? {
+fn param_text(v: sql.Value) -> String? {
   return match v {
     sql.Value.Null => none
     sql.Value.Integer(value) => "${value}"
@@ -300,7 +300,7 @@ fn param_text(v: sql.Value) -> Text? {
   }
 }
 
-// Text from the server -> a value, by the column's type
+// String from the server -> a value, by the column's type
 fn column_value(data: Bytes, type_id: Int) throws -> sql.Value {
   let text = try data.text()
   if type_id == 16 {
@@ -320,7 +320,7 @@ fn column_value(data: Bytes, type_id: Int) throws -> sql.Value {
 
 fn server_error(body: Bytes) -> Error {
   var r = Reader(data: body)
-  var fields: Map<Text, Text> = {}
+  var fields: Map<String, String> = {}
   while r.pos < body.length {
     let code = r.take(1)
     if code.int_at(0, size: 1) == 0 {
@@ -347,11 +347,11 @@ fn server_error(body: Bytes) -> Error {
 // ---- messages
 
 type Message {
-  kind: Text
+  kind: String
   body: Bytes
 }
 
-fn message(kind: Text, body: Bytes) -> Bytes {
+fn message(kind: String, body: Bytes) -> Bytes {
   var out = Bytes()
   out.append_text(kind)
   out.append_int(body.length + 4, size: 4)
@@ -401,7 +401,7 @@ type Reader {
   }
 
   // text up to a zero byte
-  mutating fn cstring() throws -> Text {
+  mutating fn cstring() throws -> String {
     let rest = self.data.slice(from: self.pos, to: self.data.length)
     let end = rest.index_of(Bytes([0])) ?? rest.length
     self.pos += end + 1

@@ -1,22 +1,22 @@
 type Rule = fn(Float) -> Float
 
 interface Describable {
-  fn describe(self) -> Text
+  fn describe(self) -> String
 }
 
 type Order implements Describable {
   id: Int
   total: Float
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Order #${self.id}: ${self.total}"
   }
 }
 
 type Customer implements Describable {
-  name: Text
+  name: String
 
-  fn describe(self) -> Text {
+  fn describe(self) -> String {
     return "Customer ${self.name}"
   }
 }

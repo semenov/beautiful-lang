@@ -2,12 +2,12 @@ import files
 import cli
 
 type Options
-  file: Text
+  file: String
   top: Int = 10
   min_length: Int = 1
 
-fn count_words(text: Text, min_length: Int) -> Map<Text, Int>
-  var counts: Map<Text, Int> = {}
+fn count_words(text: String, min_length: Int) -> Map<String, Int>
+  var counts: Map<String, Int> = {}
   let words = text.lower().split(r"[^\w]+")
 
   for word in words
@@ -17,7 +17,7 @@ fn count_words(text: Text, min_length: Int) -> Map<Text, Int>
 
   return counts
 
-fn average_word_length(text: Text) -> Float
+fn average_word_length(text: String) -> Float
   let words = text.lower().split(r"[^\w]+").filter(w => not w.is_empty())
   if words.is_empty()
     return 0.0

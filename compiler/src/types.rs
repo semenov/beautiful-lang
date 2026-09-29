@@ -92,7 +92,7 @@ pub enum TypeKind {
     Enum { variants: Vec<VariantDef> },
     Newtype(Ty),
     Interface { methods: Vec<FnId> },
-    // List, Map, Set, Int, Float, Bool, Text: implemented by the runtime
+    // List, Map, Set, Int, Float, Bool, String: implemented by the runtime
     Builtin,
 }
 
@@ -332,7 +332,7 @@ impl Program {
             Ty::Int => "Int".into(),
             Ty::Float => "Float".into(),
             Ty::Bool => "Bool".into(),
-            Ty::Text => "Text".into(),
+            Ty::Text => "String".into(),
             Ty::Unit => "nothing".into(),
             Ty::Never => "Never".into(),
             Ty::Adt(d, args) => {

@@ -7,32 +7,32 @@ import tasks
 import time
 
 pub type GithubUser
-  login: Text
-  name: Text? = none
-  bio: Text? = none
+  login: String
+  name: String? = none
+  bio: String? = none
 
 // The fetch is behind an interface so tests can substitute a fake client
 // instead of hitting the network.
 pub interface GithubClient
-  fn fetch(self, username: Text) throws -> GithubUser
+  fn fetch(self, username: String) throws -> GithubUser
 
 pub type HttpGithubClient implements GithubClient
-  fn fetch(self, username: Text) throws -> GithubUser
+  fn fetch(self, username: String) throws -> GithubUser
     let response = try http.get("https://api.github.com/users/${username}")
     return try json.decode<GithubUser>(response.body)
 
 pub type FetchOutcome
-  username: Text
+  username: String
   user: GithubUser? = none
 
-fn fetch_outcome(client: GithubClient, username: Text) -> FetchOutcome
+fn fetch_outcome(client: GithubClient, username: String) -> FetchOutcome
   let user = try client.fetch(username) catch err
     none
   return FetchOutcome(username: username, user: user)
 
 // Fetches every username at the same time, giving up after 5 seconds
 // total. A single failed fetch doesn't stop the others.
-fn fetch_all(client: GithubClient, usernames: List<Text>) throws -> List<FetchOutcome>
+fn fetch_all(client: GithubClient, usernames: List<String>) throws -> List<FetchOutcome>
   return try time.timeout(time.seconds(5), () =>
     with group = try tasks.group()
       let running = usernames.map(name => group.run(() => fetch_outcome(client, name)))
@@ -59,10 +59,10 @@ fn main() throws
   print_outcomes(outcomes)
 
 pub type FakeGithubClient implements GithubClient
-  users: Map<Text, GithubUser> = {}
-  failing: Set<Text> = Set<Text>()
+  users: Map<String, GithubUser> = {}
+  failing: Set<String> = Set<String>()
 
-  fn fetch(self, username: Text) throws -> GithubUser
+  fn fetch(self, username: String) throws -> GithubUser
     if self.failing.contains(username)
       throw Failure(message: "simulated failure for ${username}")
     match self.users[username]

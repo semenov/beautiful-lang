@@ -1,9 +1,9 @@
 type Person {
-  name: Text
+  name: String
   age: Int
 }
 
-fn parse_csv(text: Text) throws -> List<Person> {
+fn parse_csv(text: String) throws -> List<Person> {
   let lines = text.split("\n")
   if lines.is_empty() {
     throw Failure(message: "Empty CSV")

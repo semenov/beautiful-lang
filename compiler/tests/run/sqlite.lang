@@ -4,13 +4,13 @@ type UserId = Int
 
 type User {
   id: UserId
-  name: Text
+  name: String
   age: Int
   active: Bool = true
-  email: Text?
+  email: String?
 }
 
-fn add(conn: db.Connection, name: Text, age: Int) throws -> Int {
+fn add(conn: db.Connection, name: String, age: Int) throws -> Int {
   try conn.execute("insert into users (name, age, active) values (?, ?, ?)", [name, age, age < 60])
   return conn.last_id()
 }

@@ -1,8 +1,8 @@
 import redis
 import time
 
-fn listen() throws -> List<Text> {
-  var got: List<Text> = []
+fn listen() throws -> List<String> {
+  var got: List<String> = []
   with sub = try redis.subscribe("localhost:6379", channels: ["news"]) {
     for _ in 0..<3 {
       let m = try sub.receive()
@@ -30,7 +30,7 @@ fn main() throws {
     }
     let ms = start.elapsed().millis()
     print("20000 sets one by one: ${(20000 * 1000).div(ms + 1)} per second")
-    var batch: List<List<Text>> = []
+    var batch: List<List<String>> = []
     for i in 0..<20000 {
       batch.append(["SET", "k${i}", "v"])
     }

@@ -1,55 +1,55 @@
 import files
 
 interface Storage {
-  fn get(self, key: Text) -> Text?
-  fn put(var self, key: Text, value: Text) throws
-  fn delete(var self, key: Text) throws
+  fn get(self, key: String) -> String?
+  fn put(var self, key: String, value: String) throws
+  fn delete(var self, key: String) throws
 }
 
 interface Listable {
-  fn keys(self) -> List<Text>
+  fn keys(self) -> List<String>
 }
 
 type MemoryStorage implements Storage {
-  data: Map<Text, Text>
+  data: Map<String, String>
 
-  fn get(self, key: Text) -> Text? {
+  fn get(self, key: String) -> String? {
     return self.data[key]
   }
 
-  fn put(var self, key: Text, value: Text) throws {
+  fn put(var self, key: String, value: String) throws {
     self.data[key] = value
   }
 
-  fn delete(var self, key: Text) throws {
+  fn delete(var self, key: String) throws {
     self.data.remove(key)
   }
 }
 
 type ListableMemory implements Storage, Listable {
-  data: Map<Text, Text>
+  data: Map<String, String>
 
-  fn get(self, key: Text) -> Text? {
+  fn get(self, key: String) -> String? {
     return self.data[key]
   }
 
-  fn put(var self, key: Text, value: Text) throws {
+  fn put(var self, key: String, value: String) throws {
     self.data[key] = value
   }
 
-  fn delete(var self, key: Text) throws {
+  fn delete(var self, key: String) throws {
     self.data.remove(key)
   }
 
-  fn keys(self) -> List<Text> {
+  fn keys(self) -> List<String> {
     return self.data.keys()
   }
 }
 
 type FileStorage implements Storage, Listable {
-  dir: Text
+  dir: String
 
-  fn get(self, key: Text) -> Text? {
+  fn get(self, key: String) -> String? {
     let path = "${self.dir}/${key}"
     if files.exists(path) {
       let content = try files.read(path) catch err {
@@ -61,17 +61,17 @@ type FileStorage implements Storage, Listable {
     }
   }
 
-  fn put(var self, key: Text, value: Text) throws {
+  fn put(var self, key: String, value: String) throws {
     let path = "${self.dir}/${key}"
     try files.write(path, value)
   }
 
-  fn delete(var self, key: Text) throws {
+  fn delete(var self, key: String) throws {
     let path = "${self.dir}/${key}"
     try files.delete(path)
   }
 
-  fn keys(self) -> List<Text> {
+  fn keys(self) -> List<String> {
     let files_list = try files.list(self.dir) catch err {
       return []
     }
@@ -79,7 +79,7 @@ type FileStorage implements Storage, Listable {
   }
 }
 
-fn copy_with_prefix(source: Storage + Listable, var dest: Storage, prefix: Text) throws {
+fn copy_with_prefix(source: Storage + Listable, var dest: Storage, prefix: String) throws {
   let all_keys = source.keys()
   for key in all_keys {
     if key.starts_with(prefix) {

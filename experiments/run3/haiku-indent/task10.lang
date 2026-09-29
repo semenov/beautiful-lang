@@ -14,21 +14,21 @@ fn combine_rules(rules: List<Rule>) -> Rule
     result
 
 interface Describable
-  fn describe(self) -> Text
+  fn describe(self) -> String
 
 type Product implements Describable
-  name: Text
+  name: String
   price: Decimal
 
-  fn describe(self) -> Text
+  fn describe(self) -> String
     return "Product: ${self.name} (${self.price})"
 
 type Service implements Describable
-  name: Text
+  name: String
   hourly_rate: Decimal
   hours: Int
 
-  fn describe(self) -> Text
+  fn describe(self) -> String
     let total = self.hourly_rate * self.hours.to_decimal()
     return "Service: ${self.name} (${total} for ${self.hours} hours)"
 

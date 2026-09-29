@@ -12,7 +12,7 @@ pub type Account
 pub type AccountNotFound implements Error
   id: AccountId
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return "no account with id ${self.id.value}"
 
 pub type InsufficientFunds implements Error
@@ -20,13 +20,13 @@ pub type InsufficientFunds implements Error
   balance: Decimal
   requested: Decimal
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return "account ${self.id.value} has insufficient funds"
 
 pub type InvalidAmount implements Error
   amount: Decimal
 
-  fn message(self) -> Text
+  fn message(self) -> String
     return "transfer amount must be positive"
 
 fn require_account(accounts: Map<AccountId, Account>, id: AccountId) throws -> Account

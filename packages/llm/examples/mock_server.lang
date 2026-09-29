@@ -16,16 +16,16 @@ type ReqTool {
 }
 
 type ReqFn {
-  name: Text
+  name: String
 }
 
 type ReqMsg {
-  role: Text
-  content: Text?
+  role: String
+  content: String?
 }
 
 type EmbedReq {
-  input: List<Text>
+  input: List<String>
 }
 
 fn completions(req: http.Request) throws -> http.Response {
@@ -50,14 +50,14 @@ fn completions(req: http.Request) throws -> http.Response {
   return answer("echo: ${last.content ?? ""}", finish: "stop", calls: "")
 }
 
-fn answer(content: Text, finish: Text, calls: Text) -> http.Response {
+fn answer(content: String, finish: String, calls: String) -> http.Response {
   let c = if content.is_empty() { "null" } else { json.encode(content) }
   let tc = if calls.is_empty() { "" } else { ", \"tool_calls\": ${calls}" }
   let body = "{\"choices\": [{\"index\": 0, \"message\": {\"role\": \"assistant\", \"content\": ${c}${tc}}, \"finish_reason\": \"${finish}\"}], \"usage\": {\"prompt_tokens\": 5, \"completion_tokens\": 7, \"total_tokens\": 12}}"
   return http.bytes(200, data: body.bytes(), content_type: "application/json")
 }
 
-fn stream_words(out: io.Stream, text: Text) throws {
+fn stream_words(out: io.Stream, text: String) throws {
   try out.write_text(": PROCESSING\n\n")
   for w in "streamed answer to: ${text}".split(" ") {
     try out.write_text("data: {\"choices\": [{\"delta\": {\"content\": ${json.encode("${w} ")}}}]}\n\n")
@@ -68,7 +68,7 @@ fn stream_words(out: io.Stream, text: Text) throws {
 
 fn embeddings(req: http.Request) throws -> http.Response {
   let r = try json.decode<EmbedReq>(try req.text())
-  var items: List<Text> = []
+  var items: List<String> = []
   for i in 0..<r.input.length {
     items.append("{\"index\": ${i}, \"embedding\": [${r.input[i].length}, 0.5]}")
   }

@@ -1,32 +1,32 @@
 // url: parts of URLs, and percent-encoding.
 
 pub type Url {
-  scheme: Text
-  host: Text
+  scheme: String
+  host: String
   port: Int?
-  path: Text
-  query: Map<Text, Text>
-  fragment: Text?
+  path: String
+  query: Map<String, String>
+  fragment: String?
   // "postgres://ada:secret@db:5432/app": "ada" and "secret" (decoded)
-  user: Text? = none
-  password: Text? = none
+  user: String? = none
+  password: String? = none
 }
 
 // "https://example.com:8080/a/b?x=1#top"
-pub fn parse(text: Text) throws -> Url {
+pub fn parse(text: String) throws -> Url {
   let scheme_end = text.split("://")
   if scheme_end.length < 2 {
     throw Failure(message: "url: \"${text}\" has no scheme (like https://)")
   }
   let scheme = scheme_end[0].lower()
   var rest = scheme_end.drop(1).join("://")
-  var fragment: Text? = none
+  var fragment: String? = none
   let hash_parts = rest.split("#")
   if hash_parts.length > 1 {
     fragment = hash_parts.drop(1).join("#")
     rest = hash_parts[0]
   }
-  var query: Map<Text, Text> = {}
+  var query: Map<String, String> = {}
   let q_parts = rest.split("?")
   if q_parts.length > 1 {
     for pair in q_parts.drop(1).join("?").split("&") {
@@ -40,8 +40,8 @@ pub fn parse(text: Text) throws -> Url {
   }
   let slash = rest.split("/")
   var authority = slash[0]
-  var user: Text? = none
-  var password: Text? = none
+  var user: String? = none
+  var password: String? = none
   let at = authority.split("@")
   if at.length > 1 {
     let info = at.take(at.length - 1).join("@").split(":")
@@ -65,12 +65,12 @@ pub fn parse(text: Text) throws -> Url {
 }
 
 // Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"
-pub fn encode(text: Text) -> Text
+pub fn encode(text: String) -> String
 
 // "a%20b" -> "a b"
-pub fn decode(text: Text) throws -> Text
+pub fn decode(text: String) throws -> String
 
 // {"q": "a b", "page": "2"} -> "q=a%20b&page=2"
-pub fn query_text(params: Map<Text, Text>) -> Text {
+pub fn query_text(params: Map<String, String>) -> String {
   return params.entries().map(e => "${encode(e.key)}=${encode(e.value)}").join("&")
 }

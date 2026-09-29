@@ -16,14 +16,14 @@ pub fn equal(a: Bytes, b: Bytes) -> Bool
 
 // A salted, slow hash of a password, safe to store:
 // "pbkdf2-sha256$210000$<salt>$<hash>".
-pub fn hash_password(password: Text) -> Text {
+pub fn hash_password(password: String) -> String {
   let salt = random_bytes(16)
   let hash = pbkdf2_sha256(password.bytes(), salt: salt, iterations: 210000, length: 32)
   return "pbkdf2-sha256$210000$${salt.base64()}$${hash.base64()}"
 }
 
 // Checks a password against the result of `hash_password`.
-pub fn verify_password(password: Text, stored: Text) -> Bool {
+pub fn verify_password(password: String, stored: String) -> Bool {
   let parts = stored.split("$")
   if parts.length != 4 or parts[0] != "pbkdf2-sha256" {
     return false
@@ -41,4 +41,4 @@ pub fn verify_password(password: Text, stored: Text) -> Bool {
   return equal(hash, expected)
 }
 
-fn __from_base64(text: Text) throws -> Bytes
+fn __from_base64(text: String) throws -> Bytes

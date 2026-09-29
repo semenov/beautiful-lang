@@ -4,49 +4,49 @@
 import files
 
 pub interface Storage
-  fn get(self, key: Text) throws -> Text?
-  fn put(var self, key: Text, value: Text) throws
-  fn delete(var self, key: Text) throws
+  fn get(self, key: String) throws -> String?
+  fn put(var self, key: String, value: String) throws
+  fn delete(var self, key: String) throws
 
 pub interface Listable
-  fn keys(self) -> List<Text>
+  fn keys(self) -> List<String>
 
 pub type MemoryStorage implements Storage, Listable
-  data: Map<Text, Text> = {}
+  data: Map<String, String> = {}
 
-  fn get(self, key: Text) throws -> Text?
+  fn get(self, key: String) throws -> String?
     return self.data[key]
 
-  fn put(var self, key: Text, value: Text) throws
+  fn put(var self, key: String, value: String) throws
     self.data[key] = value
 
-  fn delete(var self, key: Text) throws
+  fn delete(var self, key: String) throws
     let _ = self.data.remove(key)
 
-  fn keys(self) -> List<Text>
+  fn keys(self) -> List<String>
     return self.data.keys()
 
 pub type FileStorage implements Storage
-  directory: Text
+  directory: String
 
-  fn get(self, key: Text) throws -> Text?
+  fn get(self, key: String) throws -> String?
     let path = self.path_for(key)
     if not files.exists(path)
       return none
     return try files.read(path)
 
-  fn put(var self, key: Text, value: Text) throws
+  fn put(var self, key: String, value: String) throws
     try files.write(self.path_for(key), value)
 
-  fn delete(var self, key: Text) throws
+  fn delete(var self, key: String) throws
     try files.delete(self.path_for(key))
 
-  fn path_for(self, key: Text) -> Text
+  fn path_for(self, key: String) -> String
     return "${self.directory}/${key}"
 
 // Copies every key starting with `prefix` from `source` to `destination`.
 // Only a source that can list its keys works here.
-fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: Text) throws
+fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: String) throws
   for key in source.keys()
     if key.starts_with(prefix)
       let value = try source.get(key)

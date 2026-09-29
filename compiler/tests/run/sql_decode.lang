@@ -3,7 +3,7 @@ import db
 
 type User {
   id: Int
-  name: Text
+  name: String
   admin: Bool = false
   score: Float?
 }

@@ -2,12 +2,12 @@
 // inside quoted fields).
 
 // Rows of fields.
-pub fn parse(text: Text) throws -> List<List<Text>>
+pub fn parse(text: String) throws -> List<List<String>>
 
 // Rows as records: the first row names the columns, which are matched to
 // fields by name. Numbers and true/false are converted; an empty field is
 // "missing" (fine for optional fields and fields with defaults).
-pub fn decode<T>(text: Text) throws -> List<T>
+pub fn decode<T>(text: String) throws -> List<T>
 
 // Rows to CSV text, quoting fields where needed.
-pub fn encode(rows: List<List<Text>>) -> Text
+pub fn encode(rows: List<List<String>>) -> String

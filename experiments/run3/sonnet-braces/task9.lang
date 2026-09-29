@@ -3,39 +3,39 @@
 import files
 
 interface Storage {
-  fn get(self, key: Text) throws -> Text?
-  fn put(var self, key: Text, value: Text) throws
-  fn delete(var self, key: Text) throws
+  fn get(self, key: String) throws -> String?
+  fn put(var self, key: String, value: String) throws
+  fn delete(var self, key: String) throws
 }
 
 interface Listable {
-  fn keys(self) -> List<Text>
+  fn keys(self) -> List<String>
 }
 
 type MemoryStorage implements Storage, Listable {
-  data: Map<Text, Text> = {}
+  data: Map<String, String> = {}
 
-  fn get(self, key: Text) throws -> Text? {
+  fn get(self, key: String) throws -> String? {
     return self.data[key]
   }
 
-  fn put(var self, key: Text, value: Text) throws {
+  fn put(var self, key: String, value: String) throws {
     self.data[key] = value
   }
 
-  fn delete(var self, key: Text) throws {
+  fn delete(var self, key: String) throws {
     self.data.remove(key)
   }
 
-  fn keys(self) -> List<Text> {
+  fn keys(self) -> List<String> {
     return self.data.keys()
   }
 }
 
 type FileStorage implements Storage {
-  dir: Text
+  dir: String
 
-  fn get(self, key: Text) throws -> Text? {
+  fn get(self, key: String) throws -> String? {
     let path = "${self.dir}/${key}"
     if not files.exists(path) {
       return none
@@ -43,18 +43,18 @@ type FileStorage implements Storage {
     return try files.read(path)
   }
 
-  fn put(var self, key: Text, value: Text) throws {
+  fn put(var self, key: String, value: String) throws {
     let path = "${self.dir}/${key}"
     try files.write(path, value)
   }
 
-  fn delete(var self, key: Text) throws {
+  fn delete(var self, key: String) throws {
     let path = "${self.dir}/${key}"
     try files.delete(path)
   }
 }
 
-fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: Text) throws {
+fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: String) throws {
   for key in source.keys() {
     if not key.starts_with(prefix) {
       continue
