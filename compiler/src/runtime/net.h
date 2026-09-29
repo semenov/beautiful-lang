@@ -9,7 +9,9 @@ static lt_err lt_net_connect(lt_text *host, int64_t port, lt_handle **out) {
     memset(&hints, 0, sizeof hints);
     hints.ai_family = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
+    lt_block_enter();
     int g = getaddrinfo(host->data, ps, &hints, &res);
+    lt_block_exit();
     char what[300];
     snprintf(what, sizeof what, "can't connect to %s:%lld", host->data, (long long)port);
     if (g != 0) return lt_net_error(what, gai_strerror(g));
@@ -195,7 +197,9 @@ static lt_err lt_udp_send_to(lt_handle *h, lt_bytes *data, lt_text *address) {
     hints.ai_family = AF_INET6;
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_V4MAPPED | AI_ALL;
+    lt_block_enter();
     int g = getaddrinfo(host, colon + 1, &hints, &res);
+    lt_block_exit();
     if (g != 0) return lt_net_error("send_to", gai_strerror(g));
     for (;;) {
         ssize_t n = sendto(u->fd, data->data, (size_t)data->len, 0, res->ai_addr, res->ai_addrlen);

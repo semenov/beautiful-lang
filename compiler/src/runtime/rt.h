@@ -469,6 +469,15 @@ LT_INLINE void lt_iface_unique(lt_iface *x) {
 
 static lt_err lt_make_failure(lt_text *msg);
 static lt_err lt_make_file_error(int kind, lt_text *path, lt_text *msg);
+// around C calls that may block for long (SQLite, DNS): with tasks, other
+// workers can take over (see sched.h)
+#ifdef LT_THREADS
+static void lt_block_enter(void);
+static void lt_block_exit(void);
+#else
+#define lt_block_enter() ((void)0)
+#define lt_block_exit() ((void)0)
+#endif
 
 // ---------------------------------------------------------------- text
 

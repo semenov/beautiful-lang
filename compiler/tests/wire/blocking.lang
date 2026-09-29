@@ -1,0 +1,54 @@
+// Slow SQLite queries in 24 tasks at once: while workers are stuck in
+// them, spare workers keep other tasks (a 10 ms ticker) running.
+import db
+import time
+
+type N {
+  n: Int
+}
+
+fn slow() throws -> Int {
+  with conn = try db.open(":memory:") {
+    let rows = try conn.query<N>("with recursive c(x) as (select 1 union all select x + 1 from c where x < 3000000) select count(*) as n from c", [])
+    return rows[0].n
+  }
+}
+
+fn ticker(stop: Shared<Bool>) throws -> Int {
+  var ticks = 0
+  var worst = 0
+  while true {
+    with s = stop.lock() {
+      if s {
+        return worst
+      }
+    }
+    let t0 = time.now()
+    try time.sleep(time.millis(10))
+    let ms = t0.elapsed().millis()
+    if ms > worst {
+      worst = ms
+    }
+    ticks += 1
+  }
+  return worst
+}
+
+fn main() throws {
+  let stop = Shared<Bool>(false)
+  let tick = spawn ticker(stop)
+  var tasks: List<Task<Int>> = []
+  let t0 = time.now()
+  for i in 0..<24 {
+    tasks.append(spawn slow())
+  }
+  var total = 0
+  for t in tasks {
+    total += try t.wait()
+  }
+  with s = stop.lock() {
+    s = true
+  }
+  let worst = try tick.wait()
+  print("queries: ${total}; other tasks kept running: ${worst < 200}")
+}

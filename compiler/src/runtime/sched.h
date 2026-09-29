@@ -177,7 +177,11 @@ typedef struct lt_worker {
     // global pool in batches
     char *stacks[16];
     int nstacks;
+    int64_t blocked_since; // in a blocking C call since (0: not)
 } lt_worker;
+// Worker threads: one per core, plus spares started while workers are stuck
+// in blocking calls (see lt_check_blocked).
+#define LT_MAX_WORKERS 256
 static lt_worker *lt_ws;
 static __thread lt_worker *lt_self;
 
@@ -427,7 +431,7 @@ static lt_task *lt_global_take(lt_worker *w) {
         lt_spin_unlock(&lt_gq_lock);
         return NULL;
     }
-    int64_t n = lt_gq_n / lt_workers + 1;
+    int64_t n = lt_gq_n / __atomic_load_n(&lt_workers, __ATOMIC_ACQUIRE) + 1;
     if (n > LT_LOCALQ / 2) n = LT_LOCALQ / 2;
     // only this worker adds to its queue (others only take), so the room
     // seen now is there when the batch goes in
@@ -465,7 +469,7 @@ static lt_task *lt_global_take(lt_worker *w) {
 
 // Steals half of another worker's queue; returns one to run.
 static lt_task *lt_steal(lt_worker *w) {
-    int n = lt_workers;
+    int n = __atomic_load_n(&lt_workers, __ATOMIC_ACQUIRE);
     w->seed = w->seed * 1103515245u + 12345u;
     int start = (int)((w->seed >> 8) % (uint32_t)n);
     for (int k = 0; k < n; k++) {
@@ -506,7 +510,8 @@ static lt_task *lt_steal(lt_worker *w) {
 
 static bool lt_any_work(void) {
     if (__atomic_load_n(&lt_gq_n, __ATOMIC_SEQ_CST) > 0) return true;
-    for (int i = 0; i < lt_workers; i++)
+    int nw = __atomic_load_n(&lt_workers, __ATOMIC_ACQUIRE);
+    for (int i = 0; i < nw; i++)
         if (__atomic_load_n(&lt_ws[i].next, __ATOMIC_SEQ_CST) || __atomic_load_n(&lt_ws[i].head, __ATOMIC_SEQ_CST) != __atomic_load_n(&lt_ws[i].tail, __ATOMIC_SEQ_CST)) return true;
     return false;
 }
@@ -845,6 +850,46 @@ static void lt_timer_wait(int64_t ns) {
 static void lt_timer_setup(void) {}
 #endif
 
+// ---- blocking calls (SQLite, DNS, files): a worker stuck in one can't run
+// other tasks. Once any program part may block, the timer thread looks every
+// 10 ms, and if a worker has been stuck for 10 ms while tasks wait to run
+// and no worker is free, it starts a spare worker (up to LT_MAX_WORKERS).
+static int lt_block_watch;
+static void *lt_worker_thread(void *arg);
+static void lt_block_enter(void) {
+    lt_worker *w = lt_self_worker();
+    if (!w) return;
+    __atomic_store_n(&w->blocked_since, lt_monotonic_nanos(), __ATOMIC_RELEASE);
+    if (!__atomic_load_n(&lt_block_watch, __ATOMIC_ACQUIRE)) {
+        pthread_mutex_lock(&lt_timer_mu);
+        lt_block_watch = 1;
+        lt_timer_kick();
+        pthread_mutex_unlock(&lt_timer_mu);
+    }
+}
+static void lt_block_exit(void) {
+    lt_worker *w = lt_self_worker();
+    if (w) __atomic_store_n(&w->blocked_since, 0, __ATOMIC_RELEASE);
+}
+static void lt_check_blocked(int64_t now) {
+    if (__atomic_load_n(&lt_idle, __ATOMIC_SEQ_CST) > 0 || !lt_any_work()) return;
+    int n = __atomic_load_n(&lt_workers, __ATOMIC_ACQUIRE);
+    bool stuck = false;
+    for (int i = 0; i < n && !stuck; i++) {
+        int64_t b = __atomic_load_n(&lt_ws[i].blocked_since, __ATOMIC_ACQUIRE);
+        stuck = b && now - b > 10000000;
+    }
+    if (!stuck || n >= LT_MAX_WORKERS) return;
+    lt_ws[n].seed = (uint32_t)n * 2654435761u + 1;
+    __atomic_store_n(&lt_workers, n + 1, __ATOMIC_RELEASE);
+    pthread_t th;
+    pthread_attr_t a;
+    pthread_attr_init(&a);
+    pthread_attr_setstacksize(&a, 1 << 20);
+    pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
+    pthread_create(&th, &a, lt_worker_thread, (void *)(intptr_t)n);
+}
+
 // Set by an HTTP server: called about once a second (holding lt_timer_mu)
 // to close connections past their timeouts.
 static void (*lt_sweep_hook)(int64_t now);
@@ -856,6 +901,10 @@ static void *lt_timer_thread(void *arg) {
     for (;;) {
         int64_t now = lt_monotonic_nanos();
         int64_t next = INT64_MAX;
+        if (__atomic_load_n(&lt_block_watch, __ATOMIC_ACQUIRE)) {
+            lt_check_blocked(now);
+            if (now + 10000000 < next) next = now + 10000000;
+        }
         if (lt_sweep_hook) {
             if (now - lt_sweep_last >= 1000000000) {
                 lt_sweep_last = now;
@@ -1426,7 +1475,8 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
         lt_catch_interrupts();
     }
     lt_workers = lt_ncpu();
-    lt_ws = (lt_worker *)calloc((size_t)lt_workers, sizeof(lt_worker));
+    if (lt_workers > LT_MAX_WORKERS / 2) lt_workers = LT_MAX_WORKERS / 2;
+    lt_ws = (lt_worker *)calloc(LT_MAX_WORKERS, sizeof(lt_worker));
     for (int i = 0; i < lt_workers; i++) lt_ws[i].seed = (uint32_t)i * 2654435761u + 1;
     lt_self = &lt_ws[0];
     lt_timer_setup();
@@ -1434,8 +1484,9 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     pthread_create(&timer, NULL, lt_timer_thread, NULL);
     pthread_detach(timer);
     lt_ready(m);
-    pthread_t *threads = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)lt_workers);
-    for (int i = 1; i < lt_workers; i++) {
+    int first = lt_workers; // spares started later are detached
+    pthread_t *threads = (pthread_t *)malloc(sizeof(pthread_t) * (size_t)first);
+    for (int i = 1; i < first; i++) {
         pthread_attr_t a;
         pthread_attr_init(&a);
         pthread_attr_setstacksize(&a, 1 << 20);
@@ -1443,7 +1494,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     }
     // the main thread is a worker too
     lt_worker_loop();
-    for (int i = 1; i < lt_workers; i++) pthread_join(threads[i], NULL);
+    for (int i = 1; i < first; i++) pthread_join(threads[i], NULL);
     free(threads);
     return m;
 }

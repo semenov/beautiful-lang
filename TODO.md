@@ -56,8 +56,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       per request, 10 MB vs Go 17k req/s, 348 us, 45 MB. Found and fixed: a
       query with `limit ?` failed (column names freed by SQLite's re-prepare);
       `last_id` racy with shared connections (now `conn.insert`)
+  - [x] blocking C calls (SQLite, DNS) held a worker thread, so slow
+        queries stalled everything: now marked, and the timer thread starts
+        a spare worker when one has been stuck 10 ms while tasks wait
+        (tests/wire/blocking.sh: a ticker's worst 10 ms sleep 526 -> 27 ms)
   - [ ] db: a connection pool (reads in parallel under WAL), or say why one
-        connection is enough
+        connection is enough; mark file reads/writes as blocking too
   - [ ] a Postgres variant of the backend (packages/postgres vs pgx): a service shaped
       like a real app's backend (JSON API with routing, middleware, auth
       header, validation, a database (SQLite/Postgres), templates or JSON

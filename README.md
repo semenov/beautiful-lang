@@ -259,8 +259,10 @@ Weak spots, known:
 - **No preemption.** A task that computes for a long time without waiting
   keeps its thread; the other threads keep running tasks, but if every
   thread is busy computing, a task whose socket became ready waits.
-- **Blocking calls block a thread:** reading a file, SQLite, DNS. There is
-  one thread per core and no extra threads while one is blocked.
+- **Blocking calls hold a thread:** SQLite and DNS lookups are marked, and
+  when a thread has been stuck in one for 10 ms while other tasks wait, a
+  spare thread is started (like Go's hand-off, but coarser). Reading files
+  isn't marked yet.
 - **The I/O path** re-registers a descriptor on every wait (one system call
   each time) and hands ready tasks over from a separate poller thread.
   Go polls from the idle workers themselves.

@@ -38,7 +38,9 @@ static lt_err lt_db_open(lt_text *path, lt_handle **out) {
     d->h.free = lt_db_free;
     d->path = path;
     lt_text_dup(path);
+    lt_block_enter();
     int r = sqlite3_open_v2(p, &d->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, NULL);
+    lt_block_exit();
     if (r != SQLITE_OK) {
         char buf[512];
         snprintf(buf, sizeof buf, "db: can't open \"%s\": %s", p, d->db ? sqlite3_errmsg(d->db) : sqlite3_errstr(r));
@@ -53,7 +55,10 @@ static lt_err lt_db_open(lt_text *path, lt_handle **out) {
 
 static lt_err lt_db_prepare(lt_db *d, lt_text *sql, const lt_dbval *vals, int64_t n, sqlite3_stmt **st) {
     if (!d->db) return lt_make_failure(lt_text_cstr("db: the connection is closed"));
-    if (sqlite3_prepare_v2(d->db, sql->data, (int)sql->len, st, NULL) != SQLITE_OK) return lt_db_error(d, "the SQL is wrong", sql->data);
+    lt_block_enter();
+    int pr = sqlite3_prepare_v2(d->db, sql->data, (int)sql->len, st, NULL);
+    lt_block_exit();
+    if (pr != SQLITE_OK) return lt_db_error(d, "the SQL is wrong", sql->data);
     int want = sqlite3_bind_parameter_count(*st);
     if (want != n) {
         char buf[512];
@@ -74,13 +79,21 @@ static lt_err lt_db_prepare(lt_db *d, lt_text *sql, const lt_dbval *vals, int64_
     return (lt_err){ 0 };
 }
 
+// a step may wait for the disk or another writer's lock
+static int lt_db_step(sqlite3_stmt *st) {
+    lt_block_enter();
+    int r = sqlite3_step(st);
+    lt_block_exit();
+    return r;
+}
+
 static lt_err lt_db_execute(lt_handle *h, lt_text *sql, const lt_dbval *vals, int64_t n, int64_t *changed) {
     lt_db *d = (lt_db *)h;
     sqlite3_stmt *st;
     lt_err e = lt_db_prepare(d, sql, vals, n, &st);
     if (e.obj) return e;
     int r;
-    while ((r = sqlite3_step(st)) == SQLITE_ROW) {
+    while ((r = lt_db_step(st)) == SQLITE_ROW) {
     }
     sqlite3_finalize(st);
     if (r != SQLITE_DONE) return lt_db_error(d, "the statement failed", sql->data);
@@ -103,7 +116,7 @@ static lt_err lt_db_insert(lt_handle *h, lt_text *sql, const lt_dbval *vals, int
         return e;
     }
     int r;
-    while ((r = sqlite3_step(st)) == SQLITE_ROW) {
+    while ((r = lt_db_step(st)) == SQLITE_ROW) {
     }
     sqlite3_finalize(st);
     if (r != SQLITE_DONE) {
@@ -142,7 +155,7 @@ static lt_err lt_db_query(lt_handle *h, lt_text *sql, const lt_dbval *vals, int6
         o.klens[c] = (int64_t)len;
     }
     int r;
-    while ((r = sqlite3_step(st)) == SQLITE_ROW) {
+    while ((r = lt_db_step(st)) == SQLITE_ROW) {
         for (int c = 0; c < cols; c++) {
             lt_dyn *v = &o.items[c];
             memset(v, 0, sizeof *v);
