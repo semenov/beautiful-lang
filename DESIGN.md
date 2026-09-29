@@ -115,15 +115,18 @@ Changing a value in place is done by a `mutating` method on your own type:
   `if x is none { throw … }`, `x` is `T` for the rest of the block. A bare
   type test without parentheses (`err is InsufficientFunds`) is allowed.
 - **Named function types:** `type Rule = fn(Decimal) -> Decimal` is a new
-  type like any other `type X = …`. A lambda takes the expected type, the
-  same way a number literal does, and a `Rule` value is called directly:
+  type like any other `type X = …`. A lambda takes the expected type (as
+  `1.5` becomes a `Decimal` where one is expected; other new types are
+  written out: `UserId(7)`), and a `Rule` value is called directly:
   `rule(total)`.
 
 - **Records, enums with data, exhaustive `match`.**
 - **Automatic equality and hashing.** `==` and hashing are structural for
   every type except functions and handles. Any record can be a `Map` key or a
-  `Set` element. Ordering (`<`) is built in only for numbers, `String` and
-  time. Anything else is sorted with `sort_by(x => x.key)`.
+  `Set` element. Ordering (`<`) is built in only for numbers, `String`,
+  `Decimal`, time (`Duration`, `Date`, `DateTime`), lists of them (element
+  by element) and new types over them (`UserId`). Anything else is sorted
+  with `sort_by(x => x.key)`.
 - **Generics without bounds.** `<T>` means "any type, the same one
   everywhere." It doesn't need bounds: `==`, hashing and `sort_by` work for
   everything.

@@ -91,20 +91,6 @@ pub struct Checker {
     const_state: HashMap<FnId, u8>,
 }
 
-fn orderable(t: &Ty) -> bool {
-    matches!(t, Ty::Int | Ty::Float | Ty::Text | Ty::Bool)
-}
-
-// Also Decimal, and lists of orderable values (compared element by
-// element, like words in a dictionary): `sorted_by(s => [s.group, s.name])`.
-fn orderable_in(b: &Builtins, t: &Ty) -> bool {
-    match t {
-        Ty::Adt(d, a) if *d == b.list && a.len() == 1 => orderable_in(b, &a[0]) || matches!(a[0], Ty::Var(_) | Ty::Param(_) | Ty::Err),
-        Ty::Adt(d, _) => *d == b.decimal,
-        _ => orderable(t),
-    }
-}
-
 fn levenshtein(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
@@ -773,6 +759,31 @@ impl Checker {
         }
     }
 
+    fn contains_shared(&self, t: &Ty, seen: &mut Vec<DefId>) -> bool {
+        match t {
+            Ty::Adt(d, a) => {
+                if *d == self.prog.b.shared {
+                    return true;
+                }
+                if a.iter().any(|x| self.contains_shared(x, seen)) {
+                    return true;
+                }
+                if seen.contains(d) {
+                    return false;
+                }
+                seen.push(*d);
+                match &self.prog.defs[*d].kind {
+                    TypeKind::Record { fields } => fields.iter().any(|f| self.contains_shared(&f.ty.subst(a), seen)),
+                    TypeKind::Enum { variants } => variants.iter().any(|v| v.fields.iter().any(|f| self.contains_shared(&f.ty.subst(a), seen))),
+                    TypeKind::Newtype(i) => self.contains_shared(i, seen),
+                    _ => false,
+                }
+            }
+            Ty::Opt(x) => self.contains_shared(x, seen),
+            _ => false,
+        }
+    }
+
     fn contains_task(&self, t: &Ty) -> bool {
         match t {
             Ty::Adt(d, a) => *d == self.prog.b.task || a.iter().any(|x| self.contains_task(x)),
@@ -940,6 +951,25 @@ impl Checker {
                     reported.remove(&at.lo);
                 }
             }
+        }
+    }
+
+    // What `<` and sorting accept: numbers, text, Bool, Decimal, lists of
+    // them (element by element), new types over them, and time (Duration,
+    // Date, DateTime: their fields in order are the time order).
+    fn ordered(&self, t: &Ty) -> bool {
+        match t {
+            Ty::Int | Ty::Float | Ty::Text | Ty::Bool => true,
+            Ty::Adt(d, a) if *d == self.prog.b.list && a.len() == 1 => self.ordered(&a[0]) || matches!(a[0], Ty::Var(_) | Ty::Param(_) | Ty::Err),
+            Ty::Adt(d, _) if *d == self.prog.b.decimal => true,
+            Ty::Adt(d, _) => {
+                let def = &self.prog.defs[*d];
+                match &def.kind {
+                    TypeKind::Newtype(inner) => self.ordered(inner),
+                    _ => self.prog.module_names.get(def.module).map(|m| m == "time").unwrap_or(false) && matches!(def.name.as_str(), "Duration" | "Date" | "DateTime"),
+                }
+            }
+            _ => false,
         }
     }
 
@@ -3002,33 +3032,33 @@ impl Checker {
         let owner = f.owner.map(|d| self.prog.defs[d].name.clone()).unwrap_or_default();
         let t0 = targs.first().map(|t| self.resolve(t));
         let last = targs.last().map(|t| self.resolve(t));
-        let need = |c: &mut Checker, t: Option<Ty>, ok: fn(&Ty) -> bool, what: &str| {
+        let need = |c: &mut Checker, t: Option<Ty>, ok: &dyn Fn(&Checker, &Ty) -> bool, what: &str| {
             if let Some(t) = t {
                 if matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) || c.is_decimal(&t) {
                     return;
                 }
-                if !ok(&t) {
+                if !ok(c, &t) {
                     let s = c.prog.show(&t);
                     c.err(span, format!("`{}` needs {}, but this is `{}`", f.name, what, s));
                 }
             }
         };
         match (owner.as_str(), f.name.as_str()) {
-            ("List", "sum") => need(self, t0, |t| matches!(t, Ty::Int | Ty::Float), "numbers"),
+            ("List", "sum") => need(self, t0, &|_, t| matches!(t, Ty::Int | Ty::Float), "numbers"),
             ("List", "min") | ("List", "max") | ("List", "sort") | ("List", "sorted") => {
-                need(self, t0, orderable, "values that can be ordered (numbers or text); for other types use `sort_by(x => x.key)`")
+                need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers or text); for other types use `sort_by(x => x.key)`")
             }
-            ("List", "join") => need(self, t0, |t| *t == Ty::Text, "a list of `String`"),
+            ("List", "join") => need(self, t0, &|_, t| *t == Ty::Text, "a list of `String`"),
             ("List", "sort_by") | ("List", "sorted_by") | ("List", "min_by") | ("List", "max_by") => {
                 if let Some(t) = last {
                     let t = self.zonk_ty(&t, &mut None);
-                    if !matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) && !orderable_in(&self.prog.b, &t) {
+                    if !matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) && !self.ordered(&t) {
                         let s = self.prog.show(&t);
                         self.err_help(span, format!("`{}` needs a key that can be ordered, but this is `{}`", f.name, s), "a number, text, Decimal, or a list of them compared in turn: `sorted_by(p => [p.last_name, p.first_name])`");
                     }
                 }
             }
-            ("", "min") | ("", "max") | ("", "__less") => need(self, t0, orderable, "values that can be ordered (numbers or text)"),
+            ("", "min") | ("", "max") | ("", "__less") => need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers or text)"),
             _ => {}
         }
     }
@@ -3379,6 +3409,12 @@ impl Checker {
                     return TExpr { kind: TK::Unit, ty: Ty::Err, span };
                 }
                 let v = self.expr_coerce(&args[0].value, &targs[0]);
+                // a Shared inside a Shared's value: two locks to take in
+                // some order, and a cycle that reference counting never frees
+                let inner = self.resolve(&targs[0]);
+                if self.contains_shared(&inner, &mut vec![]) {
+                    self.err_help(span, "a `Shared` can't hold another `Shared` in its value", "keep the shared parts side by side (two `Shared`s passed separately), or keep plain values inside one `Shared`");
+                }
                 TExpr { kind: TK::Record { def: d, fields: vec![v] }, ty, span }
             }
             TypeKind::Builtin if d == self.prog.b.channel => {
@@ -3555,9 +3591,9 @@ impl Checker {
                     return bad(self, format!("can't compare `{}` and `{}`", a, b), None);
                 }
                 let t = self.resolve(&lt);
-                if !orderable_in(&self.prog.b, &self.zonk_ty(&t, &mut None)) && !matches!(t, Ty::Var(_)) {
+                if !self.ordered(&self.zonk_ty(&t, &mut None)) && !matches!(t, Ty::Var(_)) {
                     let s = self.prog.show(&t);
-                    let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers and text can be ordered; compare a field instead") };
+                    let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers, String, Decimal, time and lists of them can be ordered; compare a field instead") };
                     return bad(self, format!("`{}` values can't be ordered", s), help);
                 }
                 mk(TK::Binary(op, Box::new(l), Box::new(r)), Ty::Bool)

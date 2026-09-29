@@ -1,0 +1,21 @@
+// `<` and sorting for time types and new types over ordered types.
+
+import time
+
+type UserId = Int
+
+type User {
+  id: UserId
+  name: String
+}
+
+fn main() throws {
+  let a = time.millis(5)
+  let b = time.seconds(1)
+  print("${a < b} ${b < a} ${[b, a].sorted()}")
+  let d1 = try time.parse_iso("2026-09-29T12:00:00.5Z")
+  let d2 = try time.parse_iso("2026-09-29T12:00:00Z")
+  print("${d2 < d1} ${[d1, d2].sorted()}")
+  let us = [User(id: UserId(3), name: "c"), User(id: UserId(1), name: "a")]
+  print("${us.sorted_by(u => u.id).map(u => u.name)} ${UserId(1) < UserId(2)}")
+}

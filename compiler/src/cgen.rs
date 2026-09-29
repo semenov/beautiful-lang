@@ -738,6 +738,17 @@ impl<'a> CGen<'a> {
                 let c = self.cmp_expr(e, "a->items[i]", "b->items[i]");
                 format!("int64_t n = a->len < b->len ? a->len : b->len; for (int64_t i = 0; i < n; i++) {{ int64_t r = {}; if (r) return r; }} return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);", c)
             }
+            // field by field (time types: their fields in order)
+            Kind::Record { fields, boxed, .. } => {
+                let acc = if *boxed { "->v." } else { "." };
+                let fields = fields.clone();
+                let mut s = String::new();
+                for (i, (_, f)) in fields.iter().enumerate() {
+                    let e = self.cmp_expr(*f, &format!("a{}f{}", acc, i), &format!("b{}f{}", acc, i));
+                    let _ = write!(s, "{{ int64_t r = {}; if (r) return r; }} ", e);
+                }
+                s + "return 0;"
+            }
             _ => "(void)a; (void)b; lt_panic_at(\"these values can't be ordered\", 0);".into(),
         };
         let _ = writeln!(self.helpers, "static int64_t cmp_{}({} a, {} b) {{ {} }}", id, c, c, body);
