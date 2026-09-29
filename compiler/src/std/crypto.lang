@@ -69,4 +69,3 @@ pub fn private_key(pem: String) throws -> PrivateKey
 // Whether `signature` is `key`'s signature of `data`.
 pub fn verify(key: PublicKey, data: Bytes, signature: Bytes) -> Bool
 pub fn sign(key: PrivateKey, data: Bytes) throws -> Bytes
-
