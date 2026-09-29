@@ -222,7 +222,8 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
   assign it: `items = add_item(items, item: x)`.
 - **Results must be used.** A call whose result you don't need is written
   `let _ = f()`. `list.sort()` changes the list in place; `list.sorted()`
-  returns a new one.
+  returns a new one. A `let` that is never used, and an import that is
+  never used, are errors too.
 - No `return` inside a lambda: its last line is its value.
 - A lambda gets a copy of each value it uses, made when the lambda is
   made. So it can't change them, and a `var` it uses can't change after

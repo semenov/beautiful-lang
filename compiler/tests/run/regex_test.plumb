@@ -15,11 +15,11 @@ fn main() throws {
   print("${word.matches("HeLLo")}")
   let email = try regex.compile("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")
   print("${email.matches("ada@example.com")} ${email.matches("not an email")}")
-  let bad = try regex.compile("a*?") catch err {
+  let _ = try regex.compile("a*?") catch err {
     print(err.message())
     word
   }
-  let broken = try regex.compile("(unclosed") catch err {
+  let _ = try regex.compile("(unclosed") catch err {
     print(err.message())
     word
   }

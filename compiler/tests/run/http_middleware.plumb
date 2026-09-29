@@ -1,5 +1,4 @@
 import http
-import json
 
 fn upload(req: http.Request) throws -> http.Response {
   var lines: List<String> = []

@@ -1,5 +1,4 @@
 import json
-import sql
 
 type Item {
   name: String
@@ -36,7 +35,7 @@ fn main() throws {
   let back = try json.decode<Order>(js)
   print("${total(back) == total(o)} ${(try json.decode<Item>("{\"name\": \"x\", \"price\": \"7.10\", \"qty\": 1}")).price}")
   print("${try "123.456".to_decimal()} ${(try " -0.5 ".to_decimal()).abs()}")
-  let bad = try "12,5".to_decimal() catch err {
+  let _ = try "12,5".to_decimal() catch err {
     print(err.message())
     0
   }

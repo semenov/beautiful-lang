@@ -16,11 +16,11 @@ fn load(id: Int) throws -> Int {
 
 fn main() throws {
   print("${time.millis(1500)} ${time.Date(year: 2026, month: 9, day: 29)} ${time.from_unix(0)}")
-  let x = try load(7) catch e {
+  let _ = try load(7) catch e {
     print("failed: ${e}")
     0
   }
-  let y = try load(8) catch e {
+  let _ = try load(8) catch e {
     print("${Failure(message: "loading", cause: e)}")
     0
   }

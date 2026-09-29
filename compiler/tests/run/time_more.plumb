@@ -4,7 +4,7 @@ fn main() throws {
   for t in ["1h30m", "90s", "1.5s", "250ms", "10us", "12ns", "2d", "-5m", "1h0m5s"] {
     print("${t} -> ${(try time.parse_duration(t)).text()}")
   }
-  let bad = try time.parse_duration("5 minutes") catch err {
+  let _ = try time.parse_duration("5 minutes") catch err {
     print(err.message())
     time.seconds(0)
   }
@@ -14,7 +14,7 @@ fn main() throws {
   let p = try time.parse("29/09/2026 02:05 PM +0200", pattern: "%d/%m/%Y %I:%M %p %z")
   print(p.iso())
   print((try time.parse("Sep 3 2026", pattern: "%b %e %Y")).iso())
-  let x = try time.parse("31/02/2026", pattern: "%d/%m/%Y") catch err {
+  let _ = try time.parse("31/02/2026", pattern: "%d/%m/%Y") catch err {
     print(err.message())
     dt
   }

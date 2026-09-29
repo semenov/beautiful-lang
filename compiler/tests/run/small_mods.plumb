@@ -15,7 +15,7 @@ fn main() throws {
   print(csv.encode(rows))
   let people = try csv.decode<Person>("name,age,email\nAda,36,ada@example.com\nBob,41,\n")
   print("${people}")
-  let bad = try csv.decode<Person>("name,age\nAda,old\n") catch err {
+  let _ = try csv.decode<Person>("name,age\nAda,old\n") catch err {
     print(err.message())
     []
   }

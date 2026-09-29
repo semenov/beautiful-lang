@@ -1,5 +1,4 @@
 import sql
-import db
 
 type User {
   id: Int
@@ -13,7 +12,7 @@ fn main() throws {
   for u in users {
     print("${u.id} ${u.name} ${u.admin} ${u.score ?? 0.0}")
   }
-  let bad = try sql.decode<User>(["id"], [[sql.Value.String(value: "x")]]) catch err {
+  let _ = try sql.decode<User>(["id"], [[sql.Value.String(value: "x")]]) catch err {
     print(err.message())
     return
   }

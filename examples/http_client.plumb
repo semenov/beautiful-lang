@@ -18,7 +18,7 @@ fn main() throws {
     print("first: ${try res.read_line() ?? ""}")
   }
   print("closed early")
-  let t = try http.send(http.ClientRequest(url: "http://localhost:8095/slow", timeout: 1)) catch err {
+  let _ = try http.send(http.ClientRequest(url: "http://localhost:8095/slow", timeout: 1)) catch err {
     print(err.message())
     return
   }

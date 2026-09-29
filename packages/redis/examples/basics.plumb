@@ -19,7 +19,7 @@ fn main() throws {
     print("${try db.range("jobs", from: 0, to: -1)} first ${try db.pop_first("jobs") ?? ""}")
     let replies = try db.pipeline([["SET", "p", "1"], ["INCR", "p"], ["GET", "p"]])
     print("pipeline ${replies.length}")
-    let bad = try db.command(["LPUSH", "greeting", "x"]) catch err {
+    let _ = try db.command(["LPUSH", "greeting", "x"]) catch err {
       print(err.message())
       return
     }

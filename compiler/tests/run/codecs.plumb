@@ -55,7 +55,7 @@ fn main() throws {
   print(json.encode(shapes))
 
   for bad in ["{\"id\": \"x\", \"name\": \"B\"}", "{\"name\": \"B\"}", "{\"id\": 1, \"name\": \"B\", \"tags\": [1]}", "[1, 2", "{\"id\": 1, \"name\": \"B\", \"role\": \"Boss\"}"] {
-    let r = try json.decode<User>(bad) catch err {
+    let _ = try json.decode<User>(bad) catch err {
       print("error: ${err.message()}")
       minimal
     }

@@ -1,5 +1,4 @@
 import files
-import io
 import process
 import zlib
 

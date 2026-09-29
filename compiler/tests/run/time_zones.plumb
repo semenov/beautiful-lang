@@ -12,7 +12,7 @@ fn main() throws {
   print("skipped hour: ${meeting.iso()} = ${(try meeting.in_zone("Europe/Berlin")).iso()}")
   print("round trip: ${berlin.utc().iso()}")
   print("local zone known: ${time.local_zone().length > 0}")
-  let bad = try moment.in_zone("Mars/Olympus") catch err {
+  let _ = try moment.in_zone("Mars/Olympus") catch err {
     print(err.message())
     berlin
   }

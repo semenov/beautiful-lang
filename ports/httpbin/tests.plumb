@@ -1,7 +1,6 @@
 // A port of a part of go-httpbin's handlers_test.go: the router is called
 // directly, without a network. Run: `plumb test tests.plumb`.
 
-import encoding
 import helpers
 import http
 import httpbin

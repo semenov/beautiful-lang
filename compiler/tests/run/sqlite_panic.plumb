@@ -29,7 +29,7 @@ fn main() throws {
       let rows = try conn.query<Count>("select count(*) as n from t", [])
       http.text(200, "rows ${rows[0].n}")
     })
-    let server = spawn http.serve(router, port: 8391)
+    let _ = spawn http.serve(router, port: 8391)
     try time.sleep(time.millis(200))
     let a = try http.get("http://127.0.0.1:8391/boom")
     print("boom: ${a.status}")

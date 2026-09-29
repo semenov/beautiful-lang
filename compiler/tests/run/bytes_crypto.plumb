@@ -25,7 +25,7 @@ fn main() throws {
   let stored = crypto.hash_password("s3cret")
   print("${stored.starts_with("pbkdf2-sha256$210000$")} ${crypto.verify_password("s3cret", stored)} ${crypto.verify_password("wrong", stored)}")
   print("${try encoding.from_hex("68656c6c6f").text()} ${try encoding.from_base64("aGVsbG8").text()} ${encoding.base64_url(Bytes([251, 255]))}")
-  let bad = try encoding.from_hex("zz") catch err {
+  let _ = try encoding.from_hex("zz") catch err {
     print(err.message())
     Bytes()
   }

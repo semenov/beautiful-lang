@@ -36,7 +36,7 @@ fn main() throws {
     print(err.message())
     ""
   }
-  let bad = try template.compile("{{#each items}} no end") catch err {
+  let _ = try template.compile("{{#each items}} no end") catch err {
     print(err.message())
     t
   }

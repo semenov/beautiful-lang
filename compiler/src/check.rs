@@ -58,6 +58,9 @@ struct FnCtx {
     loop_spans: Vec<Span>,
     var_captures: Vec<(LocalId, Span, Vec<Span>)>,
     writes: Vec<(LocalId, Span)>,
+    // each local: looked up anywhere; the `let`/`var` statements
+    used: Vec<bool>,
+    lets: Vec<(LocalId, Span)>,
 }
 
 pub struct ModScope {
@@ -67,6 +70,8 @@ pub struct ModScope {
     imports: HashMap<String, usize>,
     // the prelude and the standard library: may declare runtime functions
     privileged: bool,
+    // imports used so far (an unused import is an error)
+    used_imports: std::cell::RefCell<std::collections::HashSet<String>>,
 }
 
 pub struct Checker {
@@ -192,7 +197,11 @@ impl Checker {
         if self.f.as_ref().unwrap().scopes.iter().any(|s| s.contains_key(name)) {
             return None;
         }
-        self.modules[md].imports.get(name).copied()
+        let m = self.modules[md].imports.get(name).copied();
+        if m.is_some() {
+            self.modules[md].used_imports.borrow_mut().insert(name.to_string());
+        }
+        m
     }
 
     // A name from another module: it must be `pub`.
@@ -229,7 +238,7 @@ impl Checker {
         for (name, m, privileged) in mods {
             let _ = m;
             self.prog.module_names.push(name.clone());
-            self.modules.push(ModScope { name: name.clone(), globals: HashMap::new(), imports: HashMap::new(), privileged: *privileged });
+            self.modules.push(ModScope { name: name.clone(), globals: HashMap::new(), imports: HashMap::new(), privileged: *privileged, used_imports: Default::default() });
         }
         for (i, (_, m, _)) in mods.iter().enumerate() {
             for imp in &m.imports {
@@ -305,6 +314,17 @@ impl Checker {
         for item in &mods[user].1.items {
             if let ast::Item::Test(t) = item {
                 self.check_test(t, user);
+            }
+        }
+        // unused imports of the file being compiled (other files' imports may
+        // be for their tests, which are checked when they are compiled)
+        if !self.modules[user].privileged {
+            let used = self.modules[user].used_imports.borrow().clone();
+            for imp in &mods[user].1.imports {
+                let local = imp.local_name().to_string();
+                if !used.contains(&local) {
+                    self.err_help(imp.span, format!("`{}` is imported but not used", local), "remove the import");
+                }
             }
         }
         if let Some(Global::Fn(id)) = self.modules[user].globals.get("main").copied() {
@@ -406,6 +426,7 @@ impl Checker {
                 }
                 // `http.Request`: a type from an imported module
                 let (md, name) = if path.len() == 2 {
+                    self.modules[md].used_imports.borrow_mut().insert(path[0].clone());
                     match self.modules[md].imports.get(&path[0]).copied() {
                         Some(target) => match self.lookup_in_module(target, &path[1], *span) {
                             Some(Global::Type(_)) => (target, &path[1]),
@@ -886,6 +907,8 @@ impl Checker {
             loop_spans: vec![],
             var_captures: vec![],
             writes: vec![],
+            used: vec![],
+            lets: vec![],
         });
     }
 
@@ -924,6 +947,16 @@ impl Checker {
 
     fn end_fn(&mut self, mut block: TBlock) -> TBody {
         self.check_stale_captures();
+        // a value computed and never used is a forgotten result
+        let md = self.fc().module;
+        if !self.modules[md].privileged {
+            for (id, span) in self.fc().lets.clone() {
+                if !self.fc().used[id] {
+                    let name = self.fc().locals[id].name.clone();
+                    self.err_help(span, format!("`{}` is never used", name), "remove it, or write `let _ = ...` to drop a value on purpose");
+                }
+            }
+        }
         let mut locals = self.fcx().locals.clone();
         let mut unresolved: Option<Span> = None;
         self.zonk_block(&mut block, &mut unresolved);
@@ -1094,6 +1127,7 @@ impl Checker {
         fc.locals.push(LocalDef { name: name.to_string(), ty, mutable });
         fc.level.push(level);
         fc.decl_at.push(span.lo);
+        fc.used.push(false);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1107,6 +1141,7 @@ impl Checker {
         fc.locals.push(LocalDef { name: name.to_string(), ty, mutable: false });
         fc.level.push(level);
         fc.decl_at.push(0);
+        fc.used.push(true);
         let id = fc.locals.len() - 1;
         fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
         id
@@ -1122,6 +1157,7 @@ impl Checker {
             }
         }
         let id = found?;
+        self.fcx().used[id] = true;
         self.note_use(id);
         Some(id)
     }
@@ -1532,6 +1568,7 @@ impl Checker {
                     self.err(value.span, "this never produces a value");
                 }
                 let id = self.declare(*span, name, v.ty.clone(), *mutable);
+                self.fcx().lets.push((id, *span));
                 TStmt::Let(id, v)
             }
             Stmt::Assign { target, op, value, span } => {

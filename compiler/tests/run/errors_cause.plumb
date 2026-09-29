@@ -24,7 +24,7 @@ fn outer() throws -> String {
 }
 
 fn main() {
-  let x = try outer() catch err {
+  let _ = try outer() catch err {
     if err is files.NotFound {
       print("not found: ${err.path}")
     }
@@ -36,7 +36,7 @@ fn main() {
     }
     ""
   }
-  let y = try load("/nope") catch err {
+  let _ = try load("/nope") catch err {
     print("${err is AppError}")
     ""
   }

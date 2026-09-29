@@ -38,7 +38,7 @@ fn main() throws {
   let stop = Shared<Bool>(false)
   let tick = spawn ticker(stop)
   var tasks: List<Task<Int>> = []
-  let t0 = time.now()
+  let _ = time.now()
   for i in 0..<24 {
     tasks.append(spawn slow())
   }
