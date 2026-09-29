@@ -521,6 +521,10 @@ name under "type": {"type": "Circle", "radius": 2.0}.
 ```
 // The value as compact JSON.
 pub fn encode<T>(value: T) -> String
+// The value as compact JSON with camelCase keys (created_at -> createdAt),
+// for APIs that want them. Decoding needs nothing special: a `createdAt`
+// key fills a `created_at` field (names match ignoring case and _ / -).
+pub fn encode_camel<T>(value: T) -> String
 // The value as indented JSON, for people.
 pub fn encode_pretty<T>(value: T) -> String
 

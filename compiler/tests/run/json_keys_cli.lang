@@ -1,0 +1,25 @@
+import cli
+import json
+
+type User {
+  user_id: Int
+  created_at: String
+  is_admin: Bool = false
+}
+
+type Options {
+  n: Int = 10
+  c: Int = 2
+  name: String = "x"
+  verbose: Bool = false
+  args: List<String> = []
+}
+
+fn main() throws {
+  let u = try json.decode<User>("{\"userId\": 7, \"CreatedAt\": \"today\", \"is-admin\": true}")
+  print("${u.user_id} ${u.created_at} ${u.is_admin}")
+  print(json.encode_camel(u))
+  print(json.encode(u))
+  let o = try cli.decode<Options>()
+  print("n=${o.n} c=${o.c} name=${o.name} verbose=${o.verbose} args=${o.args}")
+}

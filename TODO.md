@@ -47,7 +47,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] `time.timeout(duration, work)`
   - [x] `lang doc`
   - [x] a `Date` type (calendar dates apart from instants)
-  - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
+  - [x] decode key naming: loose matching when decoding, `json.encode_camel`
   - [ ] test doubles: a fixed clock, calling handlers without a network (done
         for http), temporary directories (done)
 
@@ -93,7 +93,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `try x catch err { none }` into a `T?`; `if a and x is some(v)`
 - [x] `time`: parse_duration, Duration text and arithmetic, precise timers
       (macOS: sleep(10ms) takes ~70ms), a ticker (sleep_until on a grid)
-- [ ] `cli`: -n style flags and one-letter names
+- [x] `cli`: -n style flags and one-letter names (subcommands: still to do)
 - [ ] channels: try_receive, receive with a timeout, select
 - [ ] `-> Never` in user code; constants (`const`)
 - [ ] signals: Ctrl-C handling for tools (with the npm item above)

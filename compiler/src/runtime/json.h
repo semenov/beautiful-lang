@@ -118,9 +118,24 @@ static lt_err lt_dec_missing(const char *src, const lt_path *p, const char *fiel
     return lt_make_failure(lt_text_cstr(buf));
 }
 
+// same name, ignoring case and `_` / `-`: created_at, createdAt, CreatedAt, created-at
+static bool lt_key_loose_eq(const char *a, int64_t al, const char *b, int64_t bl) {
+    int64_t i = 0, j = 0;
+    for (;;) {
+        while (i < al && (a[i] == '_' || a[i] == '-')) i++;
+        while (j < bl && (b[j] == '_' || b[j] == '-')) j++;
+        if (i == al || j == bl) return i == al && j == bl;
+        if (tolower((unsigned char)a[i]) != tolower((unsigned char)b[j])) return false;
+        i++, j++;
+    }
+}
+
 static const lt_dyn *lt_dyn_get(const lt_dyn *o, const char *key, int64_t klen) {
     for (int64_t i = 0; i < o->n; i++)
         if (o->klens[i] == klen && memcmp(o->keys[i], key, (size_t)klen) == 0) return &o->items[i];
+    // APIs often write keys in camelCase: `createdAt` fills `created_at`
+    for (int64_t i = 0; i < o->n; i++)
+        if (lt_key_loose_eq(o->keys[i], o->klens[i], key, klen)) return &o->items[i];
     return NULL;
 }
 
@@ -445,6 +460,7 @@ typedef struct {
     int64_t len, cap;
     int indent; // < 0: compact
     int level;
+    int camel; // keys in camelCase: created_at -> createdAt
 } lt_buf;
 
 static void lt_buf_grow(lt_buf *b, int64_t n) {
@@ -512,7 +528,22 @@ static void lt_json_num(lt_buf *b, double v) {
 static void lt_json_key(lt_buf *b, const char *k, bool first) {
     if (!first) lt_buf_c(b, ',');
     lt_buf_newline(b);
-    lt_json_str(b, k, (int64_t)strlen(k));
+    if (b->camel && strchr(k, '_')) {
+        char c[256];
+        size_t w = 0;
+        bool up = false;
+        for (const char *p = k; *p && w + 1 < sizeof c; p++) {
+            if (*p == '_') {
+                up = w > 0;
+                continue;
+            }
+            c[w++] = up ? (char)toupper((unsigned char)*p) : *p;
+            up = false;
+        }
+        lt_json_str(b, c, (int64_t)w);
+    } else {
+        lt_json_str(b, k, (int64_t)strlen(k));
+    }
     lt_buf_c(b, ':');
     if (b->indent >= 0) lt_buf_c(b, ' ');
 }

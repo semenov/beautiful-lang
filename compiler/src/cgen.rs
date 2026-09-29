@@ -1551,7 +1551,8 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             };
             let req = if self.is_opt(*fid) || has_default[i] || kind == 1 || kind == 2 { "" } else { "  (required)" };
             if kind != 2 {
-                usage += &format!("  --{}{}{}{}\\n", flag, what, req, if kind == 3 { "  (can repeat)" } else { "" });
+                let dashes = if flag.chars().count() == 1 { "-" } else { "--" };
+                usage += &format!("  {}{}{}{}{}\\n", dashes, flag, what, req, if kind == 3 { "  (can repeat)" } else { "" });
             }
         }
         let has_args = kinds.contains(&2);
@@ -1577,8 +1578,10 @@ static lt_err {name}({c} *out) {{
     if (!only_pos && strcmp(a, "--") == 0) {{ only_pos = 1; continue; }}
     if (!only_pos && (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0)) {{ {name}_usage(stdout); lt_arena_free(&ar); lt_process_exit(0); }}
     int fi = -1; const char *val = NULL;
-    if (!only_pos && a[0] == '-' && a[1] == '-') {{
-      const char *nm = a + 2; const char *eq = strchr(nm, '='); size_t nl = eq ? (size_t)(eq - nm) : strlen(nm);
+    // --name or -name (Go style; -n for a one-letter field); "-5" is a value
+    bool opt_like = !only_pos && a[0] == '-' && a[1] && !(a[1] >= '0' && a[1] <= '9') && !(a[1] == '.' );
+    if (opt_like) {{
+      const char *nm = a[1] == '-' ? a + 2 : a + 1; const char *eq = strchr(nm, '='); size_t nl = eq ? (size_t)(eq - nm) : strlen(nm);
       for (int k = 0; k < nf; k++) {{
         const char *fn = names[k]; if (strlen(fn) != nl || kinds[k] == 2) continue;
         size_t j = 0; for (; j < nl; j++) {{ char x = nm[j] == '-' ? '_' : nm[j]; if (x != fn[j]) break; }}
@@ -3106,11 +3109,12 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let s = self.schema_of(id, &mut vec![]);
                 format!("lt_text_cstr({})", c_str(&s))
             }
-            "json.encode" | "json.encode_pretty" => {
+            "json.encode" | "json.encode_pretty" | "json.encode_camel" => {
                 let id = tid0.unwrap();
                 self.need(H::Enc, id);
-                let indent = if name == "json.encode" { -1 } else { 2 };
-                format!("({{ lt_buf b_ = {{0}}; b_.indent = {}; enc_{}({}, &b_); lt_buf_text(&b_); }})", indent, id, a[0])
+                let indent = if name == "json.encode_pretty" { 2 } else { -1 };
+                let camel = if name == "json.encode_camel" { 1 } else { 0 };
+                format!("({{ lt_buf b_ = {{0}}; b_.indent = {}; b_.camel = {}; enc_{}({}, &b_); lt_buf_text(&b_); }})", indent, camel, id, a[0])
             }
             "json.decode" => {
                 let id = tid0.unwrap();

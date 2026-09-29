@@ -1,0 +1,4 @@
+7 today true
+{"userId":7,"createdAt":"today","isAdmin":true}
+{"user_id":7,"created_at":"today","is_admin":true}
+n=10 c=2 name=x verbose=false args=[]
