@@ -1,3 +1,4 @@
 tar: ["a.txt", "longlong...c.txt", "sub/b.txt"] content of b.txt
 zip: ["a.txt", "longlong...c.txt", "sub/b.txt"] content of b.txt
+streamed: ["site/", "site/a.txt", "site/sub/", "site/sub/b.txt", "extra.txt"]
 archive: "a/../../x" would be written outside "ROOT/out"

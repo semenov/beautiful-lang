@@ -1340,7 +1340,8 @@ pub fn create_gzip(path: String) throws -> io.Stream
 
 ## archive
 
-archive: tar and zip files, read and written in memory.
+archive: tar and zip files, read and written in memory, and tar files
+written piece by piece.
 
 ```
 let entries = try archive.read_tar(try zlib.gunzip(try files.read_bytes("app.tar.gz")))
@@ -1350,6 +1351,15 @@ try archive.extract(entries, to: "out")
 ```
 let zip = archive.write_zip(try archive.from_dir("site"))
 try files.write_bytes("site.zip", zip)
+```
+
+A big directory without holding it in memory (".tar.gz" / ".tgz" are
+compressed):
+
+```
+with tar = try archive.create_tar("backup.tar.gz") {
+  try tar.add_dir("photos", name: "photos")
+}
 ```
 
 `extract` refuses entries whose path would leave the target directory
@@ -1371,6 +1381,25 @@ pub type Entry {
 pub fn read_tar(data: Bytes) throws -> List<Entry>
 
 pub fn write_tar(entries: List<Entry>) -> Bytes
+
+// Writes a tar archive into a file piece by piece. Closing it (the end of
+// `with`) writes the archive's end and closes the file.
+pub type TarWriter {
+  out: io.Stream
+  // Adds an entry held in memory.
+  pub fn add(self, entry: Entry) throws
+  // Adds the file at `file_path` as `name`, copying it through without
+  // reading it all into memory. Its permissions and time are kept.
+  pub fn add_file(self, file_path: String, name: String) throws
+  // Adds a directory and everything under it, named `name/...` (`name: ""`
+  // puts its contents at the top of the archive).
+  pub fn add_dir(self, dir: String, name: String) throws
+  pub fn close(self) throws
+}
+
+// Creates a tar file to fill piece by piece; ".gz" and ".tgz" names are
+// compressed with gzip.
+pub fn create_tar(file_path: String) throws -> TarWriter
 
 pub fn read_zip(data: Bytes) throws -> List<Entry>
 

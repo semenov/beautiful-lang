@@ -1,4 +1,5 @@
-// archive: tar and zip files, read and written in memory.
+// archive: tar and zip files, read and written in memory, and tar files
+// written piece by piece.
 //
 //   let entries = try archive.read_tar(try zlib.gunzip(try files.read_bytes("app.tar.gz")))
 //   try archive.extract(entries, to: "out")
@@ -6,12 +7,21 @@
 //   let zip = archive.write_zip(try archive.from_dir("site"))
 //   try files.write_bytes("site.zip", zip)
 //
+// A big directory without holding it in memory (".tar.gz" / ".tgz" are
+// compressed):
+//
+//   with tar = try archive.create_tar("backup.tar.gz") {
+//     try tar.add_dir("photos", name: "photos")
+//   }
+//
 // `extract` refuses entries whose path would leave the target directory
 // (".." or absolute paths): archives from elsewhere can't overwrite files.
 
 import files
+import io
 import path
 import time
+import zlib
 
 // A file or a directory in an archive.
 pub type Entry {
@@ -89,25 +99,127 @@ pub fn read_tar(data: Bytes) throws -> List<Entry> {
 pub fn write_tar(entries: List<Entry>) -> Bytes {
   var out = Bytes()
   for e in entries {
-    var name = if e.is_dir { "${e.name}/" } else { e.name }
-    if name.byte_length() > 100 {
-      // a pax header carries the long name
-      let record = pax_record("path", value: name)
-      out.append_all(tar_header("././@PaxHeader", size: record.length, mode: 420, modified: e.modified, kind: "x"))
-      out.append_all(padded(record))
-      name = name.slice(from: 0, to: 99)
-    }
-    out.append_all(tar_header(name, size: if e.is_dir { 0 } else { e.data.length }, mode: e.mode, modified: e.modified, kind: if e.is_dir { "5" } else { "0" }))
+    out.append_all(entry_header(e, size: if e.is_dir { 0 } else { e.data.length }))
     if not e.is_dir {
       out.append_all(padded(e.data))
     }
   }
+  out.append_all(tar_end())
+  return out
+}
+
+// The header blocks of an entry (with a pax block for a long name).
+fn entry_header(e: Entry, size: Int) -> Bytes {
+  var out = Bytes()
+  var name = if e.is_dir { "${e.name}/" } else { e.name }
+  if name.byte_length() > 100 {
+    // a pax header carries the long name
+    let record = pax_record("path", value: name)
+    out.append_all(tar_header("././@PaxHeader", size: record.length, mode: 420, modified: e.modified, kind: "x"))
+    out.append_all(padded(record))
+    name = name.slice(from: 0, to: 99)
+  }
+  out.append_all(tar_header(name, size: size, mode: e.mode, modified: e.modified, kind: if e.is_dir { "5" } else { "0" }))
+  return out
+}
+
+// two empty blocks end an archive
+fn tar_end() -> Bytes {
   var end = Bytes()
   for _ in 0..<1024 {
     end.append(0)
   }
-  out.append_all(end)
-  return out
+  return end
+}
+
+// Writes a tar archive into a file piece by piece. Closing it (the end of
+// `with`) writes the archive's end and closes the file.
+pub type TarWriter {
+  out: io.Stream
+
+  // Adds an entry held in memory.
+  pub fn add(self, entry: Entry) throws {
+    try self.out.write(entry_header(entry, size: if entry.is_dir { 0 } else { entry.data.length }))
+    if not entry.is_dir {
+      try self.out.write(padded(entry.data))
+    }
+  }
+
+  // Adds the file at `file_path` as `name`, copying it through without
+  // reading it all into memory. Its permissions and time are kept.
+  pub fn add_file(self, file_path: String, name: String) throws {
+    let info = try files.info(file_path)
+    try self.out.write(entry_header(Entry(name: name, mode: info.mode, modified: info.modified), size: info.size))
+    var left = info.size
+    with f = try files.open(file_path) {
+      while left > 0 {
+        let chunk = try f.read(min(left, 65536))
+        if chunk.is_empty() {
+          throw Failure(message: "archive: \"${file_path}\" got shorter while it was being added")
+        }
+        try self.out.write(chunk)
+        left -= chunk.length
+      }
+    }
+    let rest = info.size % 512
+    if rest != 0 {
+      try self.out.write(zeros(512 - rest))
+    }
+  }
+
+  // Adds a directory and everything under it, named `name/...` (`name: ""`
+  // puts its contents at the top of the archive).
+  pub fn add_dir(self, dir: String, name: String) throws {
+    let prefix = if name.is_empty() { "" } else { "${name}/" }
+    if not name.is_empty() {
+      let d = try files.info(dir)
+      try self.add(Entry(name: name, is_dir: true, mode: d.mode, modified: d.modified))
+    }
+    var dirs: Set<String> = Set<String>()
+    for f in try files.walk(dir) {
+      let rel = relative(f, dir: dir)
+      var parent = path.parent(rel)
+      var chain: List<String> = []
+      while not parent.is_empty() and parent != "." and not dirs.contains(parent) {
+        dirs.add(parent)
+        chain.append(parent)
+        parent = path.parent(parent)
+      }
+      for d in chain.reversed() {
+        let di = try files.info(path.join(dir, d))
+        try self.add(Entry(name: "${prefix}${d}", is_dir: true, mode: di.mode, modified: di.modified))
+      }
+      try self.add_file(f, name: "${prefix}${rel}")
+    }
+  }
+
+  pub fn close(self) throws {
+    try self.out.write(tar_end())
+    try self.out.close()
+  }
+}
+
+// Creates a tar file to fill piece by piece; ".gz" and ".tgz" names are
+// compressed with gzip.
+pub fn create_tar(file_path: String) throws -> TarWriter {
+  if file_path.ends_with(".gz") or file_path.ends_with(".tgz") {
+    return TarWriter(out: try zlib.create_gzip(file_path))
+  }
+  return TarWriter(out: try files.create(file_path))
+}
+
+fn zeros(n: Int) -> Bytes {
+  var b = Bytes()
+  for _ in 0..<n {
+    b.append(0)
+  }
+  return b
+}
+
+// `f` under `dir`, without it: "site/a/b.txt" in "site" -> "a/b.txt"
+fn relative(f: String, dir: String) -> String {
+  let rel = f.slice(from: dir.length, to: f.length)
+  return if rel.starts_with("/") { rel.slice(from: 1, to: rel.length) } else { rel }
 }
 
 fn pax_record(key: String, value: String) -> Bytes {
@@ -335,8 +447,7 @@ pub fn from_dir(dir: String) throws -> List<Entry> {
   var out: List<Entry> = []
   var dirs: Set<String> = Set<String>()
   for f in try files.walk(dir) {
-    let rel = f.slice(from: dir.length, to: f.length)
-    let name = if rel.starts_with("/") { rel.slice(from: 1, to: rel.length) } else { rel }
+    let name = relative(f, dir: dir)
     // the directories on the way
     var parent = path.parent(name)
     var chain: List<String> = []
@@ -346,9 +457,11 @@ pub fn from_dir(dir: String) throws -> List<Entry> {
       parent = path.parent(parent)
     }
     for d in chain.reversed() {
-      out.append(Entry(name: d, is_dir: true, mode: 493, modified: time.unix_now()))
+      let di = try files.info(path.join(dir, d))
+      out.append(Entry(name: d, is_dir: true, mode: di.mode, modified: di.modified))
     }
-    out.append(Entry(name: name, data: try files.read_bytes(f), modified: time.unix_now()))
+    let info = try files.info(f)
+    out.append(Entry(name: name, data: try files.read_bytes(f), mode: info.mode, modified: info.modified))
   }
   return out
 }
