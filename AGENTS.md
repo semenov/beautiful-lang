@@ -76,6 +76,7 @@ let label = match shape {
 ```
 
 No semicolons. Braces always. `if` conditions have no parentheses.
+Two-space indentation; `lang fmt` lays files out the standard way.
 
 ## Types
 

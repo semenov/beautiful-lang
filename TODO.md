@@ -42,7 +42,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       (`lang guide`, `lang doc http`, `lang doc http.Router`), built from the
       sources so it's never out of date
 - [ ] **Designed but never built** (DESIGN.md promises them):
-  - [ ] `lang fmt`: the formatter the design calls mandatory
+  - [x] `lang fmt`: indentation and whitespace (spacing inside lines: not yet)
   - [x] `Decimal` for money
   - [x] `time.timeout(duration, work)`
   - [x] `lang doc`

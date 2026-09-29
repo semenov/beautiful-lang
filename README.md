@@ -170,6 +170,7 @@ lang build app.lang -o app   # an optimized binary
 lang build --static app.lang # Linux: one file with no library dependencies
 lang test app.lang           # run the `test` blocks
 lang check app.lang          # only check for errors
+lang fmt                     # lay out every .lang file the standard way
 lang run --debug app.lang    # with memory checking and a leak count
 lang new / add / fetch / update   # projects and packages
 ```
@@ -198,8 +199,7 @@ reference counting that the compiler inserts, with no garbage collector.
 
 A working language and toolchain, used for real programs and packages. The
 test suite (`compiler/tests/run.sh`) runs every program under
-AddressSanitizer with a leak check, on macOS and Linux. Not done yet: the
-formatter (`lang fmt`), `Decimal`, and the other items in
+AddressSanitizer with a leak check, on macOS and Linux. Not done yet: the items in
 [`TODO.md`](TODO.md).
 
 Earlier designs are kept in [`drafts/`](drafts).

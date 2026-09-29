@@ -482,7 +482,6 @@ pub type ClientRequest {
   follow_redirects: Bool = true
 }
 
-
 pub fn send(request: ClientRequest) throws -> Response {
   if not request.url.contains("://") {
     throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")

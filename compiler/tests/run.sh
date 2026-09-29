@@ -26,5 +26,9 @@ for f in *.lang; do
     echo "FAIL $f: memory error"; head -20 /tmp/lang-test-err; fail=1
   fi
 done
+# the language's own code is laid out the standard way
+if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then
+  echo "FAIL lang fmt --check:"; cat /tmp/lang-fmt-err; fail=1
+fi
 [ $fail = 0 ] && echo "all passed"
 exit $fail

@@ -38,8 +38,6 @@ fn make_router() -> http.Router {
   return router
 }
 
-
-
 test "middleware runs in order and can stop a request" {
   let router = make_router()
   expect (try router.handle(http.request("GET", "/admin"))).status == 401

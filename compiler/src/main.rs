@@ -3,6 +3,7 @@ mod cgen;
 mod check;
 mod diag;
 mod doc;
+mod fmt;
 mod lexer;
 mod lower;
 mod mir;
@@ -27,6 +28,7 @@ New to it (an AI agent, or a person)? Start here:
 
 Programs:
   lang run <file.lang> [args]       compile and run
+  lang fmt [files or dirs]          lay the code out the one standard way (--check: only report)
   lang build <file.lang> [-o out]   compile an optimized binary
   lang test <file.lang>             run the file's `test` blocks
   lang check <file.lang>            only check for errors (fast)
@@ -70,6 +72,7 @@ fn learn_command(args: &[String]) -> Option<ExitCode> {
             Some(ExitCode::SUCCESS)
         }
         "doc" => Some(doc_command(&args[1..])),
+        "fmt" => Some(fmt_command(&args[1..])),
         _ => None,
     }
 }
@@ -93,6 +96,78 @@ fn doc_sources() -> Vec<(String, String, bool)> {
         }
     }
     out
+}
+
+// `lang fmt [--check] [paths]`: the files given, or every .lang file under
+// the current directory.
+fn fmt_command(args: &[String]) -> ExitCode {
+    let check = args.iter().any(|a| a == "--check");
+    let mut paths: Vec<PathBuf> = args.iter().filter(|a| !a.starts_with("--")).map(PathBuf::from).collect();
+    if paths.is_empty() {
+        paths.push(PathBuf::from("."));
+    }
+    let mut files = vec![];
+    fn collect(p: &Path, out: &mut Vec<PathBuf>) {
+        if p.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(p) {
+                let mut entries: Vec<_> = rd.flatten().map(|e| e.path()).collect();
+                entries.sort();
+                for e in entries {
+                    let name = e.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                    if name.starts_with('.') || name == "target" || name == "node_modules" {
+                        continue;
+                    }
+                    collect(&e, out);
+                }
+            }
+        } else if p.extension().map(|e| e == "lang").unwrap_or(false) {
+            out.push(p.to_path_buf());
+        }
+    }
+    for p in &paths {
+        collect(p, &mut files);
+    }
+    let mut changed = 0;
+    let mut failed = false;
+    for f in &files {
+        let src = match std::fs::read_to_string(f) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("error: can't read {}: {}", f.display(), e);
+                failed = true;
+                continue;
+            }
+        };
+        let out = fmt::format(&src);
+        if out == src {
+            continue;
+        }
+        if !fmt::same_tokens(&src, &out) {
+            eprintln!("error: {}: formatting would change the code (a formatter bug); left as it is", f.display());
+            failed = true;
+            continue;
+        }
+        changed += 1;
+        if check {
+            println!("{}: not formatted", f.display());
+        } else if let Err(e) = std::fs::write(f, &out) {
+            eprintln!("error: can't write {}: {}", f.display(), e);
+            failed = true;
+        }
+    }
+    if check {
+        if changed > 0 {
+            eprintln!("{} file(s) not formatted: run `lang fmt`", changed);
+            return ExitCode::from(1);
+        }
+    } else if changed > 0 {
+        println!("formatted {} file(s)", changed);
+    }
+    if failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 fn doc_command(args: &[String]) -> ExitCode {

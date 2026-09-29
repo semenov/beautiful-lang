@@ -58,4 +58,3 @@ pub fn clean(path: String) -> String {
 // `[a-z]` / `[!a-z]` one character from a set, `{a,b}` either text.
 //   matches("src/net/tcp.lang", pattern: "src/**/*.lang") == true
 pub fn matches(path: String, pattern: String) -> Bool
-
