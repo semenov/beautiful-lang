@@ -1,0 +1,23 @@
+// crypto.hash_password / verify_password (PBKDF2-SHA256, 210000 rounds)
+// take ~200 ms on an M-series Mac; OpenSSL does the same PBKDF2 in ~22 ms
+// (python3 -c "import hashlib; hashlib.pbkdf2_hmac('sha256', b'p', b's'*16, 210000, 32)").
+// Every login and registration costs 200 ms of CPU; the RealWorld API
+// suite spends most of its time here.
+//
+// Expected: close to OpenSSL (or a faster KDF: bcrypt / scrypt / argon2id,
+// none of which exist in `crypto`).
+
+import crypto
+import time
+
+fn main() {
+  let start = time.now()
+  let stored = crypto.hash_password("password1")
+  print("hash_password: ${start.elapsed()}")
+  let again = time.now()
+  let ok = crypto.verify_password("password1", stored: stored)
+  print("verify_password: ${again.elapsed()} (${ok})")
+  let raw = time.now()
+  let key = crypto.pbkdf2_sha256("password1".bytes(), salt: "saltsaltsaltsalt".bytes(), iterations: 210000, length: 32)
+  print("pbkdf2_sha256, 210000 rounds: ${raw.elapsed()} (${key.length} bytes)")
+}
