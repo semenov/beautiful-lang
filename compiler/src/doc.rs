@@ -39,6 +39,61 @@ fn is_fn_decl(s: &str) -> bool {
     s.starts_with("fn ")
 }
 
+// `{` minus `}` in a line of code, not counting strings (with their
+// `${...}` parts) and comments.
+fn brace_delta(s: &str) -> i32 {
+    let mut d = 0;
+    // for each open string: the brace depth of the `${` it is inside of
+    let mut stack: Vec<Option<i32>> = vec![];
+    let mut depth = 0;
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if let Some(None) = stack.last() {
+            // inside a string
+            match c {
+                '\\' => {
+                    chars.next();
+                }
+                '"' => {
+                    stack.pop();
+                }
+                '$' if chars.peek() == Some(&'{') => {
+                    chars.next();
+                    depth += 1;
+                    stack.push(Some(depth));
+                }
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => stack.push(None),
+            '/' if chars.peek() == Some(&'/') => break,
+            '{' => {
+                depth += 1;
+                if stack.is_empty() {
+                    d += 1;
+                }
+            }
+            '}' => {
+                if let Some(Some(k)) = stack.last() {
+                    if *k == depth {
+                        stack.pop();
+                        depth -= 1;
+                        continue;
+                    }
+                }
+                depth -= 1;
+                if stack.is_empty() {
+                    d -= 1;
+                }
+            }
+            _ => {}
+        }
+    }
+    d
+}
+
 fn signature(line: &str) -> String {
     let l = line.trim_end();
     match l.strip_suffix('{') {
@@ -66,7 +121,7 @@ pub fn parse(src: &str, prelude: bool) -> ModuleDoc {
     let mut open: Option<(Item, bool)> = None;
     for line in &lines[i..] {
         let s = line.trim();
-        let delta = s.matches('{').count() as i32 - s.matches('}').count() as i32;
+        let delta = brace_delta(s);
         if let Some(target) = skip_to {
             depth += delta;
             if depth <= target {

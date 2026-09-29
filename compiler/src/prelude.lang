@@ -456,7 +456,11 @@ builtin type Locked<T> {
 
 // A queue between tasks.
 builtin type Channel<T> {
+  // Waits while the channel is full; throws `ChannelClosed` once it's closed.
   fn send(self, item: T) throws
+  // Sends without waiting: false (and the item is dropped) when the channel
+  // is full or closed.
+  fn try_send(self, item: T) -> Bool
   fn receive(self) throws -> T?
   // A value if one is waiting, without waiting; none otherwise.
   fn try_receive(self) -> T?

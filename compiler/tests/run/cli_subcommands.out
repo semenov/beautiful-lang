@@ -1,0 +1,8 @@
+add apple x3 dry=false
+add pear x1 dry=true
+stats top=10 dirs=[]
+stats top=3 dirs=["src", "docs"]
+error: the option --name is required (see --help)
+error: unknown option --colour (see --help)
+error: the option --count: expected a whole number, found "lots"
+usage: tool add|stats

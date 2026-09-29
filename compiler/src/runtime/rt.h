@@ -1122,6 +1122,21 @@ static void lt_catch_interrupts(void) {
     }
 }
 
+// A server's own SIGINT/SIGTERM handler while it runs; the previous ones
+// come back afterwards. Ignored signals stay ignored.
+static void lt_signals_take(void (*handler)(int), struct sigaction old[2]) {
+    int sigs[2] = { SIGINT, SIGTERM };
+    for (int i = 0; i < 2; i++) {
+        sigaction(sigs[i], NULL, &old[i]);
+        if (old[i].sa_handler == SIG_IGN) continue;
+        signal(sigs[i], handler);
+    }
+}
+static void lt_signals_restore(struct sigaction old[2]) {
+    sigaction(SIGINT, &old[0], NULL);
+    sigaction(SIGTERM, &old[1], NULL);
+}
+
 static void lt_init(void) {
     // started by `lang run`: remove the temporary executable (still running)
     const char *self = getenv("LANG_RUN_EXE");

@@ -92,6 +92,21 @@ static bool lt_files_is_dir(lt_text *path) {
     return stat(path->data, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+// size, Unix permission bits, modification time (seconds since 1970), is a directory
+static lt_err lt_files_stat(lt_text *path, int64_t *f) {
+    struct stat st;
+    if (stat(path->data, &st) != 0) return lt_os_error("can't read the details of", path);
+    f[0] = (int64_t)st.st_size;
+    f[1] = (int64_t)(st.st_mode & 07777);
+#ifdef __APPLE__
+    f[2] = (int64_t)st.st_mtimespec.tv_sec;
+#else
+    f[2] = (int64_t)st.st_mtim.tv_sec;
+#endif
+    f[3] = S_ISDIR(st.st_mode) ? 1 : 0;
+    return (lt_err){ 0 };
+}
+
 static int lt_cmp_texts(const void *a, const void *b) { return (int)lt_text_cmp(*(lt_text **)a, *(lt_text **)b); }
 
 static lt_err lt_files_list(lt_text *dir, lt_texts **out) {

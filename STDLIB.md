@@ -34,6 +34,46 @@ pub fn walk(dir: String) throws -> List<String>
 // The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
 // "logs/2026-*.{log,gz}" (see `path.matches`).
 pub fn glob(pattern: String) throws -> List<String>
+// Deletes a file or an empty directory.
+pub fn delete(path: String) throws
+// Deletes a file, or a directory with everything in it (like `rm -rf`).
+// Nothing at `path` is fine.
+pub fn delete_all(path: String) throws
+// What `info` tells about a file or directory.
+pub type FileInfo {
+  // in bytes
+  size: Int
+  // Unix permissions: 420 is rw-r--r-- (0644), 493 is rwxr-xr-x (0755)
+  mode: Int
+  // the last change, in seconds since 1970 (`time.from_unix` for a date)
+  modified: Int
+  is_dir: Bool
+}
+
+// The size, permissions and time of the last change of a file or directory
+// (following symlinks).
+pub fn info(file_path: String) throws -> FileInfo
+
+// Creates a directory and any missing parents.
+pub fn make_dir(path: String) throws
+pub fn copy(from: String, to: String) throws
+pub fn rename(from: String, to: String) throws
+
+// A file as a stream (see the `io` module), for reading or writing it
+// piece by piece: `with f = try files.open(path) { ... }`.
+pub fn open(path: String) throws -> io.Stream
+// Creates (or empties) a file for writing.
+pub fn create(path: String) throws -> io.Stream
+// Opens a file for writing at its end, creating it if needed.
+pub fn open_append(path: String) throws -> io.Stream
+
+// A new empty directory, deleted with everything in it at the end of `with`.
+pub builtin type TempDir {
+  path: String
+  fn close(self) throws
+}
+
+pub fn temp_dir() throws -> TempDir
 ```
 
 ## path
@@ -297,8 +337,9 @@ pub fn width(text: String) -> Int
 // The text padded with spaces to `columns` on screen.
 pub fn pad(text: String, columns: Int) -> String
 
-// Rows as aligned columns; the first row is the header (underlined when
-// colors are on). Lines end without trailing spaces.
+// Rows as aligned columns; the first row is the header (bold when colors
+// are on). Columns of numbers are aligned to the right. Lines end without
+// trailing spaces.
 pub fn table(rows: List<List<String>>) -> String
 
 // A size in bytes for people: 512 B, 1.5 KB, 23.4 MB, 1.2 GB (1 KB = 1024 B).
@@ -849,7 +890,9 @@ pub type WebSocketMessage {
 // Connects to a WebSocket server: "ws://host:port/path" or "wss://..." (TLS).
 //   with ws = try http.websocket("wss://echo.example/socket") {
 //     try ws.send_text("hi")
-//     print(try ws.receive()?.text())
+//     if try ws.receive() is some(m) {
+//       print(try m.text())
+//     }
 //   }
 pub fn websocket(address: String) throws -> WebSocket
 ```
@@ -1595,7 +1638,11 @@ builtin type Locked<T> {
 
 // A queue between tasks.
 builtin type Channel<T> {
+  // Waits while the channel is full; throws `ChannelClosed` once it's closed.
   fn send(self, item: T) throws
+  // Sends without waiting: false (and the item is dropped) when the channel
+  // is full or closed.
+  fn try_send(self, item: T) -> Bool
   fn receive(self) throws -> T?
   // A value if one is waiting, without waiting; none otherwise.
   fn try_receive(self) -> T?

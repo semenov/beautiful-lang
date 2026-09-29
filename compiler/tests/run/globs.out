@@ -2,4 +2,5 @@
 ["src/a.lang", "src/net/deep/x.lang", "src/net/tcp.lang"]
 ["logs/2026-01.log", "logs/2026-02.gz"]
 true false true
+info: 5 false true true
 gone: true

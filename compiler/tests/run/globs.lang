@@ -17,6 +17,10 @@ fn main() throws {
   print("${short(root, found: try files.glob("${root}/src/**/*.lang"))}")
   print("${short(root, found: try files.glob("${root}/logs/2026-*.{log,gz}"))}")
   print("${path.matches("a/b/c.txt", pattern: "**/*.txt")} ${path.matches("a/c.txt", pattern: "*.txt")} ${path.matches("b.md", pattern: "[a-c].{md,txt}")}")
+  try files.write("${root}/sized.txt", "12345")
+  let info = try files.info("${root}/sized.txt")
+  let dir = try files.info(root)
+  print("info: ${info.size} ${info.is_dir} ${dir.is_dir} ${info.modified > 1700000000}")
   try files.delete_all(root)
   print("gone: ${not files.exists(root)}")
 }

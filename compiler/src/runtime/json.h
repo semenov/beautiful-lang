@@ -80,11 +80,50 @@ static const char *lt_dyn_kind_name(const lt_dyn *d) {
     }
 }
 
-// "<source>: at $.a.b: expected <what>, found <kind>"
+// Where a decoding error is, in the words of its source:
+//   json:  "json: at $.items[2].price"
+//   cli:   "the option --count", "argument 2"
+//   env:   "the environment variable PORT"
+//   csv:   "csv: line 4, column quantity"
+//   sql/db: "db: row 2, column age"
+static void lt_dec_where(const char *src, const lt_path *p, char *buf, size_t cap, size_t *len) {
+    const lt_path *nodes[64];
+    int n = 0;
+    for (const lt_path *q = p; q && n < 64; q = q->parent) nodes[n++] = q;
+    // nodes[n - 1] is the outermost
+    const lt_path *first = n > 0 ? nodes[n - 1] : NULL;
+    const lt_path *second = n > 1 ? nodes[n - 2] : NULL;
+    if ((strcmp(src, "cli") == 0 || strcmp(src, "env") == 0) && first && first->key) {
+        if (strcmp(src, "env") == 0) {
+            *len += (size_t)snprintf(buf + *len, cap - *len, "the environment variable ");
+            for (int64_t i = 0; i < first->klen && *len + 1 < cap; i++) buf[(*len)++] = (char)toupper((unsigned char)first->key[i]);
+            buf[*len < cap ? *len : cap - 1] = 0;
+        } else if (first->klen == 4 && memcmp(first->key, "args", 4) == 0 && second && !second->key) {
+            *len += (size_t)snprintf(buf + *len, cap - *len, "argument %lld", (long long)second->index + 1);
+            return;
+        } else {
+            *len += (size_t)snprintf(buf + *len, cap - *len, "the option --");
+            for (int64_t i = 0; i < first->klen && *len + 1 < cap; i++) buf[(*len)++] = first->key[i] == '_' ? '-' : first->key[i];
+            buf[*len < cap ? *len : cap - 1] = 0;
+        }
+        // a repeated option: which of its values
+        if (second && !second->key && *len < cap) *len += (size_t)snprintf(buf + *len, cap - *len, " (value %lld)", (long long)second->index + 1);
+        return;
+    }
+    bool rows = strcmp(src, "csv") == 0 || strcmp(src, "sql") == 0 || strcmp(src, "db") == 0;
+    if (rows && first && !first->key) {
+        *len += (size_t)snprintf(buf + *len, cap - *len, "%s: %s %lld", src, strcmp(src, "csv") == 0 ? "line" : "row", (long long)first->index);
+        if (second && second->key && *len < cap) *len += (size_t)snprintf(buf + *len, cap - *len, ", column %.*s", (int)second->klen, second->key);
+        return;
+    }
+    *len += (size_t)snprintf(buf + *len, cap - *len, "%s: at ", src);
+    lt_path_write(p, buf, cap, len);
+}
+
 static lt_err lt_dec_error(const char *source, const lt_path *p, const char *what, const lt_dyn *found) {
     char buf[1024];
-    size_t len = (size_t)snprintf(buf, sizeof buf, "%s: at ", source);
-    lt_path_write(p, buf, sizeof buf, &len);
+    size_t len = 0;
+    lt_dec_where(source, p, buf, sizeof buf, &len);
     if (len < sizeof buf) {
         if (!found) snprintf(buf + len, sizeof buf - len, ": %s", what);
         else if (found->kind == LT_D_STR) snprintf(buf + len, sizeof buf - len, ": expected %s, found \"%.*s\"", what, (int)(found->slen > 60 ? 60 : found->slen), found->s);
@@ -110,6 +149,8 @@ static lt_err lt_dec_missing(const char *src, const lt_path *p, const char *fiel
         snprintf(buf, sizeof buf, "the option --%s is required (see --help)", fl);
     } else if (strcmp(src, "db") == 0) {
         snprintf(buf, sizeof buf, "db: the query result has no column `%s`", field);
+    } else if (strcmp(src, "csv") == 0 && p && !p->parent && !p->key) {
+        snprintf(buf, sizeof buf, "csv: line %lld: the column `%s` is empty or missing", (long long)p->index, field);
     } else {
         size_t len = (size_t)snprintf(buf, sizeof buf, "%s: at ", src);
         lt_path_write(p, buf, sizeof buf, &len);

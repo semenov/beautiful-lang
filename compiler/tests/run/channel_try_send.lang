@@ -1,0 +1,14 @@
+// Channel.try_send: never waits; false when full or closed.
+fn main() throws {
+  let ch = Channel<String>(capacity: 2)
+  print("${ch.try_send("a")} ${ch.try_send("b")} ${ch.try_send("c")}")
+  print("${ch.try_receive() ?? "-"}")
+  print("${ch.try_send("d")}")
+  ch.close()
+  print("${ch.try_send("e")}")
+  var got: List<String> = []
+  while try ch.receive() is some(x) {
+    got.append(x)
+  }
+  print("${got}")
+}

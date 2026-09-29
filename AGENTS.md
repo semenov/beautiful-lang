@@ -26,6 +26,14 @@ reasons behind the rules are in `DESIGN.md`.
 - Without `pub`, a function or type is private to its file.
 - A local variable can't have the name of an imported module (`let path = ...`
   with `import path` is an error).
+- The top level holds only `import`, `type`, `enum`, `interface`, `fn` and
+  `test`. **No global variables or constants**: a fixed value is a function
+  (`fn usage() -> String { return """...""" }`); state shared between
+  tasks is a `Shared<T>` made in `main` and passed along.
+- Files: `files.read` / `write` / `append` (whole files), `files.open` /
+  `create` / `open_append` (streams, with `with`), `list`, `walk`, `glob`,
+  `exists`, `is_dir`, `make_dir`, `copy`, `rename`, `delete`, `delete_all`,
+  `temp_dir`. Paths as text: the `path` module.
 
 ## Syntax at a glance
 
@@ -168,6 +176,17 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
   `let _ = f()`. `list.sort()` changes the list in place; `list.sorted()`
   returns a new one.
 - No `return` inside a lambda: its last line is its value.
+- A function that never comes back is `-> Never`: it must end in
+  `process.exit(...)`, `panic(...)`, `throw` or an endless loop. A call to it
+  ends a branch like `return` does:
+
+```
+fn usage(msg: String) -> Never {
+  eprint("error: ${msg}")
+  process.exit(2)
+}
+let n = if args.length > 0 { try args[0].to_int() } else { usage("no count") }
+```
 
 ## Numbers
 
@@ -180,7 +199,8 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
   `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;
   `n.to_decimal()` from an Int; `1.50` prints as `1.50` and equals `1.5`.
-  JSON and SQL carry it exactly.
+  JSON carries it exactly as a number; as a SQL parameter it is sent as
+  text (`"19.99"`), and `query<T>` reads it back into a `Decimal` field.
 
 ## Resources: `with`
 
@@ -244,6 +264,28 @@ for t in tasks {
 
 A function waits for its tasks before it returns. No `async`/`await`:
 waiting code is written sequentially.
+
+**Ctrl-C and `kill`** (SIGINT, SIGTERM) cancel `main`'s task: waits
+(`sleep`, I/O, `wait()`) throw `Cancelled`, `with` blocks close their
+resources, `http.serve` stops, and the exit status is 130. A loop that
+doesn't wait checks `process.interrupted()`. A second Ctrl-C exits at once.
+(A program started with `&` from a script ignores SIGINT, as the shell
+asks; SIGTERM still works.)
+
+Sending to many listeners (chat, live updates over WebSockets): one
+`Channel` per listener, kept in a `Shared` map. The sender uses
+`try_send`, so a slow listener loses messages instead of stalling everyone:
+
+```
+let listeners = Shared<Map<Int, Channel<String>>>({})
+// a listener: register, then read its channel until it's closed
+// the sender:
+with ls = listeners.lock() {
+  for entry in ls {
+    let _ = entry.value.try_send(text)   // false: that listener is full
+  }
+}
+```
 
 ## Data in and out: `decode<T>`
 
@@ -368,6 +410,7 @@ see private functions.
 |---|---|
 | `a \`Stream\` must be closed: get it with \`with\`` | `with f = try ... { }` |
 | `/` on two `Int`s is not allowed | `a.div(b)` or `a.to_float() / b.to_float()` |
+| there are no global variables or constants | a function: `fn limit() -> Int { return 10 }` |
 | there is no `?.` | `if x is some(v) { v.field }` or `??` |
 | `catch` needs `try` before the call | `try f(x) catch err { ... }` |
 | this call can fail | put `try` in front |

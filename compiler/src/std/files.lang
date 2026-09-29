@@ -52,6 +52,26 @@ pub fn delete(path: String) throws
 // Deletes a file, or a directory with everything in it (like `rm -rf`).
 // Nothing at `path` is fine.
 pub fn delete_all(path: String) throws
+// What `info` tells about a file or directory.
+pub type FileInfo {
+  // in bytes
+  size: Int
+  // Unix permissions: 420 is rw-r--r-- (0644), 493 is rwxr-xr-x (0755)
+  mode: Int
+  // the last change, in seconds since 1970 (`time.from_unix` for a date)
+  modified: Int
+  is_dir: Bool
+}
+
+// The size, permissions and time of the last change of a file or directory
+// (following symlinks).
+pub fn info(file_path: String) throws -> FileInfo {
+  let f = try __stat(file_path)
+  return FileInfo(size: f[0], mode: f[1], modified: f[2], is_dir: f[3] == 1)
+}
+
+fn __stat(path: String) throws -> List<Int>
+
 // Creates a directory and any missing parents.
 pub fn make_dir(path: String) throws
 pub fn copy(from: String, to: String) throws

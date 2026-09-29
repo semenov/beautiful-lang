@@ -680,7 +680,9 @@ fn run_websocket(stream: io.Stream, handler: fn(WebSocket) throws) throws {
 // Connects to a WebSocket server: "ws://host:port/path" or "wss://..." (TLS).
 //   with ws = try http.websocket("wss://echo.example/socket") {
 //     try ws.send_text("hi")
-//     print(try ws.receive()?.text())
+//     if try ws.receive() is some(m) {
+//       print(try m.text())
+//     }
 //   }
 pub fn websocket(address: String) throws -> WebSocket {
   let parts = address.split("://")

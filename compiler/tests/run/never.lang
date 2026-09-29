@@ -1,0 +1,37 @@
+// `-> Never`: functions that don't come back.
+import process
+
+fn usage(msg: String) -> Never {
+  eprint("error: ${msg}")
+  process.exit(2)
+}
+
+fn reject(msg: String) throws -> Never {
+  throw Failure(message: "rejected: ${msg}")
+}
+
+fn sign(x: Int) -> String {
+  if x > 0 {
+    return "positive"
+  }
+  if x < 0 {
+    return "negative"
+  }
+  usage("zero has no sign")
+}
+
+fn checked(x: Int) throws -> Int {
+  let v = if x >= 0 { x } else { try reject("${x}") }
+  return v * 2
+}
+
+fn main() {
+  print(sign(3))
+  print(sign(-1))
+  print("${try checked(4) catch err { 0 }}")
+  let r = try checked(-4) catch err {
+    print(err.message())
+    -1
+  }
+  print("${r}")
+}

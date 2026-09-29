@@ -177,8 +177,8 @@ impl Parser {
                 Ok(Item::Test(TestDecl { name, span: sp, body }))
             }
             Tok::Let | Tok::Var => Err(self
-                .err_here("there are no global variables")
-                .help("put the value in a function, or share state through `Shared<T>` created in `main`")),
+                .err_here("there are no global variables or constants")
+                .help("a fixed value is a function: `fn usage() -> String { return \"...\" }`; state shared between tasks is a `Shared<T>` created in `main` and passed along")),
             Tok::Mutating => Err(self.err_here("`mutating fn` is only allowed inside a type")),
             t => {
                 let d = Self::describe(&t);

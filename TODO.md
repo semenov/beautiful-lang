@@ -61,6 +61,26 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] one "this call can fail" per chain, not per call
   - [x] String: character tests (is_letter of any script, is_digit, ...), index_of, trim_start/end
 
+- [ ] From the second newcomer test (invoice with Decimal and templates,
+      notes server with SQLite and WebSockets, a `tidy` tool with
+      subcommands and archives: all worked, 3 compile errors total):
+  - [x] `cli.decode_from<T>([])` crashed (field defaults weren't generated)
+  - [x] `lang doc files` stopped halfway (a `{` inside a string), and so did STDLIB.md
+  - [x] `-> Never` couldn't be written though the docs show it
+  - [x] docs: `?.` in the websocket example, Decimal in SQL, no top-level
+        constants, the file operations, Ctrl-C, broadcasting to listeners
+  - [x] `Channel.try_send` (a slow listener must not stall a broadcast)
+  - [x] errors in the source's words: `the option --count: ...`,
+        `csv: line 4, column quantity: ...`, `db: row 2, column age: ...`
+  - [x] `--help` shows defaults; `lang run` shows the program's name, not a temp file
+  - [x] `files.info`: size, permissions, modification time
+  - [x] `term.table` aligns number columns to the right
+  - [x] a server started with SIGINT ignored (`&` in a script) keeps it
+        ignored, and gives back the program's own Ctrl-C handler when it stops
+  - [ ] `archive`: streaming tar writing (big directories, Ctrl-C in the middle)
+  - [ ] `lang test`: hide log lines of passing tests (request logs clutter it)
+  - [ ] `--help`: field comments as option descriptions
+
 ## Stdlib gaps from the npm review (research/npm-top-packages.md), in order
 
 - [x] `files.walk`, `files.glob`, `path.matches`, `files.delete_all`
@@ -79,7 +99,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
       (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
       chunks, partition, index_of, find_index), log levels and JSON logs
-- [ ] still small: decode key naming, log fields, cli subcommands
+- [ ] still small: log fields (decode key naming and cli subcommands: done)
 - [x] signals: Ctrl-C cancels `main` so `with` blocks close
 - [x] `crypto`: RSA and ECDSA P-256 sign/verify, keys from PEM or JWK (Ed25519: not yet)
 - [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)
@@ -102,7 +122,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       (macOS: sleep(10ms) takes ~70ms), a ticker (sleep_until on a grid)
 - [x] `cli`: -n style flags, one-letter names, subcommands (decode_from)
 - [x] channels: try_receive (a timeout: time.timeout around receive); select: not yet
-- [ ] `-> Never` in user code; constants (`const`)
+- [x] `-> Never` in user code
+- [ ] constants (`const`): to raise with Vlad (a fixed value is a function for now)
 - [x] signals: Ctrl-C cancels main's tasks; process.interrupted()
 - [x] a field default can't use a type declared later in the file
 - [x] Float.format: NaN text (width: use pad_start)

@@ -22,6 +22,43 @@ ORDER = [
 ]
 
 
+def braces(s: str) -> tuple[int, int]:
+    """`{` and `}` in a line of code, not counting strings (with their
+    `${...}` parts) and comments."""
+    opens = closes = depth = 0
+    stack = []  # per open string: None, or the depth of the `${` inside it
+    i = 0
+    while i < len(s):
+        c = s[i]
+        if stack and stack[-1] is None:
+            if c == "\\":
+                i += 1
+            elif c == '"':
+                stack.pop()
+            elif c == "$" and s[i + 1 : i + 2] == "{":
+                i += 1
+                depth += 1
+                stack.append(depth)
+            i += 1
+            continue
+        if c == '"':
+            stack.append(None)
+        elif s.startswith("//", i):
+            break
+        elif c == "{":
+            depth += 1
+            if not stack:
+                opens += 1
+        elif c == "}":
+            if stack and stack[-1] == depth:
+                stack.pop()
+            elif not stack:
+                closes += 1
+            depth -= 1
+        i += 1
+    return opens, closes
+
+
 def public_api(text: str, prelude: bool) -> tuple[str, str]:
     """(module intro, API listing) from a module's source."""
     lines = text.split("\n")
@@ -39,7 +76,7 @@ def public_api(text: str, prelude: bool) -> tuple[str, str]:
     type_depth = None  # depth inside a public type's braces
     for line in lines[i:]:
         s = line.strip()
-        opens, closes = s.count("{"), s.count("}")
+        opens, closes = braces(s)
         if skipping_until is not None:
             depth += opens - closes
             if depth <= skipping_until:

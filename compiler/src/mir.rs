@@ -301,7 +301,7 @@ impl Term {
 
 // Intrinsics that take ownership of an argument (the rest are borrowed).
 pub fn consumes_arg(name: &str, i: usize) -> bool {
-    matches!((name, i), ("Shared.release", 1) | ("spawn", 1) | ("Channel.send", 1))
+    matches!((name, i), ("Shared.release", 1) | ("spawn", 1) | ("Channel.send", 1) | ("Channel.try_send", 1))
 }
 
 // Mutating intrinsics that store their arguments.

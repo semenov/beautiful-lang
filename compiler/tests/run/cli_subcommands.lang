@@ -1,0 +1,45 @@
+// `cli.decode_from`: options from a list of arguments, for subcommands.
+import cli
+
+type AddOptions {
+  name: String
+  count: Int = 1
+  dry_run: Bool = false
+}
+
+type StatsOptions {
+  top: Int = 10
+  args: List<String> = []
+}
+
+fn run(args: List<String>) throws {
+  match args.first() ?? "" {
+    "add" => {
+      let o = try cli.decode_from<AddOptions>(args.drop(1))
+      print("add ${o.name} x${o.count} dry=${o.dry_run}")
+    }
+    "stats" => {
+      let o = try cli.decode_from<StatsOptions>(args.drop(1))
+      print("stats top=${o.top} dirs=${o.args}")
+    }
+    _ => print("usage: tool add|stats")
+  }
+}
+
+fn main() {
+  let calls = [
+    ["add", "--name", "apple", "--count", "3"],
+    ["add", "-name=pear", "--dry-run"],
+    ["stats"],
+    ["stats", "src", "--top", "3", "docs"],
+    ["add"],
+    ["add", "--name", "x", "--colour", "red"],
+    ["add", "--name", "x", "--count", "lots"],
+    [],
+  ]
+  for args in calls {
+    try run(args) catch err {
+      print("error: ${err.message()}")
+    }
+  }
+}

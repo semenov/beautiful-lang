@@ -734,7 +734,7 @@ fn main() -> ExitCode {
             // status and standard input are its own; it deletes its temporary
             // file when it starts (LANG_RUN_EXE)
             use std::os::unix::process::CommandExt;
-            let err = Command::new(&exe).args(&opts.args).env("LANG_RUN_EXE", &exe).exec();
+            let err = Command::new(&exe).arg0(&stem).args(&opts.args).env("LANG_RUN_EXE", &exe).exec();
             let _ = std::fs::remove_file(&exe);
             eprintln!("error: can't run the program: {}", err);
             ExitCode::from(1)

@@ -481,7 +481,7 @@ impl Checker {
                         if r.builtin {
                             props.push((f.name.clone(), ty));
                         } else {
-                            fields.push(FieldDef { name: f.name.clone(), ty, default: None, span: f.span });
+                            fields.push(FieldDef { name: f.name.clone(), ty, default: None, default_text: None, span: f.span });
                         }
                     }
                     let def = &mut self.prog.defs[d];
@@ -505,6 +505,7 @@ impl Checker {
                                 name: f.name.clone(),
                                 ty: self.resolve_texpr(&f.ty, &e.generics, md),
                                 default: None,
+                                default_text: None,
                                 span: f.span,
                             })
                             .collect();
@@ -544,6 +545,9 @@ impl Checker {
             params.push((p.name.clone(), self.resolve_texpr(&p.ty, &generics, md)));
         }
         let ret = match &decl.ret {
+            // `-> Never`: the function never comes back (it exits, panics,
+            // throws or loops forever); only as a return type
+            Some(TypeExpr::Named { path, args, .. }) if path.len() == 1 && path[0] == "Never" && args.is_empty() && self.lookup_global("Never", md).is_none() => Ty::Never,
             Some(t) => self.resolve_texpr(t, &generics, md),
             None => Ty::Unit,
         };
@@ -795,8 +799,10 @@ impl Checker {
                         if !body.locals.is_empty() {
                             self.err(f.span, "a default value can't declare names");
                         }
+                        let written = self.source_texts.get(def.span.file as usize).and_then(|s| s.get(def.span.lo as usize..def.span.hi as usize)).map(|s| s.to_string());
                         if let TypeKind::Record { fields } = &mut self.prog.defs[d].kind {
                             fields[i].default = Some(e);
+                            fields[i].default_text = written;
                         }
                     }
                 }
@@ -877,6 +883,9 @@ impl Checker {
         }
         let body = decl.body.as_ref().unwrap();
         let block = self.block(body, false, None);
+        if f.ret == Ty::Never && block.ty != Ty::Never && !self.block_returns(body) && !f.intrinsic {
+            self.err_help(body.span, format!("`{}` returns `Never`, so it must not finish", f.name), "end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends");
+        }
         if f.ret != Ty::Unit && block.ty != Ty::Never && !matches!(f.ret, Ty::Never) {
             if !self.block_returns(body) {
                 self.err_help(body.span, format!("`{}` must return a `{}` at the end", f.name, self.show(&f.ret)), "add `return ...` as the last line");
@@ -1379,7 +1388,14 @@ impl Checker {
                     self.err_help(*span, "no `return` inside a lambda", "the lambda's last line is its value");
                 }
                 let ret = self.fc().ret.clone();
+                if ret == Ty::Never && self.fc().lambdas.is_empty() {
+                    self.err(*span, "this function returns `Never`: it can't `return`");
+                }
                 match v {
+                    Some(v) if ret == Ty::Never => {
+                        let e = self.expr(v, None);
+                        TStmt::Return(Some(e))
+                    }
                     Some(v) => {
                         if ret == Ty::Unit {
                             self.err(v.span, "this function returns nothing (it has no `->`)");
@@ -1398,7 +1414,7 @@ impl Checker {
                         }
                     }
                     None => {
-                        if ret != Ty::Unit {
+                        if ret != Ty::Unit && ret != Ty::Never {
                             let r = self.show(&ret);
                             self.err(*span, format!("return a `{}` value", r));
                         }

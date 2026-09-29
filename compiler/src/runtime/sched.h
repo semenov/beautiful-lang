@@ -832,6 +832,23 @@ static lt_err lt_chan_send(lt_chan *c, void *item) {
     }
 }
 
+// takes ownership of *item; true if it was queued, false (and dropped) if
+// the channel is full or closed. Never waits.
+static bool lt_chan_try_send(lt_chan *c, void *item) {
+    lt_spin_lock(&c->spin);
+    if (c->closed || c->count >= c->cap) {
+        lt_spin_unlock(&c->spin);
+        c->drop_item(item);
+        return false;
+    }
+    memcpy(c->buf + ((c->head + c->count) % c->cap) * c->esize, item, c->esize);
+    c->count++;
+    lt_task *r = lt_wq_pop(&c->recv_q);
+    lt_spin_unlock(&c->spin);
+    if (r) lt_ready(r);
+    return true;
+}
+
 // 1: got an item into *out; 0: closed (or cancelled when `stop_on_cancel`)
 static int lt_chan_recv(lt_chan *c, void *out) {
     for (;;) {

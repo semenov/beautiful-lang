@@ -508,8 +508,8 @@ static lt_err lt_http_serve(int64_t port, lt_fn handler) {
     lt_set_nonblocking(fd);
     lt_http_listen_fd = fd;
     lt_http_port = (int)port;
-    signal(SIGINT, lt_http_on_signal);
-    signal(SIGTERM, lt_http_on_signal);
+    struct sigaction old_sigs[2];
+    lt_signals_take(lt_http_on_signal, old_sigs);
     signal(SIGPIPE, SIG_IGN);
     {
         char msg[96];
@@ -543,8 +543,7 @@ static lt_err lt_http_serve(int64_t port, lt_fn handler) {
     }
     lt_http_listen_fd = -1;
     close(fd);
-    signal(SIGINT, SIG_DFL);
-    signal(SIGTERM, SIG_DFL);
+    lt_signals_restore(old_sigs);
     lt_text *m = lt_text_cstr("stopped");
     lt_log("INFO", m);
     lt_text_drop(m);

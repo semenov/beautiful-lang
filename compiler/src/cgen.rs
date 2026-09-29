@@ -1514,12 +1514,12 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             _ => vec![],
         };
         let ty = self.ty_of(id);
-        let has_default: Vec<bool> = match &ty {
+        let (has_default, default_texts): (Vec<bool>, Vec<Option<String>>) = match &ty {
             Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
-                TypeKind::Record { fields } => fields.iter().map(|f| f.default.is_some()).collect(),
-                _ => vec![],
+                TypeKind::Record { fields } => (fields.iter().map(|f| f.default.is_some()).collect(), fields.iter().map(|f| f.default_text.clone()).collect()),
+                _ => (vec![], vec![]),
             },
-            _ => vec![],
+            _ => (vec![], vec![]),
         };
         let n = fields.len().max(1);
         if !cli {
@@ -1557,9 +1557,14 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 _ => " <text>",
             };
             let req = if self.is_opt(*fid) || has_default[i] || kind == 1 || kind == 2 { "" } else { "  (required)" };
+            // the default, when it says something ("false", "[]" and `none` don't)
+            let shown = match default_texts.get(i).cloned().flatten() {
+                Some(t) if kind == 0 && t != "none" && t.len() <= 40 => format!("  (default: {})", t.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%")),
+                _ => String::new(),
+            };
             if kind != 2 {
                 let dashes = if flag.chars().count() == 1 { "-" } else { "--" };
-                usage += &format!("  {}{}{}{}{}\\n", dashes, flag, what, req, if kind == 3 { "  (can repeat)" } else { "" });
+                usage += &format!("  {}{}{}{}{}{}\\n", dashes, flag, what, req, shown, if kind == 3 { "  (can repeat)" } else { "" });
             }
         }
         let has_args = kinds.contains(&2);
@@ -2851,13 +2856,14 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.need(H::Ops, st);
                 format!("{}_release({}, {})", self.tys[st].c, a[0], a[1])
             }
-            "Channel.send" => {
+            "Channel.send" | "Channel.try_send" => {
                 let e = match &self.tys[tid0.unwrap()].kind {
                     Kind::Channel(e) => *e,
                     _ => unreachable!(),
                 };
                 let ec = self.tys[e].c.clone();
-                format!("({{ {ec} it_ = {x}; lt_chan_send({c}, &it_); }})", ec = ec, x = a[1], c = a[0])
+                let f = if name == "Channel.send" { "lt_chan_send" } else { "lt_chan_try_send" };
+                format!("({{ {ec} it_ = {x}; {f}({c}, &it_); }})", ec = ec, x = a[1], c = a[0], f = f)
             }
             "template.compile" => format!("lt_template_compile({}, true, {})", a[0], a[1]),
             "template.compile_text" => format!("lt_template_compile({}, false, {})", a[0], a[1]),
@@ -2914,6 +2920,12 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.need(H::Ops, lid);
                 let lc = self.tys[lid].c.clone();
                 format!("({{ int64_t f_[7]; lt_texts *ab_ = lt_texts_new(1); lt_err e_ = lt_tz_fields({}, {}, &ab_, f_); if (!e_.obj) {{ {lc} l_ = {lc}_new(7); for (int i_ = 0; i_ < 7; i_++) {lc}_push(&l_, f_[i_]); *{out} = l_; lt_texts_push(&{abbr}, ab_->items[0]); }} if (ab_->cap) lt_free(ab_, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)ab_->cap); e_; }})", a[0], a[1], lc = lc, out = a[3], abbr = a[2])
+            }
+            "files.__stat" => {
+                let lid = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::Int]));
+                self.need(H::Ops, lid);
+                let lc = self.tys[lid].c.clone();
+                format!("({{ int64_t f_[4]; lt_err e_ = lt_files_stat({}, f_); if (!e_.obj) {{ {lc} l_ = {lc}_new(4); for (int i_ = 0; i_ < 4; i_++) {lc}_push(&l_, f_[i_]); *{out} = l_; }} e_; }})", a[0], lc = lc, out = a[1])
             }
             "time.__zone_unix" => format!("({{ __typeof__({f}) f_ = {f}; lt_tz_unix({}, f_->items[0], f_->items[1], f_->items[2], f_->items[3], f_->items[4], f_->items[5], {}); }})", a[0], a[2], f = a[1]),
             "time.__cancel_after" => {

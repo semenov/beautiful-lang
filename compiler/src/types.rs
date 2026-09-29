@@ -77,6 +77,8 @@ pub struct FieldDef {
     pub name: String,
     pub ty: Ty,
     pub default: Option<TExpr>,
+    // the default as written, for `--help`
+    pub default_text: Option<String>,
     pub span: Span,
 }
 
