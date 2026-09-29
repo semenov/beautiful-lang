@@ -381,8 +381,7 @@ impl<'a> Lowerer<'a> {
     fn method_callee(&mut self, id: FnId, recv: &Ty) -> (MCallee, bool) {
         let f = &self.prog.fns[id];
         if f.intrinsic {
-            let owner = &self.prog.defs[f.owner.unwrap()].name;
-            (MCallee::Intrinsic(format!("{}.{}", owner, f.name), vec![recv.clone()]), f.throws)
+            (MCallee::Intrinsic(intrinsic_name(self.prog, f), vec![recv.clone()]), f.throws)
         } else {
             let targs = match recv {
                 Ty::Adt(_, a) => a.clone(),
@@ -815,11 +814,10 @@ impl<'a> Lowerer<'a> {
                 let throws = if f.rethrows { rethrow } else { *throws };
                 let p = self.place(place, false);
                 let callee = if f.intrinsic {
-                    let owner = &self.prog.defs[f.owner.unwrap()].name;
                     let pty = self.ty(&place.ty);
                     let mut it = vec![pty];
                     it.extend(targs.iter().skip(1).cloned());
-                    MCallee::Intrinsic(format!("{}.{}", owner, f.name), it)
+                    MCallee::Intrinsic(intrinsic_name(self.prog, f), it)
                 } else {
                     MCallee::Fn(self.instance(*fn_id, targs, rethrow))
                 };
@@ -896,7 +894,14 @@ impl<'a> Lowerer<'a> {
                 let v = self.expr(b);
                 let owner = match &bty {
                     Ty::Text => "Text".to_string(),
-                    Ty::Adt(d, _) => self.prog.defs[*d].name.clone(),
+                    Ty::Adt(d, _) => {
+                        let def = &self.prog.defs[*d];
+                        if def.module != 0 {
+                            format!("{}.{}", self.prog.module_names[def.module], def.name)
+                        } else {
+                            def.name.clone()
+                        }
+                    }
                     _ => unreachable!(),
                 };
                 self.assign(ty, Rv::Call(MCallee::Intrinsic(format!("{}.{}", owner, name), vec![bty]), vec![v]))
@@ -1395,11 +1400,7 @@ impl<'a> Lowerer<'a> {
 
     fn intrinsic(&mut self, id: FnId, targs: Vec<Ty>, args: Vec<Op>, arg_tys: Vec<Ty>, ty: Ty, throws: bool) -> Op {
         let f = &self.prog.fns[id];
-        let name = match f.owner {
-            Some(d) => format!("{}.{}", self.prog.defs[d].name, f.name),
-            None if f.module != 0 => format!("{}.{}", self.prog.module_names[f.module], f.name),
-            None => f.name.clone(),
-        };
+        let name = intrinsic_name(self.prog, f);
         // the receiver's type first, then the function's own type arguments
         let mut itys = vec![];
         if f.owner.is_some() {
@@ -1584,11 +1585,7 @@ impl<'a> Lowerer<'a> {
                     arg_tys.push(at);
                 }
                 if f.intrinsic {
-                    let name = match f.owner {
-                        Some(d) => format!("{}.{}", self.prog.defs[d].name, f.name),
-                        None if f.module != 0 => format!("{}.{}", self.prog.module_names[f.module], f.name),
-                        None => f.name.clone(),
-                    };
+                    let name = intrinsic_name(self.prog, f);
                     let mut itys = vec![];
                     if f.owner.is_some() {
                         itys.push(arg_tys[0].clone());
@@ -1799,4 +1796,20 @@ pub fn strip_throws(t: &Ty) -> Ty {
 
 pub fn sanitize(s: &str) -> String {
     s.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect()
+}
+
+// "print", "List.append", "files.read", "net.Connection.read"
+pub fn intrinsic_name(prog: &Program, f: &FnDef) -> String {
+    match f.owner {
+        Some(d) => {
+            let def = &prog.defs[d];
+            if def.module != 0 {
+                format!("{}.{}.{}", prog.module_names[def.module], def.name, f.name)
+            } else {
+                format!("{}.{}", def.name, f.name)
+            }
+        }
+        None if f.module != 0 => format!("{}.{}", prog.module_names[f.module], f.name),
+        None => f.name.clone(),
+    }
 }
