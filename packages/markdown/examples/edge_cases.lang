@@ -1,0 +1,8 @@
+import markdown
+
+fn main() {
+  for s in ["*a **b** c*", "__strong__ and _em_", "a * b * c", "``code with ` tick``", "\\*not em\\*", "[a [b] c](/x)", "1) one\n2) two", "- a\n\n- b", "    indented\n    code", "text\n===", "* * *", "> quote\n\nafter"] {
+    print("${s.replace("\n", "⏎")} => ${markdown.to_html(s).trim_end().replace("\n", "⏎")}")
+  }
+  print(markdown.inline_html("A *title*"))
+}

@@ -1,0 +1,41 @@
+import markdown
+
+fn main() {
+  let doc = """
+# Title with *style*
+
+A paragraph with **bold**, *italic*, `code`, a [link](https://example.com "Example"),
+and ~~old~~ text. Snake_case_words stay. Visit https://example.org.
+Line with two spaces  
+breaks here. <script>alert(1)</script> & more.
+
+Setext heading
+--------------
+
+- one
+- two with **bold**
+  - nested a
+  - nested b
+- three
+
+1. first
+2. second
+
+> a quote
+> with *two* lines
+
+```js
+if (a < b) { x() }
+```
+
+| Name | Price |
+|:-----|------:|
+| Soup | 4.50 |
+| Tea  | 1.20 |
+
+---
+
+![logo](/img/logo.png "Logo") [bad](javascript:alert(1)) <me@example.com>
+"""
+  print(markdown.to_html(doc))
+}

@@ -82,7 +82,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] still small: decode key naming, log fields, cli subcommands
 - [x] signals: Ctrl-C cancels `main` so `with` blocks close
 - [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
-- [ ] **markdown package** (Vlad asked): Markdown -> HTML (CommonMark)
+- [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)
 - [ ] packages: jwt, smtp, s3, mysql, semver, yaml (maybe stdlib)
 
 ## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)

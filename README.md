@@ -146,11 +146,13 @@ lang new shop && cd shop
 lang add postgres https://github.com/semenov/beautiful-lang --path packages/postgres
 ```
 
-This repository has three, all written in the language itself:
+This repository has four, all written in the language itself:
 
 - [`packages/postgres`](packages/postgres): the PostgreSQL wire protocol,
   SCRAM login, TLS, typed rows;
 - [`packages/redis`](packages/redis): commands, pipelines, pub/sub;
+- [`packages/markdown`](packages/markdown): Markdown to HTML (CommonMark
+  basics, GitHub tables and strikethrough), safe for user-written text;
 - [`packages/llm`](packages/llm): OpenAI-compatible chat APIs (OpenAI,
   OpenRouter, Ollama, ...): typed answers from a record's JSON Schema, tool
   calls, streaming, embeddings.
