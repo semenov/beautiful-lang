@@ -255,6 +255,9 @@ typedef struct lt_obj { int64_t rc; } lt_obj;
 typedef struct lt_text {
     int64_t rc;
     int64_t len; // bytes, UTF-8
+    // characters; -1 until counted (then chars == len means ASCII, where a
+    // character's index is its byte offset)
+    int64_t chars;
     char data[];
 } lt_text;
 
@@ -328,6 +331,7 @@ static lt_text *lt_text_new(int64_t len) {
     lt_text *t = (lt_text *)lt_alloc(LT_TEXT_SIZE(len));
     t->rc = 1;
     t->len = len;
+    t->chars = -1;
     t->data[len] = 0;
     return t;
 }
@@ -342,7 +346,7 @@ static lt_text *lt_text_cstr(const char *s) {
     return lt_text_from(s, (int64_t)strlen(s));
 }
 
-static struct { int64_t rc; int64_t len; char data[1]; } lt_empty_text_obj = { -1, 0, "" };
+static struct { int64_t rc; int64_t len; int64_t chars; char data[1]; } lt_empty_text_obj = { -1, 0, 0, "" };
 #define LT_EMPTY_TEXT ((lt_text *)&lt_empty_text_obj)
 
 LT_INLINE bool lt_text_eq(lt_text *a, lt_text *b) {
@@ -550,16 +554,24 @@ static lt_text *lt_text_concat_n(int n, lt_text **parts) {
 }
 
 static int64_t lt_text_length(lt_text *t) {
+    int64_t c = __atomic_load_n(&t->chars, __ATOMIC_RELAXED);
+    if (c >= 0) return c;
     int64_t n = 0;
     for (int64_t i = 0; i < t->len; i++) {
         if (((unsigned char)t->data[i] & 0xC0) != 0x80) n++;
     }
+    // shared texts are only read: every thread would store the same count
+    if (t->rc >= 0) __atomic_store_n(&t->chars, n, __ATOMIC_RELAXED);
     return n;
 }
+
+// whether characters are bytes (ASCII): then indexes are byte offsets
+static inline bool lt_text_ascii(lt_text *t) { return lt_text_length(t) == t->len; }
 
 // byte offset of the character with index `ci` (clamped to the end)
 static int64_t lt_text_char_offset(lt_text *t, int64_t ci) {
     if (ci <= 0) return 0;
+    if (lt_text_ascii(t)) return ci < t->len ? ci : t->len;
     int64_t n = 0;
     for (int64_t i = 0; i < t->len; i++) {
         if (((unsigned char)t->data[i] & 0xC0) != 0x80) {
@@ -1388,6 +1400,7 @@ static int64_t lt_text_find(lt_text *t, lt_text *part, int64_t from) {
     if (start > t->len) return -1;
     const char *hit = lt_find(t->data + start, t->len - start, part->data, part->len);
     if (!hit) return -1;
+    if (lt_text_ascii(t)) return hit - t->data;
     int64_t n = 0;
     for (const char *p = t->data; p < hit; p++)
         if (((unsigned char)*p & 0xC0) != 0x80) n++;

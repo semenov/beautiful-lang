@@ -29,7 +29,18 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Port a small open-source project** to the language; note what's
       missing in the language and libraries and add it as I go
   - [x] rakyll/hey (load generator): section below
-  - [ ] tomnomnom/gron (JSON of any shape, streams, colors): in progress
+  - [ ] tomnomnom/gron (JSON of any shape, streams, colors): being finished
+    - [x] bug: appending to a shared list doubled its capacity (OOM on deep JSON)
+    - [x] `String.slice` / `index_of` were O(n) per call: ASCII strings now O(1)
+    - [ ] `io.stdout().write_text` ~4x slower than `print` (buffering)
+    - [ ] reading `m[k]` then writing `m[k]` copies the value (quadratic); `take` avoids it: document or optimize
+    - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
+    - [ ] Float text like JS/Go (`12345678901234567000`, not `1.2345678901234567e+19`)
+    - [ ] sorting by a list key (lexicographic) or with a comparator
+    - [ ] or-patterns in `match`: `"a" | "b" => ...`
+    - [ ] `Duration` in interpolation shows its fields
+    - [ ] a variant named `String` can't be built by its bare name: suggest `Value.String(...)`
+    - [ ] guide: a one-line record example doesn't parse
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
         on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).
