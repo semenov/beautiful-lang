@@ -1,0 +1,23 @@
+// `is` with an error type nothing throws (it used to crash the C compiler).
+
+type Oops implements Error {
+  code: Int
+
+  fn message(self) -> String {
+    return "oops"
+  }
+}
+
+fn f() throws -> Int {
+  throw Failure(message: "x")
+}
+
+fn main() {
+  let c = try f() catch err {
+    if err is Oops {
+      print("never")
+    }
+    0
+  }
+  print("${c}")
+}

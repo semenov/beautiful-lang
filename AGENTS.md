@@ -179,6 +179,10 @@ let text = try files.read(path) catch err {     // handle it here
 }
 ```
 
+- `err is NotFound` also looks through causes: it's true when `err` or
+  an error in its `cause` chain (`Failure(message:, cause: err)`, or your
+  own error type's `cause: Error?` field) is a `NotFound`, and inside the
+  `if`, `err` is that `NotFound`.
 - `catch` always follows `try`: `try f() catch err { ... }`. Never
   `f() catch ...`.
 - A `catch` block ends with a value, or with `return`, `throw`, `break` or

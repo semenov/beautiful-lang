@@ -277,6 +277,7 @@ pub fn split(c: &str) -> Option<Units> {
     let mut runtime = String::with_capacity(rt.len() + 4096);
     let mut program = String::with_capacity(rt.len() / 2);
     let mut callbacks: Vec<(String, String)> = vec![];
+    let mut stood_in = std::collections::HashSet::new();
     for it in &its {
         match it {
             Item::Other(s) => {
@@ -306,12 +307,21 @@ pub fn split(c: &str) -> Option<Units> {
                 } else if is_function_decl(d) {
                     let name = declared_name(d).unwrap_or_default();
                     let plain = unstatic(d);
-                    if !defined.contains(&name) && !inline(d) && !callbacks.iter().any(|(n, _)| *n == name) {
-                        callbacks.push((name, plain.trim_end_matches(';').trim().to_string()));
+                    let callback = !defined.contains(&name) && !inline(d);
+                    if callback && !callbacks.iter().any(|(n, _)| *n == name) {
+                        callbacks.push((name.clone(), plain.trim_end_matches(';').trim().to_string()));
                     }
                     if inline(d) {
                         runtime += d;
                         program += d;
+                    } else if callback && !stood_in.contains(&name) {
+                        // the program may not define it: a weak stand-in, in
+                        // the same #if context as the declaration
+                        stood_in.insert(name.clone());
+                        runtime += "__attribute__((weak)) ";
+                        runtime += plain.trim_end().trim_end_matches(';');
+                        runtime += " { abort(); }";
+                        program += &plain;
                     } else {
                         runtime += &plain;
                         program += &plain;
@@ -329,12 +339,6 @@ pub fn split(c: &str) -> Option<Units> {
                 }
             }
         }
-    }
-    // stand-ins for callbacks this program doesn't define
-    for (_, sig) in &callbacks {
-        runtime += "\n__attribute__((weak)) ";
-        runtime += sig;
-        runtime += " { abort(); }";
     }
     runtime += "\n";
     // the program defines its callbacks without `static`

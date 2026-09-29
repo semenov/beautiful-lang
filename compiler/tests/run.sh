@@ -5,6 +5,8 @@
 # - nothing may leak
 cd "$(dirname "$0")/run" || exit 1
 PLUMB_BIN=${PLUMB_BIN:-../../target/release/plumb}
+# the runtime must compile on its own (split.rs): no quiet fallback here
+export PLUMB_SPLIT_STRICT=1
 case $PLUMB_BIN in /*) ;; *) PLUMB_BIN=$(pwd)/$PLUMB_BIN ;; esac
 fail=0
 for f in *.plumb; do

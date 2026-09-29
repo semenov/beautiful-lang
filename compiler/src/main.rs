@@ -797,6 +797,9 @@ fn runtime_object(cc: &str, flags: &[String], text: &str, cache: &Path) -> Optio
         // the single-file build still works; keep the C for a look
         let _ = std::fs::remove_file(&tmp);
         eprintln!("warning: the runtime didn't compile on its own ({}); compiling it with the program", src.display());
+        if std::env::var("PLUMB_SPLIT_STRICT").is_ok() {
+            std::process::exit(3);
+        }
         return None;
     }
     Some(obj)

@@ -85,6 +85,11 @@ pub struct CGen<'a> {
     ty_ids: HashMap<Ty, usize>,
     requested: Vec<(H, usize)>,
     done: HashSet<(H, usize)>,
+    // types read out of an interface value (`err is T` then its fields):
+    // their box struct is needed even if no vtable makes one
+    boxes: Vec<usize>,
+    // `err is T` walks the cause chain: lt_err_find is needed
+    err_find: bool,
     protos: String,
     // conversions between interface combinations, generated after the vtables
     upcasts: Vec<(Vec<DefId>, Vec<DefId>)>,
@@ -164,6 +169,8 @@ impl<'a> CGen<'a> {
             ty_ids: HashMap::new(),
             requested: vec![],
             done: HashSet::new(),
+            boxes: vec![],
+            err_find: false,
             protos: String::new(),
             upcasts: vec![],
             helper_types: String::new(),
@@ -2677,11 +2684,23 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             Rv::IfaceIs(o, t) => {
                 let e = self.op(o);
                 let tid = self.tid(t);
-                set(out, format!("({}.vt->type_id == {})", e, tid));
+                // an error also matches through its `cause` chain
+                if self.is_error_iface(&self.op_ty(fi, o)) {
+                    self.err_find = true;
+                    set(out, format!("(lt_err_find({}, {}).obj != NULL)", e, tid));
+                } else {
+                    set(out, format!("({}.vt->type_id == {})", e, tid));
+                }
             }
             Rv::IfaceGet(o, t) => {
                 let e = self.op(o);
                 let tid = self.tid(t);
+                let e = if self.is_error_iface(&self.op_ty(fi, o)) {
+                    self.err_find = true;
+                    format!("lt_err_find({}, {})", e, tid)
+                } else {
+                    e
+                };
                 set(out, format!("((Boxed{}*){}.obj)->v", tid, e));
                 self.need_box(tid);
                 dup_after(self, out);
@@ -2879,7 +2898,15 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
         }
     }
 
-    fn need_box(&mut self, _tid: usize) {}
+    fn is_error_iface(&self, t: &Ty) -> bool {
+        matches!(t, Ty::Iface(ids) if ids.len() == 1 && ids[0] == self.prog.b.error)
+    }
+
+    fn need_box(&mut self, tid: usize) {
+        if !self.boxes.contains(&tid) {
+            self.boxes.push(tid);
+        }
+    }
 
     // `void f(void *p)` that drops the value at p
     fn drop_ptr(&mut self, e: usize) -> String {
@@ -3849,6 +3876,37 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
         }
         let mut vt_out = String::new();
         self.gen_vtables(&mut vt_out);
+        // lt_err_find: the error, or the first in its cause chain, of a type;
+        // a cause is an error type's `cause: Error?` field
+        if self.err_find {
+            let mut cases = String::new();
+            let err_opt = Ty::opt(Ty::Iface(vec![self.prog.b.error]));
+            for vt in self.m.vtables.clone().iter() {
+                if vt.iface != vec![self.prog.b.error] {
+                    continue;
+                }
+                if let Ty::Adt(d, args) = &vt.concrete {
+                    if let TypeKind::Record { fields } = &self.prog.defs[*d].kind {
+                        if let Some(i) = fields.iter().position(|f| f.name == "cause" && f.ty.subst(args) == err_opt) {
+                            let tid = self.tid(&vt.concrete);
+                            let acc = match &self.tys[tid].kind {
+                                Kind::Record { boxed: true, .. } => format!("((Boxed{}*)e.obj)->v->v.f{}", tid, i),
+                                _ => format!("((Boxed{}*)e.obj)->v.f{}", tid, i),
+                            };
+                            let _ = write!(cases, " case {}: e = {}; break;", tid, acc);
+                        }
+                    }
+                }
+            }
+            let _ = writeln!(vt_out, "static lt_iface lt_err_find(lt_iface e, int64_t tid) {{ while (e.obj && e.vt->type_id != tid) {{ switch (e.vt->type_id) {{{} default: e.obj = NULL; }} }} return e; }}", cases);
+        }
+        // a type tested with `is` but never put into an interface value
+        for tid in self.boxes.clone() {
+            if !self.done.contains(&(H::Ops, usize::MAX - tid)) {
+                self.done.insert((H::Ops, usize::MAX - tid));
+                let _ = writeln!(vt_out, "typedef struct {{ int64_t rc; {} v; }} Boxed{};", self.tys[tid].c, tid);
+            }
+        }
         for (k, (from, to)) in self.upcasts.clone().iter().enumerate() {
             let mut cases = String::new();
             for vt in self.m.vtables.iter() {

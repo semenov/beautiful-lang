@@ -1,0 +1,43 @@
+// `is` finds an error through its `cause` chain.
+
+import files
+
+type AppError implements Error {
+  code: Int
+  cause: Error? = none
+
+  fn message(self) -> String {
+    return "app error ${self.code}"
+  }
+}
+
+fn load(p: String) throws -> String {
+  return try files.read(p) catch err {
+    throw Failure(message: "loading config", cause: err)
+  }
+}
+
+fn outer() throws -> String {
+  return try load("/nope") catch err {
+    throw AppError(code: 7, cause: err)
+  }
+}
+
+fn main() {
+  let x = try outer() catch err {
+    if err is files.NotFound {
+      print("not found: ${err.path}")
+    }
+    if err is AppError {
+      print("app: ${err.code}")
+    }
+    if err is Failure {
+      print("a failure in the chain")
+    }
+    ""
+  }
+  let y = try load("/nope") catch err {
+    print("${err is AppError}")
+    ""
+  }
+}
