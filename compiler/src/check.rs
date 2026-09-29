@@ -2622,7 +2622,9 @@ impl Checker {
             let rt = self.resolve(&result.ty);
             if self.resource_close(&rt).is_some() {
                 let s = self.show(&rt);
-                self.err_help(span, format!("a `{}` must be closed: get it with `with`", s), "write `with f = try ... { ... }`: it's closed at the end of the block, even on an error");
+                let throws = matches!(result.kind, TK::Call { throws: true, .. });
+                let how = if throws { "write `with f = try ... { ... }`" } else { "write `with f = ... { ... }`" };
+                self.err_help(span, format!("a `{}` must be closed: get it with `with`", s), format!("{}: it's closed at the end of the block, even on an error", how));
             }
         }
         // `try` rules (a spawned call's errors arrive at `wait`)

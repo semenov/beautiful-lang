@@ -144,6 +144,10 @@ let user = users[id] ?? throw NotFound(id: id)
 
 **There is no `?.`**. Unwrap first with `if x is some(v)`, or use `??`.
 `m[key]` gives `V?`; `xs[i]` out of range is a bug (it stops the task).
+Change a value inside a map or list in place: `m[key].append(x)`,
+`accounts[id].balance -= 5`. Reading it out and writing it back
+(`if m[k] is some(v) { m[k] = grow(v) }`) copies the whole value, since
+two places hold it; `if m.take(k) is some(v) { m[k] = grow(v) }` doesn't.
 
 ## Errors
 

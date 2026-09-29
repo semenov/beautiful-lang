@@ -33,7 +33,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] bug: appending to a shared list doubled its capacity (OOM on deep JSON)
     - [x] `String.slice` / `index_of` were O(n) per call: ASCII strings now O(1)
     - [x] `io.stdout().write_text` was 10x slower than `print`: now shares its buffer
-    - [ ] reading `m[k]` then writing `m[k]` copies the value (quadratic); `take` avoids it: document or optimize
+    - [x] reading `m[k]` then writing `m[k]` copies the value: documented (in-place paths, `take`); optimizing it: later
     - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
     - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
     - [x] sorting by a list key (lexicographic); `<` on lists. A comparator: not needed so far
