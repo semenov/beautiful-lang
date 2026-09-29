@@ -30,8 +30,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       object reuse, no per-request allocations, lazy header parsing, worker
       pool...) and apply what fits to our HTTP server; measure before/after
 
-- [ ] **Top npm packages by downloads**: go through them, decide what
-      belongs in the stdlib, what should be a package, what we don't need
+- [x] **Top npm packages by downloads**: reviewed in research/npm-top-packages.md;
+      the resulting work is the next section
 
 - [x] **The `lang` CLI teaches the language**: tell an agent that knows
       nothing about it "run `lang help`", and it can learn the syntax and
@@ -57,6 +57,27 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] guide: maps, shared state in handlers, tests with a body, task lists
   - [ ] one "this call can fail" per chain, not per call
   - [ ] `Text` has no character tests (letters, digits); regex is ASCII-only
+
+## Stdlib gaps from the npm review (research/npm-top-packages.md), in order
+
+- [ ] `files.walk`, `files.glob`, `path.matches`; recursive `make_dir` / `delete`
+- [ ] `term`: colors (off when not a terminal / NO_COLOR), text width, tables,
+      questions (yes/no, password), a progress line
+- [ ] `time`: format and parse with a pattern, time zones, `Date`,
+      `parse_duration`, printing durations
+- [ ] `Decimal`
+- [ ] `http`: middleware (`router.use`), cookies, forms (urlencoded,
+      multipart), `http.mime_type`, CORS
+- [ ] WebSockets (server and client)
+- [ ] templates (logic-less, HTML-escaping)
+- [ ] `tar` and `zip`
+- [ ] small ones: `env.load(".env")`, `process.find`, `process.run` with cwd /
+      env / input, byte sizes, decode key naming, `random.uuid_v7`, List
+      helpers (flat_map, unique, chunks, partition, index_of), log levels and
+      fields, cli subcommands
+- [ ] signals: Ctrl-C cancels `main` so `with` blocks close (design first)
+- [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
+- [ ] packages: jwt, smtp, s3, mysql, semver, markdown, yaml (maybe stdlib)
 
 ## Then: my own review of what's missing or weak
 
