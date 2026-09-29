@@ -1,0 +1,27 @@
+import redis
+
+fn main() throws {
+  with db = try redis.connect("redis://localhost:6379") {
+    try db.set("greeting", value: "hello")
+    print(try db.get("greeting") ?? "(none)")
+    print("${try db.get("missing") ?? "(none)"}")
+    let _ = try db.delete("visits")
+    print("visits ${try db.increment("visits")} ${try db.increment_by("visits", amount: 10)}")
+    try db.set_for("temp", value: "x", seconds: 100)
+    print("ttl ${try db.time_to_live("temp") ?? -1}")
+    print("lock ${try db.set_new("lock", value: "me", seconds: 5)} ${try db.set_new("lock", value: "me", seconds: 5)}")
+    try db.hash_set("user:1", field: "name", value: "Ada")
+    try db.hash_set("user:1", field: "plumb", value: "Plumb")
+    print("${try db.hash_get_all("user:1")}")
+    let _ = try db.delete("jobs")
+    let _ = try db.push("jobs", value: "a")
+    let _ = try db.push("jobs", value: "b")
+    print("${try db.range("jobs", from: 0, to: -1)} first ${try db.pop_first("jobs") ?? ""}")
+    let replies = try db.pipeline([["SET", "p", "1"], ["INCR", "p"], ["GET", "p"]])
+    print("pipeline ${replies.length}")
+    let bad = try db.command(["LPUSH", "greeting", "x"]) catch err {
+      print(err.message())
+      return
+    }
+  }
+}

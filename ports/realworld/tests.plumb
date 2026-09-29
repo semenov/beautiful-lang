@@ -1,0 +1,79 @@
+// The API through the router, without a network: `plumb test tests.plumb`.
+// The full suites (hurl, Postman) run against the server: tests/api-tests.sh.
+
+import api
+import db
+import http
+import json
+import server
+import schema
+
+type Token {
+  token: String
+}
+
+type TokenBody {
+  user: Token
+}
+
+fn send(app: api.App, method: String, path: String, body: String, token: String) throws -> http.Response {
+  var req = http.request(method, path)
+  req.body = body.bytes()
+  if not token.is_empty() {
+    req.headers["authorization"] = "Token ${token}"
+  }
+  return try server.router(app).handle(req)
+}
+
+fn register(app: api.App, name: String) throws -> String {
+  let body = "{\"user\": {\"username\": \"${name}\", \"email\": \"${name}@example.com\", \"password\": \"password123\"}}"
+  let res = try send(app, method: "POST", path: "/api/users", body: body, token: "")
+  if res.status != 201 {
+    // `expect` only works in the test block itself
+    throw Failure(message: "register ${name}: ${res.status} ${try res.text()}")
+  }
+  return (try json.decode<TokenBody>(try res.text())).user.token
+}
+
+test "register, then the token finds the user" {
+  with conn = try db.open(":memory:") {
+    try schema.create(conn)
+    let app = api.App(conn: conn, secret: "test")
+    let token = try register(app, name: "ada")
+    let res = try send(app, method: "GET", path: "/api/user", body: "", token: token)
+    expect res.status == 200
+    expect (try res.text()).contains("\"username\":\"ada\"")
+  }
+}
+
+test "errors have the API's shape" {
+  with conn = try db.open(":memory:") {
+    try schema.create(conn)
+    let app = api.App(conn: conn, secret: "test")
+    let missing = try send(app, method: "GET", path: "/api/user", body: "", token: "")
+    expect missing.status == 401
+    expect (try missing.text()) == "{\"errors\":{\"token\":[\"is missing\"]}}"
+    let _ = try register(app, name: "ada")
+    let again = "{\"user\": {\"username\": \"ada\", \"email\": \"other@example.com\", \"password\": \"password123\"}}"
+    let taken = try send(app, method: "POST", path: "/api/users", body: again, token: "")
+    expect taken.status == 409
+    expect (try taken.text()) == "{\"errors\":{\"username\":[\"has already been taken\"]}}"
+  }
+}
+
+test "the same title twice gives two slugs; the feed is not an article" {
+  with conn = try db.open(":memory:") {
+    try schema.create(conn)
+    let app = api.App(conn: conn, secret: "test")
+    let token = try register(app, name: "ada")
+    let article = "{\"article\": {\"title\": \"How to Train Your Dragon!\", \"description\": \"d\", \"body\": \"b\", \"tagList\": [\"z\", \"a\"]}}"
+    let first = try send(app, method: "POST", path: "/api/articles", body: article, token: token)
+    let second = try send(app, method: "POST", path: "/api/articles", body: article, token: token)
+    expect first.status == 201
+    expect (try first.text()).contains("\"slug\":\"how-to-train-your-dragon\"")
+    expect (try first.text()).contains("\"tagList\":[\"a\",\"z\"]")
+    expect not (try second.text()).contains("\"slug\":\"how-to-train-your-dragon\"")
+    let feed = try send(app, method: "GET", path: "/api/articles/feed", body: "", token: token)
+    expect (try feed.text()) == "{\"articles\":[],\"articlesCount\":0}"
+  }
+}

@@ -1,8 +1,8 @@
 # The standard library against Go and Node (2026-09-29)
 
-A review of lang's standard library against what Go's standard library and
+A review of Plumb's standard library against what Go's standard library and
 Node (with its most used npm packages) give programmers for backends and
-command-line tools. Method: every module's `lang doc`, `lang guide`,
+command-line tools. Method: every module's `plumb doc`, `plumb guide`,
 DESIGN.md (the stdlib decisions: protocol clients, YAML, Markdown, JWT,
 LRU caches and so on are packages on purpose), TODO.md, HANDOFF.md and
 `research/npm-top-packages.md` (already acted on: globs, `term`, dates and
@@ -77,8 +77,8 @@ None of these needs a new language feature except file embedding (and
 | 23 | network basics: DNS lookup, listening on a host / port 0, Unix sockets, IP addresses | Health checks and service discovery (`net.LookupHost`, SRV); tests that start a server on a free port; the Docker socket and local daemons (`/var/run/*.sock`); allow-lists by CIDR | `net.lookup(host) -> List<String>`, `net.lookup_txt`, `lookup_mx`, `lookup_srv`; `net.listen(host:, port: 0) -> Listener` with `port()` and `accept()`; `net.connect_unix(path)`, `http.ClientRequest.unix_socket`; `net.parse_ip`, `net.parse_network("10.0.0.0/8").contains(ip)` |
 | 24 | a server's two listeners stop together (bug) | A program serving an API and a metrics/admin port: on SIGTERM one `http.serve` returns, the other keeps waiting in `accept` until a new connection arrives (one global listen fd in the runtime) **(tried)** | every `serve` watches the stop flag and its own fd; `http.serve` returns in each task |
 | 25 | binary data: little-endian, signed and float numbers, varints | The mysql package (in TODO) speaks a little-endian protocol; msgpack, protobuf, WAV/PNG/ZIP headers too. `Bytes.int_at` / `append_int` are unsigned big-endian only | `b.int_at(offset, size:, little_endian: true)` (or `int_le_at`), `b.signed_at`, `b.float_at`, `append_int_le`, `append_float`; `encoding.varint` / `from_varint` |
-| 26 | database: large results, migrations, dynamic filters **(pool in TODO)** | `query<T>` returns a `List`: a 5M-row export must fit in memory. Every service needs schema migrations (golang-migrate, knex, Prisma migrate). Optional filters, `IN (...)` and a user-chosen `ORDER BY` can't be built since SQL must be a literal: workarounds exist (`? is null or name = ?`, `json_each(?)`, a `match` over literal queries) but aren't documented | `conn.each<T>(sql, params, row => ...)` (rows one at a time); `db.migrate(conn, dir: "migrations")` (numbered `.sql` files, a version table, one transaction each); document the dynamic-filter patterns in `lang doc sql` |
-| 27 | testing: a fixed clock **(in TODO)**, running one test, all files of a project, benchmarks, a server for client code | `lang test` takes one file and runs all of it; Go has `-run`, `./...`, `testing.B`, `httptest.NewServer`; Node `--test-name-pattern`. Code that calls HTTP APIs can't be tested without a real server | `lang test [dir or file] [--match text]`; `bench "name" { ... }` blocks with `lang test --bench`; `http.test_server(router) -> TestServer` (a free port, `url`, closed by `with`) |
+| 26 | database: large results, migrations, dynamic filters **(pool in TODO)** | `query<T>` returns a `List`: a 5M-row export must fit in memory. Every service needs schema migrations (golang-migrate, knex, Prisma migrate). Optional filters, `IN (...)` and a user-chosen `ORDER BY` can't be built since SQL must be a literal: workarounds exist (`? is null or name = ?`, `json_each(?)`, a `match` over literal queries) but aren't documented | `conn.each<T>(sql, params, row => ...)` (rows one at a time); `db.migrate(conn, dir: "migrations")` (numbered `.sql` files, a version table, one transaction each); document the dynamic-filter patterns in `plumb doc sql` |
+| 27 | testing: a fixed clock **(in TODO)**, running one test, all files of a project, benchmarks, a server for client code | `plumb test` takes one file and runs all of it; Go has `-run`, `./...`, `testing.B`, `httptest.NewServer`; Node `--test-name-pattern`. Code that calls HTTP APIs can't be tested without a real server | `plumb test [dir or file] [--match text]`; `bench "name" { ... }` blocks with `plumb test --bench`; `http.test_server(router) -> TestServer` (a free port, `url`, closed by `with`) |
 | 28 | embedding files in the binary | One file to deploy with its templates, static assets and SQL migrations (Go `//go:embed`, used by most Go web apps; Node needs `pkg`/SEA). A language/tooling change: raise with Vlad | `let assets = embed("public")` at the top level giving a read-only `files`-like view; `template.load_embedded`, `router.files_embedded` |
 | 29 | Set operations and more collection helpers | `union`, `intersection`, `difference`, building a Set from a list, `sum_by`, `window` (the npm review listed the last two; not built), `Map.filter`, `map_values`. Go 1.21 `slices`/`maps`, lodash | `a.union(b)`, `a.intersection(b)`, `a.difference(b)`, `xs.to_set()`, `xs.sum_by(key)`, `xs.windows(size)`, `m.filter(e => ...)`, `m.map_values(v => ...)` |
 | 30 | rate limiting | Login endpoints and public APIs need per-client limits (express-rate-limit 71M/week, Go `x/time/rate`); calling a rate-limited API needs a limiter too | `router.use(http.rate_limit(per_minute: 60, key: req => req.client_ip))`; `time.Limiter(per_second: 10)` with `try limiter.wait()` |
@@ -209,7 +209,7 @@ Missing: AES-GCM (#2), SHA-512 family, HMAC-SHA512, HKDF, key generation,
 Ed25519 (in TODO), streaming hashes (#16), CRC-32. Password hashing is
 PBKDF2 only: verifying bcrypt / argon2 hashes from an existing user table
 (Node apps mostly used bcrypt) needs a package or a migration on login;
-worth a note in `lang doc crypto` (low). x509 certificate parsing (expiry
+worth a note in `plumb doc crypto` (low). x509 certificate parsing (expiry
 monitors) is low.
 
 ### Networking
@@ -294,7 +294,7 @@ benchmarks, a test server for client code. Snapshot / golden files are low
 - **Embedding files** (#28): `go:embed` is the usual way to ship a web app
   as one binary.
 - **Runtime and build info**: version of the program (`-ldflags -X`,
-  `debug.ReadBuildInfo`), OS / arch (#18). A `lang build --set version=1.2`
+  `debug.ReadBuildInfo`), OS / arch (#18). A `plumb build --set version=1.2`
   or a generated constant would help CLI `--version`.
 - **Profiling a live service** (`net/http/pprof`, `--inspect`): low for
   now; perf works on Linux.

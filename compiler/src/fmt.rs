@@ -1,4 +1,4 @@
-// `lang fmt`: one layout for every file, with no settings.
+// `plumb fmt`: one layout for every file, with no settings.
 //
 // What it changes: indentation (two spaces per open `{`, `(` or `[`; a line
 // starting with `.` continues the one above and goes one level deeper),
@@ -113,7 +113,7 @@ pub fn format(src: &str) -> String {
             level += 1;
         }
         let in_string = scan_line(raw, &mut st, level);
-        if std::env::var("LANG_FMT_DEBUG").is_ok() {
+        if std::env::var("PLUMB_FMT_DEBUG").is_ok() {
             eprintln!("{:3} {:?} {}", st.depth, st.stack.iter().map(|s| (s.0 == In::Code, s.1)).collect::<Vec<_>>(), raw);
         }
         keep.push(in_string);
@@ -156,7 +156,7 @@ pub fn same_tokens(a: &str, b: &str) -> bool {
         (Ok(x), Ok(y)) => {
             for (p, q) in x.iter().zip(y.iter()) {
                 if no_spans(&format!("{:?}", p.tok)) != no_spans(&format!("{:?}", q.tok)) {
-                    if std::env::var("LANG_FMT_DEBUG").is_ok() {
+                    if std::env::var("PLUMB_FMT_DEBUG").is_ok() {
                         eprintln!("before: {:?}\nafter:  {:?}", p.tok, q.tok);
                     }
                     return false;

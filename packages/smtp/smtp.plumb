@@ -1,0 +1,214 @@
+// smtp: sending email, written in the language itself.
+//
+//   let server = smtp.Server(host: "smtp.example.com", user: "shop@example.com", password: key)
+//   try smtp.send(smtp.Message(
+//     from: "Shop <shop@example.com>",
+//     to: ["ada@example.com"],
+//     subject: "Your order",
+//     text: "Thanks for your order!",
+//     html: "<p>Thanks for your <b>order</b>!</p>",
+//   ), server: server)
+//
+// Port 587 with STARTTLS is the default (most providers); port 465 uses
+// TLS from the start (`security: "tls"`); `security: "none"` only for a
+// local test server. The server's certificate is always checked.
+//
+// Install: plumb add smtp https://github.com/semenov/plumb --path packages/smtp
+
+import crypto
+import io
+import net
+import random
+import time
+
+pub type Server {
+  host: String
+  port: Int = 587
+  user: String = ""
+  password: String = ""
+  // "starttls" (port 587), "tls" (port 465) or "none" (local testing only)
+  security: String = "starttls"
+}
+
+pub type Attachment {
+  // the file name the recipient sees
+  name: String
+  content_type: String = "application/octet-stream"
+  data: Bytes
+}
+
+pub type Message {
+  // "Name <address>" or just the address
+  from: String
+  to: List<String>
+  cc: List<String> = []
+  // receive the message without being listed in it
+  bcc: List<String> = []
+  reply_to: String = ""
+  subject: String
+  // the plain-text body; with `html` as well, mail programs pick one
+  text: String = ""
+  html: String = ""
+  attachments: List<Attachment> = []
+  headers: Map<String, String> = {}
+}
+
+// Sends the message to every recipient (to, cc and bcc).
+pub fn send(message: Message, server: Server) throws {
+  with conn = try open(server) {
+    try reply(conn, code: 220)
+    try hello(conn)
+    if server.security == "starttls" {
+      try command(conn, line: "STARTTLS", code: 220)
+      try net.start_tls(conn, host: server.host)
+      try hello(conn)
+    }
+    if not server.user.is_empty() {
+      var auth = Bytes()
+      auth.append(0)
+      auth.append_text(server.user)
+      auth.append(0)
+      auth.append_text(server.password)
+      try command(conn, line: "AUTH PLAIN ${auth.base64()}", code: 235)
+    }
+    try command(conn, line: "MAIL FROM:<${address(message.from)}>", code: 250)
+    for r in message.to.concat(message.cc).concat(message.bcc) {
+      try command(conn, line: "RCPT TO:<${address(r)}>", code: 250)
+    }
+    try command(conn, line: "DATA", code: 354)
+    // a line starting with "." gets another one (dot-stuffing)
+    var body: List<String> = []
+    for line in render(message).split("\r\n") {
+      body.append(if line.starts_with(".") { ".${line}" } else { line })
+    }
+    try conn.write_text("${body.join("\r\n")}\r\n.\r\n")
+    try reply(conn, code: 250)
+    try conn.write_text("QUIT\r\n")
+  }
+}
+
+fn open(server: Server) throws -> io.Stream {
+  if server.security == "tls" {
+    return try net.connect_tls(server.host, port: server.port)
+  }
+  return try net.connect(server.host, port: server.port)
+}
+
+fn hello(conn: io.Stream) throws {
+  try command(conn, line: "EHLO localhost", code: 250)
+}
+
+fn command(conn: io.Stream, line: String, code: Int) throws {
+  try conn.write_text("${line}\r\n")
+  try reply(conn, code: code)
+}
+
+// Reads a reply (its continuation lines too) and checks its code.
+fn reply(conn: io.Stream, code: Int) throws {
+  var last = ""
+  while true {
+    let line = try conn.read_line() ?? throw Failure(message: "smtp: the server closed the connection")
+    last = line
+    // "250-..." continues, "250 ..." ends the reply
+    if line.length < 4 or line.slice(from: 3, to: 4) != "-" {
+      break
+    }
+  }
+  let got = try last.slice(from: 0, to: 3).to_int() catch err {
+    throw Failure(message: "smtp: an unexpected reply: ${last}")
+  }
+  if got != code {
+    throw Failure(message: "smtp: the server said: ${last}")
+  }
+}
+
+fn address(who: String) -> String {
+  if who.index_of("<") is some(a) {
+    return who.slice(from: a + 1, to: who.length).split(">")[0].trim()
+  }
+  return who.trim()
+}
+
+// ---- the message's text (MIME)
+
+// The message as it's sent: headers and a MIME body. Useful for tests.
+pub fn render(message: Message) -> String {
+  var h: List<String> = []
+  h.append("From: ${header_value(message.from)}")
+  h.append("To: ${message.to.map(t => header_value(t)).join(", ")}")
+  if not message.cc.is_empty() {
+    h.append("Cc: ${message.cc.map(t => header_value(t)).join(", ")}")
+  }
+  if not message.reply_to.is_empty() {
+    h.append("Reply-To: ${header_value(message.reply_to)}")
+  }
+  h.append("Subject: ${encode_word(message.subject)}")
+  h.append("Date: ${time.utc_now().format("%a, %d %b %Y %H:%M:%S +0000")}")
+  let domain = address(message.from).split("@").last() ?? "localhost"
+  h.append("Message-ID: <${random.token(24)}@${domain}>")
+  h.append("MIME-Version: 1.0")
+  for entry in message.headers.entries() {
+    h.append("${entry.key}: ${entry.value}")
+  }
+  var body = ""
+  let alternative = if message.html.is_empty() {
+    text_part("text/plain", content: message.text)
+  } else if message.text.is_empty() {
+    text_part("text/html", content: message.html)
+  } else {
+    multipart("alternative", parts: [text_part("text/plain", content: message.text), text_part("text/html", content: message.html)])
+  }
+  if message.attachments.is_empty() {
+    body = alternative
+  } else {
+    var parts = [alternative]
+    for a in message.attachments {
+      parts.append("Content-Type: ${a.content_type}; name=\"${a.name}\"\r\nContent-Disposition: attachment; filename=\"${a.name}\"\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap(a.data.base64())}")
+    }
+    body = multipart("mixed", parts: parts)
+  }
+  return "${h.join("\r\n")}\r\n${body}"
+}
+
+fn text_part(kind: String, content: String) -> String {
+  return "Content-Type: ${kind}; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${wrap(content.bytes().base64())}"
+}
+
+fn multipart(kind: String, parts: List<String>) -> String {
+  let boundary = "=_${random.token(20)}"
+  var out = "Content-Type: multipart/${kind}; boundary=\"${boundary}\"\r\n\r\n"
+  for p in parts {
+    out = "${out}--${boundary}\r\n${p}\r\n"
+  }
+  return "${out}--${boundary}--"
+}
+
+// base64 in lines of 76 characters, as MIME wants
+fn wrap(text: String) -> String {
+  var lines: List<String> = []
+  var i = 0
+  while i < text.length {
+    lines.append(text.slice(from: i, to: min(i + 76, text.length)))
+    i += 76
+  }
+  return lines.join("\r\n")
+}
+
+// a header value with non-ASCII text encoded (RFC 2047)
+fn encode_word(text: String) -> String {
+  if text.byte_length() == text.length and not text.contains("\n") {
+    return text
+  }
+  return "=?UTF-8?B?${text.bytes().base64()}?="
+}
+
+// "Name <a@b>" with the name encoded if needed
+fn header_value(who: String) -> String {
+  if who.index_of("<") is some(a) {
+    let name = who.slice(from: 0, to: a).trim()
+    if not name.is_empty() {
+      return "${encode_word(name)} <${address(who)}>"
+    }
+  }
+  return address(who)
+}

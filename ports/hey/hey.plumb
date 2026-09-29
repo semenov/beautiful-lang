@@ -1,0 +1,730 @@
+// hey: an HTTP load generator. A port of github.com/rakyll/hey to plumb.
+//
+// c workers share n requests (each does n / c of them, as in the original),
+// send their results into a channel, and a reporter task collects them. At
+// the end a summary (or CSV with -o csv) is printed.
+
+import files
+import http
+import io
+import process
+import regex
+import time
+import url
+
+fn hey_ua() -> String {
+  return "hey/0.0.1"
+}
+
+// We report for max 1M results.
+fn max_results() -> Int {
+  return 1000000
+}
+
+fn usage() -> String {
+  return """
+    Usage: hey [options...] <url>
+
+    Options:
+      -n  Number of requests to run. Default is 200.
+      -c  Number of workers to run concurrently. Total number of requests cannot
+          be smaller than the concurrency level. Default is 50.
+      -q  Rate limit, in queries per second (QPS) per worker. Default is no rate limit.
+      -z  Duration of application to send requests. When duration is reached,
+          application stops and exits. If duration is specified, n is ignored.
+          Examples: -z 10s -z 3m.
+      -o  Output type. If none provided, a summary is printed.
+          "csv" is the only supported alternative. Dumps the response
+          metrics in comma-separated values format.
+
+      -m  HTTP method, one of GET, POST, PUT, DELETE, HEAD, OPTIONS.
+      -H  Custom HTTP header. You can specify as many as needed by repeating the flag.
+          For example, -H "Accept: text/html" -H "Content-Type: application/xml" .
+      -t  Timeout for each request in seconds. Default is 20, use 0 for infinite.
+      -A  HTTP Accept header.
+      -d  HTTP request body.
+      -D  HTTP request body from file. For example, /home/user/file.txt or ./file.txt.
+      -T  Content-type, defaults to "text/html".
+      -U  User-Agent, defaults to version "hey/0.0.1".
+      -a  Basic authentication, username:password.
+      -x  HTTP Proxy address as host:port.        (not supported in this port)
+      -h2 Enable HTTP/2.                          (not supported in this port)
+
+      -host\tHTTP Host header.
+
+      -disable-compression  Disable compression.
+      -disable-keepalive    Disable keep-alive, prevents re-use of TCP
+                            connections between different HTTP requests.
+                            (this port never re-uses connections)
+      -disable-redirects    Disable following of HTTP redirects
+      -cpus                 Number of used cpu cores. (ignored in this port)
+
+    """
+}
+
+// ---------------------------------------------------------------- options
+
+type Options {
+  method: String = "GET"
+  old_headers: String = ""
+  headers: List<String> = []
+  body: String = ""
+  body_file: String = ""
+  accept: String = ""
+  content_type: String = "text/html"
+  auth: String = ""
+  host: String = ""
+  user_agent: String = ""
+  output: String = ""
+  c: Int = 50
+  n: Int = 200
+  q: Float = 0.0
+  t: Int = 20
+  z_nanos: Int = 0
+  h2: Bool = false
+  cpus: Int = 0
+  disable_compression: Bool = false
+  disable_keepalive: Bool = false
+  disable_redirects: Bool = false
+  proxy: String = ""
+  args: List<String> = []
+}
+
+fn write_err(text: String) {
+  try write_stderr(text) catch err {
+    return
+  }
+}
+
+// A `with` needs a throwing function: closing a stream can fail.
+fn write_stderr(text: String) throws {
+  with e = io.stderr() {
+    try e.write_text(text)
+  }
+}
+
+// These print; the caller exits (a function can't be declared as never
+// returning, so it couldn't stand in for a value in `catch` or `??`).
+fn usage_error(msg: String) {
+  if not msg.is_empty() {
+    write_err("${msg}\n\n")
+  }
+  write_err("${usage()}\n")
+}
+
+// Go's flag package prints this and exits with status 2.
+fn flag_error(msg: String) {
+  write_err("${msg}\n${usage()}")
+}
+
+fn int_flag(name: String, value: String) -> Int {
+  // (`process.exit` directly inside this `catch` crashes the C compiler)
+  if int_or_none(value) is some(n) {
+    return n
+  }
+  flag_error("invalid value \"${value}\" for flag -${name}: parse error")
+  process.exit(2)
+}
+
+fn bool_flags() -> List<String> {
+  return ["h2", "disable-compression", "disable-keepalive", "disable-redirects"]
+}
+
+// The command line the way Go's `flag` package reads it: -name value,
+// -name=value (one or two dashes), bool flags without a value; the first
+// argument that isn't a flag ends the flags.
+fn parse_args(args: List<String>) -> Options {
+  var o = Options()
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--" {
+      o.args = args.drop(i + 1)
+      return o
+    }
+    if not arg.starts_with("-") or arg == "-" {
+      o.args = args.drop(i)
+      return o
+    }
+    var name = if arg.starts_with("--") { arg.slice(2, arg.length) } else { arg.slice(1, arg.length) }
+    var value: String? = none
+    let parts = name.split("=")
+    if parts.length > 1 {
+      name = parts[0]
+      value = parts.drop(1).join("=")
+    }
+    if name == "help" {
+      write_err(usage())
+      process.exit(0)
+    }
+    if bool_flags().contains(name) {
+      let on = (value ?? "true") == "true" or value == "1"
+      if name == "h2" { o.h2 = on }
+      if name == "disable-compression" { o.disable_compression = on }
+      if name == "disable-keepalive" { o.disable_keepalive = on }
+      if name == "disable-redirects" { o.disable_redirects = on }
+      i += 1
+      continue
+    }
+    var v = ""
+    if value is some(given) {
+      v = given
+    } else {
+      if i + 1 >= args.length {
+        flag_error("flag needs an argument: -${name}")
+        process.exit(2)
+      }
+      i += 1
+      v = args[i]
+    }
+    i += 1
+    if name == "m" { o.method = v }
+    else if name == "h" { o.old_headers = v }
+    else if name == "H" { o.headers.append(v) }
+    else if name == "d" { o.body = v }
+    else if name == "D" { o.body_file = v }
+    else if name == "A" { o.accept = v }
+    else if name == "T" { o.content_type = v }
+    else if name == "a" { o.auth = v }
+    else if name == "host" { o.host = v }
+    else if name == "U" { o.user_agent = v }
+    else if name == "o" { o.output = v }
+    else if name == "x" { o.proxy = v }
+    else if name == "c" { o.c = int_flag(name, value: v) }
+    else if name == "n" { o.n = int_flag(name, value: v) }
+    else if name == "t" { o.t = int_flag(name, value: v) }
+    else if name == "cpus" { o.cpus = int_flag(name, value: v) }
+    else if name == "q" {
+      if float_or_none(v) is some(q) {
+        o.q = q
+      } else {
+        flag_error("invalid value \"${v}\" for flag -q: parse error")
+        process.exit(2)
+      }
+    } else if name == "z" {
+      if parse_duration(v) is some(nanos) {
+        o.z_nanos = nanos
+      } else {
+        flag_error("invalid value \"${v}\" for flag -z: parse error")
+        process.exit(2)
+      }
+    } else {
+      flag_error("flag provided but not defined: -${name}")
+      process.exit(2)
+    }
+  }
+  return o
+}
+
+// `try t.to_int() catch err { none }` doesn't type-check (Int vs Int?).
+fn int_or_none(t: String) -> Int? {
+  return try t.to_int() catch err {
+    return none
+  }
+}
+
+fn float_or_none(t: String) -> Float? {
+  return try t.to_float() catch err {
+    return none
+  }
+}
+
+// Go's time.ParseDuration: "10s", "3m", "1h30m", "1.5s", "300ms", "2us", "5ns".
+fn parse_duration(text: String) -> Int? {
+  let units: Map<String, Float> = {
+    "ns": 1.0, "us": 1000.0, "µs": 1000.0, "ms": 1000000.0,
+    "s": 1000000000.0, "m": 60000000000.0, "h": 3600000000000.0,
+  }
+  if text == "0" {
+    return 0
+  }
+  let chars = text.chars()
+  var total = 0.0
+  var i = 0
+  if chars.is_empty() {
+    return none
+  }
+  while i < chars.length {
+    var number = ""
+    while i < chars.length and ("0123456789.".contains(chars[i])) {
+      number = "${number}${chars[i]}"
+      i += 1
+    }
+    var unit = ""
+    while i < chars.length and not "0123456789.".contains(chars[i]) {
+      unit = "${unit}${chars[i]}"
+      i += 1
+    }
+    let factor = units[unit] ?? 0.0
+    if number.is_empty() or factor == 0.0 {
+      return none
+    }
+    let value = try number.to_float() catch err {
+      return none
+    }
+    total += value * factor
+  }
+  return total.round()
+}
+
+// ---------------------------------------------------------------- work
+
+type Work {
+  request: http.ClientRequest
+  qps: Float
+  start: time.Instant
+  // 0: no deadline (-z not given)
+  deadline_nanos: Int
+  follow_redirects: Bool
+}
+
+type Result {
+  error: String? = none
+  status: Int = 0
+  // seconds since the start of the run
+  offset: Float
+  duration: Float
+  // from sending until the status and headers arrived
+  // (DNS + connect + request write + server time: the library doesn't split it)
+  wait: Float = 0.0
+  // reading the body
+  read: Float = 0.0
+  size: Int = 0
+}
+
+fn since(start: time.Instant, at: time.Instant) -> Float {
+  return (at.nanos - start.nanos).to_float() / 1000000000.0
+}
+
+fn is_redirect(status: Int) -> Bool {
+  return [301, 302, 303, 307, 308].contains(status)
+}
+
+// The request to send after a redirect, the way Go's client does it:
+// 301/302/303 turn into a GET without a body (HEAD stays HEAD), 307/308
+// repeat the request.
+fn redirected(req: http.ClientRequest, status: Int, location: String) throws -> http.ClientRequest {
+  var next = req
+  if location.contains("://") {
+    next.url = location
+  } else {
+    let u = try url.parse(req.url)
+    let origin = if u.port is some(port) { "${u.scheme}://${u.host}:${port}" } else { "${u.scheme}://${u.host}" }
+    if location.starts_with("//") {
+      next.url = "${u.scheme}:${location}"
+    } else if location.starts_with("/") {
+      next.url = "${origin}${location}"
+    } else {
+      let dir = u.path.split("/").drop(1)
+      let parent = dir.take(dir.length - 1).join("/")
+      next.url = if parent.is_empty() { "${origin}/${location}" } else { "${origin}/${parent}/${location}" }
+    }
+  }
+  if status == 301 or status == 302 or status == 303 {
+    if next.method != "HEAD" {
+      next.method = "GET"
+    }
+    next.body = Bytes()
+    next.headers.remove("content-type")
+  }
+  return next
+}
+
+fn make_request(w: Work) throws -> Result {
+  let s = time.now()
+  let offset = since(w.start, at: s)
+  var req = w.request
+  var redirects = 0
+  while true {
+    with res = try http.open(req) catch err {
+      return Result(error: err.message(), offset: offset, duration: s.elapsed().seconds())
+    } {
+      let got_headers = time.now()
+      let status = res.status()
+      // http.open never follows redirects (http.send always does), so
+      // they are followed here.
+      // (`and` can't be combined with `is some(...)` in one condition)
+      let location = if w.follow_redirects and is_redirect(status) { res.header("location") } else { none }
+      if location is some(to) {
+        if redirects == 10 {
+          return Result(error: "${w.request.method} \"${w.request.url}\": stopped after 10 redirects", offset: offset, duration: s.elapsed().seconds())
+        }
+        redirects += 1
+        req = try redirected(req, status: status, location: to) catch err {
+          return Result(error: err.message(), offset: offset, duration: s.elapsed().seconds())
+        }
+        continue
+      }
+      // Go discards the body with io.Copy and ignores its error. A HEAD
+      // response has no body, but the library waits for one: don't read.
+      var reading = req.method != "HEAD"
+      while reading {
+        let chunk = try res.read(65536) catch err {
+          Bytes()
+        }
+        reading = not chunk.is_empty()
+      }
+      let done = time.now()
+      // Go takes the size from Content-Length (-1, so not counted, when absent).
+      var size = -1
+      if res.header("content-length") is some(cl) {
+        size = int_or_none(cl) ?? -1
+      }
+      return Result(
+        status: status,
+        offset: offset,
+        duration: since(s, at: done),
+        wait: since(s, at: got_headers),
+        read: since(got_headers, at: done),
+        size: size,
+      )
+    }
+  }
+}
+
+fn run_worker(w: Work, count: Int, results: Channel<Result>) throws -> Int {
+  // Go: time.NewTicker(time.Duration(1e6/QPS) * time.Microsecond); the
+  // first tick comes one period after the start, missed ticks are dropped.
+  let period = if w.qps > 0.0 { (1000000.0 / w.qps).floor() * 1000 } else { 0 }
+  var next_tick = time.now().nanos + period
+  var done = 0
+  for i in 0..<count {
+    if w.deadline_nanos > 0 and w.start.elapsed().nanos >= w.deadline_nanos {
+      return done
+    }
+    if period > 0 {
+      let now = time.now().nanos
+      if next_tick > now {
+        try time.sleep(time.Duration(nanos: next_tick - now))
+        next_tick += period
+      } else {
+        // behind schedule: this tick was waiting, the next is on the grid
+        next_tick += ((now - next_tick).div(period) + 1) * period
+      }
+    }
+    let s = time.now()
+    // make_request only fails when closing the response fails
+    let result = try make_request(w) catch err {
+      Result(error: err.message(), offset: since(w.start, at: s), duration: s.elapsed().seconds())
+    }
+    try results.send(result)
+    done += 1
+  }
+  return done
+}
+
+// ---------------------------------------------------------------- report
+
+type Collected {
+  num_res: Int = 0
+  avg_total: Float = 0.0
+  avg_wait: Float = 0.0
+  avg_read: Float = 0.0
+  lats: List<Float> = []
+  wait_lats: List<Float> = []
+  read_lats: List<Float> = []
+  offsets: List<Float> = []
+  status_codes: List<Int> = []
+  error_dist: Map<String, Int> = {}
+  size_total: Int = 0
+}
+
+fn run_reporter(results: Channel<Result>) throws -> Collected {
+  var r = Collected()
+  while try results.receive() is some(res) {
+    r.num_res += 1
+    if res.error is some(message) {
+      r.error_dist[message] = (r.error_dist[message] ?? 0) + 1
+    } else {
+      r.avg_total += res.duration
+      r.avg_wait += res.wait
+      r.avg_read += res.read
+      if r.lats.length < max_results() {
+        r.lats.append(res.duration)
+        r.wait_lats.append(res.wait)
+        r.read_lats.append(res.read)
+        r.status_codes.append(res.status)
+        r.offsets.append(res.offset)
+      }
+      if res.size > 0 {
+        r.size_total += res.size
+      }
+    }
+  }
+  return r
+}
+
+type Bucket {
+  mark: Float
+  count: Int
+}
+
+type Percentile {
+  percentage: Int
+  latency: Float
+}
+
+// The same buckets as the original: 11 marks from fastest to slowest.
+fn histogram(lats: List<Float>, fastest: Float, slowest: Float) -> List<Bucket> {
+  let bc = 10
+  var marks: List<Float> = []
+  let bs = (slowest - fastest) / bc.to_float()
+  for i in 0..<bc {
+    marks.append(fastest + bs * i.to_float())
+  }
+  marks.append(slowest)
+  var counts: List<Int> = []
+  for i in 0..=bc {
+    counts.append(0)
+  }
+  var bi = 0
+  var i = 0
+  while i < lats.length {
+    if lats[i] <= marks[bi] {
+      i += 1
+      counts[bi] += 1
+    } else if bi < marks.length - 1 {
+      bi += 1
+    }
+  }
+  var res: List<Bucket> = []
+  for k in 0..=bc {
+    res.append(Bucket(mark: marks[k], count: counts[k]))
+  }
+  return res
+}
+
+// The original's percentile: the first sorted latency whose index is at
+// least p% of the count (and a zero entry when there is none).
+fn latencies(lats: List<Float>) -> List<Percentile> {
+  let pctls = [10, 25, 50, 75, 90, 95, 99]
+  var data: List<Float> = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  var j = 0
+  var i = 0
+  while i < lats.length and j < pctls.length {
+    let current = (i * 100).div(lats.length)
+    if current >= pctls[j] {
+      data[j] = lats[i]
+      j += 1
+    }
+    i += 1
+  }
+  var res: List<Percentile> = []
+  for k in 0..<pctls.length {
+    if data[k] > 0.0 {
+      res.append(Percentile(percentage: pctls[k], latency: data[k]))
+    } else {
+      res.append(Percentile(percentage: 0, latency: 0.0))
+    }
+  }
+  return res
+}
+
+fn bar_line(b: Bucket, max: Int) -> String {
+  let bar_len = if max > 0 { (b.count * 40 + max.div(2)).div(max) } else { 0 }
+  return "  ${b.mark.format(3)} [${b.count}]\t|${"■".repeat(bar_len)}\n"
+}
+
+// Go's "%4.4f": NaN is " NaN" there, and Float.format gives "nan".
+fn num(x: Float) -> String {
+  let s = x.format(4)
+  return if s == "nan" { " NaN" } else { s.pad_start(4, fill: " ") }
+}
+
+fn summary(r: Collected, total: time.Duration) -> String {
+  let count = r.lats.length.to_float()
+  let rps = r.num_res.to_float() / total.seconds()
+  let average = r.avg_total / count
+  let avg_wait = r.avg_wait / count
+  let avg_read = r.avg_read / count
+  let lats = r.lats.sorted()
+  let waits = r.wait_lats.sorted()
+  let reads = r.read_lats.sorted()
+  let fastest = lats.first() ?? 0.0
+  let slowest = lats.last() ?? 0.0
+  let size_req = if lats.is_empty() { 0 } else { r.size_total.div(lats.length) }
+
+  var out: List<String> = ["\nSummary:\n"]
+  out.append("  Total:\t${num(total.seconds())} secs\n")
+  out.append("  Slowest:\t${num(slowest)} secs\n")
+  out.append("  Fastest:\t${num(fastest)} secs\n")
+  out.append("  Average:\t${num(average)} secs\n")
+  out.append("  Requests/sec:\t${num(rps)}\n")
+  out.append("  ")
+  if r.size_total > 0 {
+    out.append("\n  Total data:\t${r.size_total} bytes\n  Size/request:\t${size_req} bytes")
+  }
+  out.append("\n\nResponse time histogram:\n")
+  if not lats.is_empty() {
+    let buckets = histogram(lats, fastest: fastest, slowest: slowest)
+    let max = buckets.map(b => b.count).max() ?? 0
+    for b in buckets {
+      out.append(bar_line(b, max: max))
+    }
+  }
+  out.append("\n\nLatency distribution:")
+  if not lats.is_empty() {
+    for p in latencies(lats) {
+      // "%%" is printed literally by the original (a template/printf quirk)
+      out.append("\n  ${p.percentage}%% in ${num(p.latency)} secs")
+    }
+  }
+  // The library gives no DNS/connect/write timing: those phases are all
+  // inside "resp wait" here.
+  out.append("\n\nDetails (average, fastest, slowest):\n")
+  out.append("  DNS+dialup:\tn/a (not measurable: included in resp wait)\n")
+  out.append("  DNS-lookup:\tn/a (not measurable: included in resp wait)\n")
+  out.append("  req write:\tn/a (not measurable: included in resp wait)\n")
+  out.append("  resp wait:\t${num(avg_wait)} secs, ${num(waits.first() ?? 0.0)} secs, ${num(waits.last() ?? 0.0)} secs\n")
+  out.append("  resp read:\t${num(avg_read)} secs, ${num(reads.first() ?? 0.0)} secs, ${num(reads.last() ?? 0.0)} secs\n")
+  out.append("\nStatus code distribution:")
+  let codes = r.status_codes.count_each()
+  for code in codes.keys().sorted() {
+    out.append("\n  [${code}]\t${codes[code] ?? 0} responses")
+  }
+  out.append("\n\n")
+  if not r.error_dist.is_empty() {
+    out.append("Error distribution:")
+    for message in r.error_dist.keys().sorted() {
+      out.append("\n  [${r.error_dist[message] ?? 0}]\t${message}")
+    }
+  }
+  out.append("\n")
+  return out.join("")
+}
+
+fn csv(r: Collected) -> String {
+  var lines = ["response-time,DNS+dialup,DNS,Request-write,Response-delay,Response-read,status-code,offset"]
+  for i in 0..<r.lats.length {
+    // DNS+dialup, DNS and Request-write can't be measured: 0 (as the
+    // original writes for a re-used connection); Response-delay includes them.
+    lines.append("${num(r.lats[i])},0.0000,0.0000,0.0000,${num(r.wait_lats[i])},${num(r.read_lats[i])},${r.status_codes[i]},${num(r.offsets[i])}")
+  }
+  return lines.join("\n")
+}
+
+// ---------------------------------------------------------------- main
+
+fn parse_input(input: String, pattern: String) -> List<String> {
+  let re = try regex.compile(pattern) catch err {
+    panic("bad pattern ${pattern}")
+  }
+  if re.find(input) is some(m) {
+    return m.groups.map(g => g ?? "")
+  }
+  usage_error("could not parse the provided input; input = ${input}")
+  process.exit(1)
+}
+
+fn read_body(file: String) -> Bytes? {
+  return try files.read_bytes(file) catch err {
+    write_err("${err.message()}\n")
+    return none
+  }
+}
+
+fn main() throws {
+  let o = parse_args(process.args())
+  if o.args.is_empty() {
+    usage_error("")
+    process.exit(1)
+  }
+  var num = o.n
+  let conc = o.c
+  if o.z_nanos > 0 {
+    num = 2147483647
+    if conc <= 0 {
+      usage_error("-c cannot be smaller than 1.")
+      process.exit(1)
+    }
+  } else {
+    if num <= 0 or conc <= 0 {
+      usage_error("-n and -c cannot be smaller than 1.")
+      process.exit(1)
+    }
+    if num < conc {
+      usage_error("-n cannot be less than -c.")
+      process.exit(1)
+    }
+  }
+  if o.output != "" and o.output != "csv" {
+    // The original treats any other -o value as a Go text/template.
+    usage_error("-o: only \"csv\" is supported (templates are not)")
+    process.exit(1)
+  }
+  if not o.proxy.is_empty() {
+    write_err("-x: the http library has no proxy setting\n")
+    process.exit(1)
+  }
+  if o.h2 {
+    write_err("warning: -h2 ignored: the http library has no HTTP/2 setting\n")
+  }
+
+  let target = o.args[0]
+  let method = o.method.upper()
+
+  // Header names in lower case, so that a later one replaces an earlier one
+  // (Go's header.Set).
+  var headers: Map<String, String> = {"content-type": o.content_type}
+  if not o.old_headers.is_empty() {
+    usage_error("Flag '-h' is deprecated, please use '-H' instead.")
+    process.exit(1)
+  }
+  for h in o.headers {
+    let m = parse_input(h, pattern: "^([\\w-]+):\\s*(.+)")
+    headers[m[0].lower()] = m[1]
+  }
+  if not o.accept.is_empty() {
+    headers["accept"] = o.accept
+  }
+  if not o.auth.is_empty() {
+    let m = parse_input(o.auth, pattern: "^(.+):([^\\s].+)")
+    headers["authorization"] = "Basic ${"${m[0]}:${m[1]}".bytes().base64()}"
+  }
+  var body = o.body.bytes()
+  if not o.body_file.is_empty() {
+    if read_body(o.body_file) is some(data) {
+      body = data
+    } else {
+      process.exit(1)
+    }
+  }
+  if not o.host.is_empty() {
+    headers["host"] = o.host
+  }
+  var ua = headers["user-agent"] ?? ""
+  ua = if ua.is_empty() { hey_ua() } else { "${ua} ${hey_ua()}" }
+  if not o.user_agent.is_empty() {
+    ua = "${o.user_agent} ${hey_ua()}"
+  }
+  headers["user-agent"] = ua
+  if o.disable_compression {
+    headers["accept-encoding"] = "identity"
+  }
+
+  let start = time.now()
+  let work = Work(
+    request: http.ClientRequest(url: target, method: method, headers: headers, body: body, timeout: time.seconds(o.t)),
+    qps: o.q,
+    start: start,
+    deadline_nanos: o.z_nanos,
+    follow_redirects: not o.disable_redirects,
+  )
+  let results = Channel<Result>(capacity: min(conc * 1000, max_results()))
+  let reporter = spawn run_reporter(results)
+  var workers: List<Task<Int>> = []
+  // Ignore the case where n % c != 0 (as the original does).
+  for i in 0..<conc {
+    workers.append(spawn run_worker(work, count: num.div(conc), results: results))
+  }
+  for w in workers {
+    let _ = try w.wait()
+  }
+  results.close()
+  let total = start.elapsed()
+  let collected = try reporter.wait()
+  let text = if o.output == "csv" { csv(collected) } else { summary(collected, total: total) }
+  with out = io.stdout() {
+    try out.write_text("${text}\n")
+  }
+}

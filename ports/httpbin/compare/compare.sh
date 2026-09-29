@@ -1,7 +1,7 @@
 #!/bin/bash
-# Compares go-httpbin (port 18080) with the lang port (18090), request by request.
+# Compares go-httpbin (port 18080) with the plumb port (18090), request by request.
 # Usage: compare.sh  (reads cases below: "name|curl args")
-GO=18080; LANG_PORT=18090
+GO=18080; PLUMB_PORT=18090
 norm() {
   # headers: lower-case names, drop date/connection, sort; body kept as is
   python3 -c '
@@ -46,7 +46,7 @@ while IFS='|' read -r name args; do
   [ -z "$name" ] && continue
   [[ "$name" == \#* ]] && continue
   a=$(eval curl -s -i --raw --max-time 15 "http://localhost:$GO$args" | norm)
-  b=$(eval curl -s -i --raw --max-time 15 "http://localhost:$LANG_PORT$args" | norm)
+  b=$(eval curl -s -i --raw --max-time 15 "http://localhost:$PLUMB_PORT$args" | norm)
   if [ "$a" == "$b" ]; then echo "SAME  $name"; pass=$((pass+1)); else echo "DIFF  $name"; diff <(echo "$a") <(echo "$b") | head -${DIFFLINES:-12} | sed 's/^/      /'; fail=$((fail+1)); fi
 done < "${1:-/tmp/port-httpbin/compare/cases.txt}"
 echo "same: $pass, different: $fail"

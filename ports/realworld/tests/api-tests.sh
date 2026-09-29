@@ -10,12 +10,12 @@
 #   tests/api-tests.sh postman    only newman
 set -u
 cd "$(dirname "$0")/.."
-LANG_BIN="${LANG_BIN:-../../compiler/target/release/lang}"
+PLUMB_BIN="${PLUMB_BIN:-../../compiler/target/release/plumb}"
 PORT="${PORT:-3917}"
 WHICH="${1:-all}"
 WORK="$(mktemp -d)"
 
-"$LANG_BIN" build main.lang -o "$WORK/conduit" || exit 1
+"$PLUMB_BIN" build main.plumb -o "$WORK/conduit" || exit 1
 CONDUIT_SECRET=test-secret "$WORK/conduit" --port "$PORT" --db "$WORK/test.db" 2> "$WORK/server.log" &
 SERVER=$!
 trap 'kill $SERVER; rm -rf "$WORK"' EXIT

@@ -1,18 +1,18 @@
 #!/bin/sh
-# Runs the notes service in Lang and in Go on fresh databases under the same
+# Runs the notes service in Plumb and in Go on fresh databases under the same
 # load; prints requests per second, latency, server CPU per request and the
 # server's peak memory.   ./bench.sh [connections] [seconds]
 cd "$(dirname "$0")"
 C=${1:-64}
 D=${2:-10}
-LANG_BIN=${LANG_BIN:-../../compiler/target/release/lang}
-$LANG_BIN build lang/server.lang -o /tmp/be-lang || exit 1
+PLUMB_BIN=${PLUMB_BIN:-../../compiler/target/release/plumb}
+$PLUMB_BIN build plumb/server.plumb -o /tmp/be-plumb || exit 1
 (cd go && go build -o /tmp/be-go .) || exit 1
 (cd load && go build -o /tmp/be-load .) || exit 1
 cpu() { ps -o time= -p $1 | awk -F'[:.]' '{ if (NF==3) print ($1*60+$2)*1000+$3*10; else print (($1*60+$2)*60+$3)*1000+$4*10 }'; }
-for impl in lang go; do
+for impl in plumb go; do
   dir=$(mktemp -d)
-  port=$([ $impl = lang ] && echo 8300 || echo 8301)
+  port=$([ $impl = plumb ] && echo 8300 || echo 8301)
   DB=$dir/notes.db PORT=$port /usr/bin/time -l /tmp/be-$impl 2>$dir/err >/dev/null &
   sleep 1
   pid=$(pgrep -n -f /tmp/be-$impl$)

@@ -3,7 +3,7 @@ News & notes
 1: First
 2: Second <b>bold</b>
 Hello world AB!
-<note lang="en"><to>Ann &amp; Bob</to><empty/></note>
+<note plumb="en"><to>Ann &amp; Bob</to><empty/></note>
 Ann & Bob
 xml: line 1: the closing tag doesn't match the open element
 xml: line 1: the document ends inside an element

@@ -1,0 +1,34 @@
+import xml
+
+fn main() throws {
+  let doc = """<?xml version="1.0" encoding="UTF-8"?>
+<!-- a feed -->
+<rss version="2.0">
+  <channel>
+    <title>News &amp; notes</title>
+    <item id="1"><title>First</title><link>https://a.example/1?x=1&amp;y=2</link></item>
+    <item id="2"><title><![CDATA[Second <b>bold</b>]]></title></item>
+    <p>Hello <b>world</b> &#x41;&#66;!</p>
+  </channel>
+</rss>
+"""
+  let rss = try xml.parse(doc)
+  print("${rss.name} ${rss.attribute("version") ?? "?"}")
+  let channel = rss.child("channel") ?? panic("no channel")
+  print(channel.child_text("title") ?? "")
+  for item in channel.elements_named("item") {
+    print("${item.attribute("id") ?? ""}: ${item.child_text("title") ?? ""}")
+  }
+  print(channel.child_text("p") ?? "")
+  let built = xml.Element(name: "note", attributes: {"plumb": "en"})
+    .add(xml.Element(name: "to").add_text("Ann & Bob"))
+    .add(xml.Element(name: "empty"))
+  print(xml.render(built))
+  print(try xml.parse(xml.render(built)).text())
+  for bad in ["<a><b></a>", "<a>", "<a x=1/>", "<a>&nope;</a>", "<a/><b/>", "text", "<a>\n\n</b>"] {
+    let _ = try xml.parse(bad) catch err {
+      print(err.message())
+      continue
+    }
+  }
+}

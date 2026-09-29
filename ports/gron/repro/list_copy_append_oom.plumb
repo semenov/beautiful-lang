@@ -1,0 +1,20 @@
+// FIXED by the compiler update (2026-09-29): this now runs correctly. Kept as a
+// regression check.
+// BUG (runtime): appending to a list that is shared with another variable
+// copies it (copy-on-write) with DOUBLE the old capacity instead of room for
+// its length. Repeating it grows the capacity exponentially: after ~45
+// rounds, "panic: out of memory" (ASan: requested allocation size
+// 0x10000000018 in T0_clone <- T0_grow <- T0_push).
+// The same happens with `var out = a[0]; out.append(x); a[0] = out`,
+// with Map values, with `concat`, and when an accumulator is threaded
+// through recursion (`out = fill(out, ...)`), see
+// recursive_accumulator_oom.plumb. gron crashed on 80-level-deep JSON.
+fn main() {
+  var p: List<Int> = []
+  var keep: List<Int> = []
+  for i in 0..<100 {
+    keep = p
+    p.append(i)
+  }
+  print("${keep.length} ${p.length}")
+}

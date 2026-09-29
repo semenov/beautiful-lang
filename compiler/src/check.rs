@@ -2515,7 +2515,7 @@ impl Checker {
         } else if named_rule {
             for a in args {
                 if a.name.is_some() && params.len() < 3 {
-                    // allowed but not needed; `lang fmt` would remove it
+                    // allowed but not needed; `plumb fmt` would remove it
                 }
             }
         }

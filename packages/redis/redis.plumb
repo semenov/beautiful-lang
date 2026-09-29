@@ -1,0 +1,360 @@
+// redis: a Redis client (RESP over TCP), written in the language itself.
+//
+//   with db = try redis.connect("redis://localhost:6379") {
+//     try db.set("greeting", value: "hello")
+//     print(try db.get("greeting") ?? "(none)")
+//     let visits = try db.increment("visits")
+//   }
+//
+// Values are text. Redis errors ("WRONGTYPE ...") are thrown as errors.
+// Any command works through `command([...])`.
+//
+// Install: plumb add redis https://github.com/semenov/plumb --path packages/redis
+
+import io
+import net
+import url
+
+// What Redis answers.
+pub enum Reply {
+  Nil
+  Status(text: String)
+  Integer(value: Int)
+  Bulk(value: String)
+  Many(items: List<Reply>)
+}
+
+// A connection. Get one with `with db = try redis.connect(...)`.
+pub type Client {
+  conn: io.Stream
+
+  pub fn close(self) throws {
+    try self.conn.close()
+  }
+
+  // Any command: `db.command(["LPUSH", "jobs", "42"])`.
+  pub fn command(self, args: List<String>) throws -> Reply {
+    return try send(self.conn, args: args)
+  }
+
+  // Several commands in one round trip; the replies in the same order. An
+  // error reply comes back as an error after all replies are read.
+  pub fn pipeline(self, commands: List<List<String>>) throws -> List<Reply> {
+    var out = Bytes()
+    for c in commands {
+      out.append_all(encode(c))
+    }
+    try self.conn.write(out)
+    var replies: List<Reply> = []
+    var first_error: Error? = none
+    for _ in commands {
+      let r = try read_reply(self.conn) catch err {
+        if first_error is none {
+          first_error = err
+        }
+        continue
+      }
+      replies.append(r)
+    }
+    if first_error is some(e) {
+      throw e
+    }
+    return replies
+  }
+
+  // ---- strings
+
+  pub fn get(self, key: String) throws -> String? {
+    return optional_text(try self.command(["GET", key]))
+  }
+
+  pub fn set(self, key: String, value: String) throws {
+    let _ = try self.command(["SET", key, value])
+  }
+
+  // Set with an expiry: the key disappears after `seconds`.
+  pub fn set_for(self, key: String, value: String, seconds: Int) throws {
+    let _ = try self.command(["SET", key, value, "EX", "${seconds}"])
+  }
+
+  // Set only if the key doesn't exist yet; true if it was set (a lock).
+  pub fn set_new(self, key: String, value: String, seconds: Int) throws -> Bool {
+    return try self.command(["SET", key, value, "NX", "EX", "${seconds}"]) is Status
+  }
+
+  // True if the key existed.
+  pub fn delete(self, key: String) throws -> Bool {
+    return integer(try self.command(["DEL", key])) > 0
+  }
+
+  pub fn exists(self, key: String) throws -> Bool {
+    return integer(try self.command(["EXISTS", key])) > 0
+  }
+
+  // Adds one; a missing key counts as 0. Returns the new value.
+  pub fn increment(self, key: String) throws -> Int {
+    return integer(try self.command(["INCR", key]))
+  }
+
+  pub fn increment_by(self, key: String, amount: Int) throws -> Int {
+    return integer(try self.command(["INCRBY", key, "${amount}"]))
+  }
+
+  // True if the key exists (and now expires).
+  pub fn expire(self, key: String, seconds: Int) throws -> Bool {
+    return integer(try self.command(["EXPIRE", key, "${seconds}"])) > 0
+  }
+
+  // Seconds until the key expires; none if it doesn't expire or doesn't exist.
+  pub fn time_to_live(self, key: String) throws -> Int? {
+    let n = integer(try self.command(["TTL", key]))
+    if n < 0 {
+      return none
+    }
+    return n
+  }
+
+  // Keys matching a pattern like "user:*". Slow on big databases: use it
+  // for tools, not in request handlers.
+  pub fn keys(self, pattern: String) throws -> List<String> {
+    return texts(try self.command(["KEYS", pattern]))
+  }
+
+  // ---- hashes (a map under one key)
+
+  pub fn hash_get(self, key: String, field: String) throws -> String? {
+    return optional_text(try self.command(["HGET", key, field]))
+  }
+
+  pub fn hash_set(self, key: String, field: String, value: String) throws {
+    let _ = try self.command(["HSET", key, field, value])
+  }
+
+  pub fn hash_get_all(self, key: String) throws -> Map<String, String> {
+    let items = texts(try self.command(["HGETALL", key]))
+    var out: Map<String, String> = {}
+    var i = 0
+    while i + 1 < items.length {
+      out[items[i]] = items[i + 1]
+      i += 2
+    }
+    return out
+  }
+
+  pub fn hash_delete(self, key: String, field: String) throws -> Bool {
+    return integer(try self.command(["HDEL", key, field])) > 0
+  }
+
+  // ---- lists (queues)
+
+  // Adds to the end; returns the new length.
+  pub fn push(self, key: String, value: String) throws -> Int {
+    return integer(try self.command(["RPUSH", key, value]))
+  }
+
+  // Takes from the front; none if the list is empty.
+  pub fn pop_first(self, key: String) throws -> String? {
+    return optional_text(try self.command(["LPOP", key]))
+  }
+
+  // Waits up to `seconds` (0: forever) for an item at the front: a job queue.
+  pub fn wait_first(self, key: String, seconds: Int) throws -> String? {
+    let r = try self.command(["BLPOP", key, "${seconds}"])
+    let items = texts(r)
+    if items.length < 2 {
+      return none
+    }
+    return items[1]
+  }
+
+  // Items `from` to `to` (inclusive; -1 is the last).
+  pub fn range(self, key: String, from: Int, to: Int) throws -> List<String> {
+    return texts(try self.command(["LRANGE", key, "${from}", "${to}"]))
+  }
+
+  pub fn length(self, key: String) throws -> Int {
+    return integer(try self.command(["LLEN", key]))
+  }
+
+  // ---- sets
+
+  // True if it was new.
+  pub fn set_add(self, key: String, member: String) throws -> Bool {
+    return integer(try self.command(["SADD", key, member])) > 0
+  }
+
+  pub fn set_remove(self, key: String, member: String) throws -> Bool {
+    return integer(try self.command(["SREM", key, member])) > 0
+  }
+
+  pub fn set_contains(self, key: String, member: String) throws -> Bool {
+    return integer(try self.command(["SISMEMBER", key, member])) > 0
+  }
+
+  pub fn set_members(self, key: String) throws -> List<String> {
+    return texts(try self.command(["SMEMBERS", key]))
+  }
+
+  // ---- publish / subscribe
+
+  // Returns how many subscribers received it.
+  pub fn publish(self, channel: String, message: String) throws -> Int {
+    return integer(try self.command(["PUBLISH", channel, message]))
+  }
+}
+
+// A message from `Subscription.receive`.
+pub type Message {
+  channel: String
+  text: String
+}
+
+// A connection that only receives messages (Redis allows nothing else on
+// it). Get one with `with sub = try redis.subscribe(address, channels: [...])`.
+pub type Subscription {
+  conn: io.Stream
+
+  pub fn close(self) throws {
+    try self.conn.close()
+  }
+
+  // Waits for the next message.
+  pub fn receive(self) throws -> Message {
+    while true {
+      let items = texts(try read_reply(self.conn))
+      if items.length == 3 and items[0] == "message" {
+        return Message(channel: items[1], text: items[2])
+      }
+    }
+    panic("unreachable")
+  }
+}
+
+// Connects to "redis://host:port", "redis://:password@host:port/2" (the
+// number picks the database), or "host:port".
+pub fn connect(address: String) throws -> Client {
+  // closed if the setup fails; handed to the caller if it succeeds
+  with client = Client(conn: try open_stream(address)) {
+    try setup(client.conn, address: address)
+    return client
+  }
+}
+
+pub fn subscribe(address: String, channels: List<String>) throws -> Subscription {
+  with sub = Subscription(conn: try open_stream(address)) {
+    try setup(sub.conn, address: address)
+    var args = ["SUBSCRIBE"]
+    args.append_all(channels)
+    try sub.conn.write(encode(args))
+    // one confirmation per channel
+    for _ in channels {
+      let _ = try read_reply(sub.conn)
+    }
+    return sub
+  }
+}
+
+fn open_stream(address: String) throws -> io.Stream {
+  let u = try parse_address(address)
+  return try net.connect(u.host, u.port ?? 6379)
+}
+
+fn send(conn: io.Stream, args: List<String>) throws -> Reply {
+  try conn.write(encode(args))
+  return try read_reply(conn)
+}
+
+fn setup(conn: io.Stream, address: String) throws {
+  let u = try parse_address(address)
+  if u.password is some(p) {
+    if u.user is some(name) and not name.is_empty() {
+      let _ = try send(conn, args: ["AUTH", name, p])
+    } else {
+      let _ = try send(conn, args: ["AUTH", p])
+    }
+  }
+  let db = u.path.slice(from: 1, to: u.path.length)
+  if not db.is_empty() {
+    let _ = try send(conn, args: ["SELECT", db])
+  }
+}
+
+fn parse_address(address: String) throws -> url.Url {
+  if address.contains("://") {
+    return try url.parse(address)
+  }
+  return try url.parse("redis://${address}")
+}
+
+// ---- the protocol
+
+fn encode(args: List<String>) -> Bytes {
+  var out = Bytes()
+  out.append_text("*${args.length}\r\n")
+  for a in args {
+    out.append_text("$${a.byte_length()}\r\n")
+    out.append_text(a)
+    out.append_text("\r\n")
+  }
+  return out
+}
+
+fn read_reply(conn: io.Stream) throws -> Reply {
+  let line = try conn.read_line() ?? throw Failure(message: "redis: the server closed the connection")
+  if line.is_empty() {
+    throw Failure(message: "redis: an empty reply")
+  }
+  let kind = line.slice(from: 0, to: 1)
+  let rest = line.slice(from: 1, to: line.length)
+  if kind == "+" {
+    return Reply.Status(text: rest)
+  }
+  if kind == "-" {
+    throw Failure(message: "redis: ${rest}")
+  }
+  if kind == ":" {
+    return Reply.Integer(value: try rest.to_int())
+  }
+  if kind == "$" {
+    let n = try rest.to_int()
+    if n < 0 {
+      return Reply.Nil
+    }
+    let data = try conn.read_exact(n + 2)
+    return Reply.Bulk(value: try data.slice(from: 0, to: n).text())
+  }
+  if kind == "*" {
+    let n = try rest.to_int()
+    if n < 0 {
+      return Reply.Nil
+    }
+    var items: List<Reply> = []
+    for _ in 0..<n {
+      items.append(try read_reply(conn))
+    }
+    return Reply.Many(items: items)
+  }
+  throw Failure(message: "redis: can't read the reply \"${line}\"")
+}
+
+fn optional_text(r: Reply) -> String? {
+  return match r {
+    Bulk(value) => value
+    Status(text) => text
+    _ => none
+  }
+}
+
+fn integer(r: Reply) -> Int {
+  return match r {
+    Integer(value) => value
+    _ => 0
+  }
+}
+
+fn texts(r: Reply) -> List<String> {
+  return match r {
+    Many(items) => items.map(i => optional_text(i) ?? "")
+    _ => []
+  }
+}

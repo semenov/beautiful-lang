@@ -1,0 +1,432 @@
+// Statements: lists of tokens like `json.city = "Leeds";`, made from JSON
+// (gron) and read back (ungron).
+
+import identifier
+import jsonraw
+import token
+import ungron
+
+// An assignment statement, e.g. `json.city = "Leeds";`, stored as tokens:
+// 'json', '.', 'city', '=', '"Leeds"' and ';'. Stored as tokens so that
+// sorting is cheaper, and so the same type serves gron and ungron.
+pub type Statement {
+  tokens: List<token.Token>
+
+  // The statement as text.
+  pub fn to_string(self) -> String {
+    return self.tokens.map(t => t.format()).join("")
+  }
+
+  // The statement as text with terminal colors.
+  pub fn color_string(self) -> String {
+    return self.tokens.map(t => t.format_color()).join("")
+  }
+
+  // A copy with `.k` added.
+  pub fn with_bare(self, k: String) -> Statement {
+    return Statement(tokens: self.tokens.concat([
+      token.Token(text: ".", typ: token.TokenType.Dot),
+      token.Token(text: k, typ: token.TokenType.Bare),
+    ]))
+  }
+
+  // A copy with `["k"]` added.
+  pub fn with_quoted_key(self, k: String) -> Statement {
+    return Statement(tokens: self.tokens.concat([
+      token.Token(text: "[", typ: token.TokenType.LBrace),
+      token.Token(text: token.quote_string(k), typ: token.TokenType.QuotedKey),
+      token.Token(text: "]", typ: token.TokenType.RBrace),
+    ]))
+  }
+
+  // A copy with `[k]` added.
+  pub fn with_numeric_key(self, k: Int) -> Statement {
+    return Statement(tokens: self.tokens.concat([
+      token.Token(text: "[", typ: token.TokenType.LBrace),
+      token.Token(text: "${k}", typ: token.TokenType.NumericKey),
+      token.Token(text: "]", typ: token.TokenType.RBrace),
+    ]))
+  }
+
+  // The statement as JSON: `json.a[0] = 1;` becomes `[["a",0],1]`.
+  pub fn jsonify(self) throws -> Statement {
+    let s = self.tokens
+    let n = s.length
+    if n < 4 or s[0].typ != token.TokenType.Bare or s[n - 3].typ != token.TokenType.Equals or s[n - 1].typ != token.TokenType.Semi {
+      throw Failure(message: "non-assignment statement")
+    }
+    var j: List<token.Token> = []
+    j.append(token.Token(text: "[", typ: token.TokenType.LBrace))
+    j.append(token.Token(text: "[", typ: token.TokenType.LBrace))
+    for t in s.drop(1).take(n - 4) {
+      if t.typ == token.TokenType.NumericKey or t.typ == token.TokenType.QuotedKey {
+        j.append(t)
+        j.append(token.Token(text: ",", typ: token.TokenType.Comma))
+      } else if t.typ == token.TokenType.Bare {
+        j.append(token.Token(text: token.quote_string(t.text), typ: token.TokenType.QuotedKey))
+        j.append(token.Token(text: ",", typ: token.TokenType.Comma))
+      }
+    }
+    if j[j.length - 1].typ == token.TokenType.Comma {
+      let _ = j.pop()
+    }
+    j.append(token.Token(text: "]", typ: token.TokenType.LBrace))
+    j.append(token.Token(text: ",", typ: token.TokenType.Comma))
+    j.append(s[n - 2])
+    j.append(token.Token(text: "]", typ: token.TokenType.LBrace))
+    return Statement(tokens: j)
+  }
+
+  // A text that sorts the way Go's `statements.Less` orders statements:
+  // token by token, `=` before anything else (so `json.a = {};` comes
+  // before `json.a.b = 1;`), array indexes as numbers, the rest as text.
+  // plumb can only sort by a number or a text key, not with a comparison
+  // function, so the rules are folded into one text: tokens joined by a
+  // U+0001 separator (lower than any character a token can hold), `=` as
+  // empty text, and indexes padded with zeros.
+  pub fn sort_key(self) -> String {
+    var parts: List<String> = []
+    for t in self.tokens {
+      if t.typ == token.TokenType.Equals {
+        parts.append("")
+      } else if t.typ == token.TokenType.NumericKey {
+        parts.append(t.text.pad_start(20, fill: "0"))
+      } else {
+        parts.append(t.text)
+      }
+    }
+    return parts.join("\u{1}")
+  }
+}
+
+// Sorts statements the way gron's `statements.Less` does.
+pub fn sort_statements(ss: List<Statement>) -> List<Statement> {
+  let keyed = ss.map(s => Keyed(key: s.sort_key(), statement: s))
+  return keyed.sorted_by(k => k.key).map(k => k.statement)
+}
+
+type Keyed {
+  key: String
+  statement: Statement
+}
+
+// Adds `= value;` to a path.
+fn with_value(path: Statement, value: token.Token) -> Statement {
+  return Statement(tokens: path.tokens.concat([
+    token.Token(text: "=", typ: token.TokenType.Equals),
+    value,
+    token.Token(text: ";", typ: token.TokenType.Semi),
+  ]))
+}
+
+// Lexes a line of gron output into a statement.
+pub fn statement_from_string(text: String) -> Statement {
+  return Statement(tokens: ungron.lex(text))
+}
+
+// Reads a statement in the --json form: `[["a",0],1]`.
+pub fn statement_from_json_spec(text: String) throws -> Statement {
+  // Go reads these with plain json.Unmarshal: numbers become float64 and
+  // are written back with Go's float formatting (1.0 -> 1). plumb's
+  // json.parse has Float numbers too, but it turns -0 into 0 and 1e400 into
+  // Infinity without an error, so the numbers are read as text here and
+  // converted one by one.
+  let top = try jsonraw.decode_all(text.bytes())
+  let parts = match top {
+    Array(items) => items
+    _ => throw Failure(message: "json: cannot unmarshal ${json_kind(top)} into Go value of type []interface {}")
+  }
+  for item in parts.indexed() {
+    try check_numbers(item.value, path: ".${item.index}", in_object: false)
+  }
+  if parts.length != 2 {
+    throw layout_error()
+  }
+  let path = match parts[0] {
+    Array(items) => items
+    _ => throw layout_error()
+  }
+  var ts: List<token.Token> = [token.Token(text: "json", typ: token.TokenType.Bare)]
+  for e in path {
+    ts.append(token.Token(text: "[", typ: token.TokenType.LBrace))
+    match e {
+      String(value) => ts.append(token.Token(text: token.quote_string(value), typ: token.TokenType.QuotedKey))
+      Number(value) => ts.append(token.Token(text: try float_text(value), typ: token.TokenType.NumericKey))
+      _ => throw layout_error()
+    }
+    ts.append(token.Token(text: "]", typ: token.TokenType.RBrace))
+  }
+  ts.append(token.Token(text: "=", typ: token.TokenType.Equals))
+  let v = parts[1]
+  let value = match v {
+    Bool(value) => if value { token.Token(text: "true", typ: token.TokenType.True) } else { token.Token(text: "false", typ: token.TokenType.False) }
+    Number(value) => token.Token(text: try float_text(value), typ: token.TokenType.Number)
+    String(value) => token.Token(text: jsonraw.encode_string(value), typ: token.TokenType.Str)
+    Array(items) => if items.is_empty() { token.Token(text: "[]", typ: token.TokenType.EmptyArray) } else { throw layout_error() }
+    Object(fields) => if fields.is_empty() { token.Token(text: "{}", typ: token.TokenType.EmptyObject) } else { throw layout_error() }
+    Null => token.Token(text: "null", typ: token.TokenType.Null)
+  }
+  ts.append(value)
+  ts.append(token.Token(text: ";", typ: token.TokenType.Semi))
+  return Statement(tokens: ts)
+}
+
+// A JSON number as Go writes it after reading it into a float64.
+fn float_text(number: String) throws -> String {
+  return go_float(try number.to_float())
+}
+
+// Whether a JSON number fits in a Float (1e400 doesn't).
+fn fits_float(number: String) -> Bool {
+  let f = try number.to_float() catch _ { return false }
+  let text = f.to_string()
+  return not (text.contains("Infinity") or text.contains("inf") or text.contains("NaN"))
+}
+
+// Go reads the whole line into an []interface{} first, so a number too big
+// for a float64 anywhere in it is an error that names the first one's
+// place: `.1.0`, or `Go struct field .1.a` when it is an object's field.
+fn check_numbers(v: jsonraw.Value, path: String, in_object: Bool) throws {
+  // Values still to look at, the next one last
+  var todo = [Place(value: v, path: path, in_object: in_object)]
+  while todo.pop() is some(p) {
+    match p.value {
+      Number(text) => {
+        if not fits_float(text) {
+          let place = if p.in_object { "Go struct field ${p.path}" } else { p.path }
+          throw Failure(message: "json: cannot unmarshal number ${text} into ${place} of type float64")
+        }
+      }
+      Array(items) => {
+        for item in items.indexed().reversed() {
+          todo.append(Place(value: item.value, path: "${p.path}.${item.index}", in_object: false))
+        }
+      }
+      Object(fields) => {
+        for entry in fields.entries().reversed() {
+          todo.append(Place(value: entry.value, path: "${p.path}.${entry.key}", in_object: true))
+        }
+      }
+      _ => {}
+    }
+  }
+}
+
+type Place {
+  value: jsonraw.Value
+  path: String
+  in_object: Bool
+}
+
+fn layout_error() -> Failure {
+  return Failure(message: "invalid JSON layout")
+}
+
+fn json_kind(v: jsonraw.Value) -> String {
+  return match v {
+    Null => "null"
+    Bool(_) => "bool"
+    Number(_) => "number"
+    String(_) => "string"
+    Array(_) => "array"
+    Object(_) => "object"
+  }
+}
+
+// A float64 as Go's encoding/json writes it: integers without a point
+// below 1e21 (`12345678901234567000`), exponents as `1e+21` / `1e-7`.
+// plumb's Float.to_string gives the shortest digits but its own layout.
+pub fn go_float(f: Float) -> String {
+  let text = f.to_string()
+  if text.contains("inf") or text.contains("nan") or text.contains("NaN") or text.contains("Inf") {
+    return text
+  }
+  // Split into sign, digits and a decimal exponent: value = 0.DIGITS * 10^exp
+  let negative = text.starts_with("-")
+  let body = if negative { text.slice(from: 1, to: text.length) } else { text }
+  var mantissa = body
+  var exp10 = 0
+  let lower = body.lower()
+  if lower.index_of("e") is some(e) {
+    mantissa = body.slice(from: 0, to: e)
+    exp10 = try body.slice(from: e + 1, to: body.length).replace("+", "").to_int() catch _ { 0 }
+  }
+  var int_part = mantissa
+  var frac_part = ""
+  if mantissa.index_of(".") is some(dot) {
+    int_part = mantissa.slice(from: 0, to: dot)
+    frac_part = mantissa.slice(from: dot + 1, to: mantissa.length)
+  }
+  var digits = "${int_part}${frac_part}"
+  var point = int_part.length + exp10
+  // Strip leading zeros (moving the point) and trailing zeros.
+  while digits.length > 1 and digits.starts_with("0") {
+    digits = digits.slice(from: 1, to: digits.length)
+    point -= 1
+  }
+  while digits.length > 1 and digits.ends_with("0") {
+    digits = digits.slice(from: 0, to: digits.length - 1)
+  }
+  let sign = if negative { "-" } else { "" }
+  if digits == "0" {
+    return "${sign}0"
+  }
+  let abs = f.abs()
+  if abs < 0.000001 or abs >= 1e21 {
+    // %e with the shortest digits, then Go trims "e-07" to "e-7".
+    let e = point - 1
+    let head = digits.slice(from: 0, to: 1)
+    let tail = digits.slice(from: 1, to: digits.length)
+    let m = if tail.is_empty() { head } else { "${head}.${tail}" }
+    let es = if e < 0 { "-${-e}" } else { "+${e}" }
+    return "${sign}${m}e${es}"
+  }
+  if point <= 0 {
+    return "${sign}0.${"0".repeat(-point)}${digits}"
+  }
+  if point >= digits.length {
+    return "${sign}${digits}${"0".repeat(point - digits.length)}"
+  }
+  return "${sign}${digits.slice(from: 0, to: point)}.${digits.slice(from: point, to: digits.length)}"
+}
+
+// Turns statements back into one value: each is ungronned on its own, then
+// they are merged.
+pub fn to_value(ss: List<Statement>) throws -> jsonraw.Value {
+  var merged = jsonraw.Value.Null
+  var parsed = 0
+  for s in ss {
+    let u = try ungron.ungron_tokens(s.tokens) catch err {
+      if err is ungron.Recoverable {
+        continue
+      }
+      throw Failure(message: "ungron failed for `${s.to_string()}`: ${err.message()}")
+    }
+    parsed += 1
+    if parsed == 1 {
+      merged = u
+    } else {
+      merged = try ungron.recursive_merge(merged, b: u) catch err {
+        throw Failure(message: "failed to merge statements: ${err.message()}")
+      }
+    }
+  }
+  if parsed == 0 {
+    throw Failure(message: "no statements were parsed")
+  }
+  return merged
+}
+
+// Reads the first JSON value of `data` and makes its statements, each path
+// starting with `prefix`.
+pub fn statements_from_json(data: Bytes, prefix: Statement) throws -> List<Statement> {
+  let top = try jsonraw.decode_first(data)
+  var f = Filler()
+  f.fill(prefix, v: top)
+  return f.ss
+}
+
+// Collects statements, like Go's `(*statements).fill`.
+type Filler {
+  ss: List<Statement> = []
+
+  // Adds the statement for `prefix = v;` and, for objects and arrays, the
+  // statements of everything inside, parents first. (A list of paths still
+  // to do rather than recursion, which overflows the stack on JSON
+  // thousands of levels deep.)
+  mutating fn fill(prefix: Statement, v: jsonraw.Value) {
+    var todo = [Pending(path: prefix, value: v)]
+    while todo.pop() is some(p) {
+      self.ss.append(with_value(p.path, value: token.value_token(p.value)))
+      var inner: List<Pending> = []
+      match p.value {
+        Object(fields) => {
+          for entry in fields {
+            let path = if identifier.valid_identifier(entry.key) { p.path.with_bare(entry.key) } else { p.path.with_quoted_key(entry.key) }
+            inner.append(Pending(path: path, value: entry.value))
+          }
+        }
+        Array(items) => {
+          for item in items.indexed() {
+            inner.append(Pending(path: p.path.with_numeric_key(item.index), value: item.value))
+          }
+        }
+        _ => {}
+      }
+      // The last one pushed is done first
+      inner.reverse()
+      todo.append_all(inner)
+    }
+  }
+}
+
+// A path and the value at it, waiting to be filled in.
+type Pending {
+  path: Statement
+  value: jsonraw.Value
+}
+
+// The prefix every statement starts with: `json`.
+pub fn json_prefix() -> Statement {
+  return Statement(tokens: [token.Token(text: "json", typ: token.TokenType.Bare)])
+}
+
+test "statements from JSON" {
+  let ss = try statements_from_json("{\"dotted\": \"A dotted value\", \"a quoted\": \"value\", \"bool1\": true, \"arr\": [\"one\", 2.0, null]}".bytes(), prefix: json_prefix())
+  let text = sort_statements(ss).map(s => s.to_string())
+  expect text == [
+    "json = {};",
+    "json.arr = [];",
+    "json.arr[0] = \"one\";",
+    "json.arr[1] = 2.0;",
+    "json.arr[2] = null;",
+    "json.bool1 = true;",
+    "json.dotted = \"A dotted value\";",
+    "json[\"a quoted\"] = \"value\";",
+  ]
+}
+
+test "natural sort of indexes" {
+  let ss = try statements_from_json("[0,1,2,3,4,5,6,7,8,9,10,11]".bytes(), prefix: json_prefix())
+  let text = sort_statements(ss).map(s => s.to_string())
+  expect text[2] == "json[1] = 1;"
+  expect text[3] == "json[2] = 2;"
+  expect text[12] == "json[11] = 11;"
+}
+
+test "jsonify" {
+  let s = statement_from_string("json.a[\"b c\"][0] = 1;")
+  expect (try s.jsonify()).to_string() == "[[\"a\",\"b c\",0],1]"
+  expect (try statement_from_string("json = {};").jsonify()).to_string() == "[[],{}]"
+}
+
+test "statements from the JSON form" {
+  let s = try statement_from_json_spec("[[\"a\",0,\"b c\"],1.0]")
+  expect s.to_string() == "json[\"a\"][0][\"b c\"] = 1;"
+  expect (try statement_from_json_spec("[[],{}]")).to_string() == "json = {};"
+  let layout = try statement_from_json_spec("[[],{\"a\":1}]").to_string() catch e { e.message() }
+  expect layout == "invalid JSON layout"
+  let big = try statement_from_json_spec("[[\"a\",1e400],1]").to_string() catch e { e.message() }
+  expect big == "json: cannot unmarshal number 1e400 into .0.1 of type float64"
+  let in_field = try statement_from_json_spec("[[],[{\"a\":1e400}]]").to_string() catch e { e.message() }
+  expect in_field == "json: cannot unmarshal number 1e400 into Go struct field .1.0.a of type float64"
+}
+
+test "Go float formatting" {
+  expect go_float(1.0) == "1"
+  expect go_float(0.1) == "0.1"
+  expect go_float(-2.5) == "-2.5"
+  expect go_float(100000.0) == "100000"
+  expect go_float(12345678901234567890.0) == "12345678901234567000"
+  expect go_float(1e21) == "1e+21"
+  expect go_float(0.0000001) == "1e-7"
+  expect go_float(0.000001) == "0.000001"
+  expect go_float(1.5e-10) == "1.5e-10"
+  expect go_float(0.0) == "0"
+}
+
+test "ungronning statements" {
+  let ss = ["json.a[1] = 2;", "json.a[0] = 1;", "--", "", "json.b = \"x\";"].map(l => statement_from_string(l))
+  let v = try to_value(ss)
+  expect jsonraw.encode_pretty(v) == "{\n  \"json\": {\n    \"a\": [\n      1,\n      2\n    ],\n    \"b\": \"x\"\n  }\n}"
+}

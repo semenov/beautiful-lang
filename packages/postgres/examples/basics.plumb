@@ -1,0 +1,28 @@
+import postgres
+
+type User {
+  id: Int
+  name: String
+  age: Int
+  active: Bool = true
+  score: Float?
+}
+
+fn main() throws {
+  with db = try postgres.connect("postgres://plumb:secret@localhost:5432/plumb") {
+    try db.execute("drop table if exists users", [])
+    try db.execute("create table users (id serial primary key, name text not null, age int not null, active bool, score float8)", [])
+    try db.execute("insert into users (name, age, active, score) values ($1, $2, $3, $4)", ["Ada", 36, true, 9.5])
+    try db.execute("insert into users (name, age, active) values ($1, $2, $3)", ["Bob", 17, false])
+    try db.execute("insert into users (name, age) values ($1, $2)", ["Robert'); drop table users; --", 20])
+    let adults = try db.query<User>("select id, name, age, active, score from users where age >= $1 order by id", [18])
+    for u in adults {
+      print("${u.id} ${u.name} ${u.age} ${u.active} ${u.score ?? -1.0}")
+    }
+    print("changed ${try db.execute_counting("update users set age = age + 1 where age < $1", [30])}")
+    let one = try db.query_one<User>("select * from users where name = $1", ["Bob"])
+    if one is some(bob) {
+      print("bob: ${bob.age}")
+    }
+  }
+}

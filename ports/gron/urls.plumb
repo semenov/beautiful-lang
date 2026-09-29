@@ -1,0 +1,82 @@
+// Fetching JSON from a URL.
+
+import env
+import http
+import regex
+import time
+import url
+
+// Whether the input names a URL rather than a file.
+pub fn valid_url(u: String) -> Bool {
+  let r = try regex.compile("(?i)^https?://") catch _ { return false }
+  return r.find(u) is some(_)
+}
+
+// The proxy to use for `u`, if any: the --proxy argument, else the
+// `<scheme>_proxy` environment variable, unless the host is in --noproxy
+// (or `no_proxy`). "-" means the argument wasn't given.
+pub fn configure_proxy(u: String, proxy: String, no_proxy: String) -> String? {
+  let parsed = try url.parse(u) catch _ { return none }
+  var p = proxy
+  var np = no_proxy
+  // Direct arguments are superior to environment variables.
+  if p == "-" {
+    p = env.get("${parsed.scheme}_proxy") ?? ""
+  }
+  if np == "-" {
+    np = env.get("no_proxy") ?? ""
+  }
+  // No proxy through an environment variable or an argument.
+  if p.is_empty() {
+    return none
+  }
+  let host = if parsed.port is some(port) { "${parsed.host}:${port}" } else { parsed.host }
+  for no_proxy_host in np.split(",") {
+    if no_proxy_host.is_empty() {
+      continue
+    }
+    // Direct matches of the host name.
+    if host == no_proxy_host {
+      return none
+    }
+    // ".foobar.com" matches all subdomains of foobar.com.
+    if no_proxy_host.starts_with(".") and host.ends_with(no_proxy_host) {
+      return none
+    }
+  }
+  return p
+}
+
+// A GET request to `u`, open for reading its body.
+pub fn get_url(u: String, insecure: Bool, proxy_url: String, no_proxy: String, version: String) throws -> http.ResponseStream {
+  // plumb's HTTP client has no settings for these two.
+  if insecure and u.lower().starts_with("https") {
+    throw Failure(message: "--insecure is not supported: plumb's HTTP client always checks certificates")
+  }
+  if configure_proxy(u, proxy: proxy_url, no_proxy: no_proxy) is some(p) {
+    throw Failure(message: "can't use proxy ${p}: plumb's HTTP client has no proxy support")
+  }
+  with res = try http.open(http.ClientRequest(
+    url: u,
+    headers: {"user-agent": "gron/${version}", "accept": "application/json"},
+    timeout: time.seconds(20),
+  )) {
+    return res
+  }
+}
+
+test "valid URLs" {
+  expect valid_url("http://test.com")
+  expect valid_url("https://test.com")
+  expect valid_url("HTTPS://TEST.COM")
+  expect not valid_url("httpx://test.com")
+  expect not valid_url("foo.json")
+  expect not valid_url("/tmp/http://x")
+}
+
+test "proxy settings" {
+  expect configure_proxy("https://test.com", proxy: "http://localhost:1234", no_proxy: "-") == "http://localhost:1234"
+  expect configure_proxy("https://test.com", proxy: "http://localhost:1234", no_proxy: "test.com") == none
+  expect configure_proxy("https://sub.test.com", proxy: "http://localhost:1234", no_proxy: ".test.com") == none
+  expect configure_proxy("https://test.com", proxy: "", no_proxy: "-") == none
+}

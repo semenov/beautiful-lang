@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Random JSON (and gron text) to compare the lang port with the Go original.
+"""Random JSON (and gron text) to compare the plumb port with the Go original.
 Usage: fuzz.py OUTDIR N"""
 import json, random, sys, os
 out, n = sys.argv[1], int(sys.argv[2])

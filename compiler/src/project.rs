@@ -1,6 +1,6 @@
 // Projects and packages.
 //
-// A project is a directory with `lang.toml`:
+// A project is a directory with `plumb.toml`:
 //
 //     [package]
 //     name = "notes"
@@ -15,8 +15,8 @@
 // repository can hold several); `path` alone is a package on this disk
 // (for developing packages side by side), relative to the project.
 //
-// `lang add` records a dependency and pins the exact commit in `lang.lock`.
-// Packages are fetched with git into ~/.lang/packages/<name>/<commit>/.
+// `plumb add` records a dependency and pins the exact commit in `plumb.lock`.
+// Packages are fetched with git into ~/.plumb/packages/<name>/<commit>/.
 // There is no central registry: a package is a git repository and a
 // version is a tag (like Go modules). One version of each package per build.
 
@@ -94,7 +94,7 @@ fn parse_value(v: &str) -> Option<TomlValue> {
 }
 
 pub fn read_manifest(root: &Path) -> Result<Option<Manifest>, String> {
-    let path = root.join("lang.toml");
+    let path = root.join("plumb.toml");
     let text = match std::fs::read_to_string(&path) {
         Ok(t) => t,
         Err(_) => return Ok(None),
@@ -147,12 +147,12 @@ pub fn write_manifest(root: &Path, m: &Manifest) -> Result<(), String> {
             s += &format!("{} = {{ {} }}\n", n, parts.join(", "));
         }
     }
-    std::fs::write(root.join("lang.toml"), s).map_err(|e| e.to_string())
+    std::fs::write(root.join("plumb.toml"), s).map_err(|e| e.to_string())
 }
 
 pub fn read_lock(root: &Path) -> BTreeMap<String, Locked> {
     let mut out = BTreeMap::new();
-    let text = match std::fs::read_to_string(root.join("lang.lock")) {
+    let text = match std::fs::read_to_string(root.join("plumb.lock")) {
         Ok(t) => t,
         Err(_) => return out,
     };
@@ -171,20 +171,20 @@ pub fn read_lock(root: &Path) -> BTreeMap<String, Locked> {
 }
 
 pub fn write_lock(root: &Path, lock: &BTreeMap<String, Locked>) -> Result<(), String> {
-    let mut s = String::from("# Written by `lang add` / `lang fetch`. Pins every package to an exact commit.\n");
+    let mut s = String::from("# Written by `plumb add` / `plumb fetch`. Pins every package to an exact commit.\n");
     for (n, l) in lock {
         s += &format!("\n[package.{}]\ngit = \"{}\"\nversion = \"{}\"\ncommit = \"{}\"\n", n, l.git, l.version, l.commit);
     }
-    std::fs::write(root.join("lang.lock"), s).map_err(|e| e.to_string())
+    std::fs::write(root.join("plumb.lock"), s).map_err(|e| e.to_string())
 }
 
-// The project root: the nearest directory with `lang.toml`, else the file's directory.
+// The project root: the nearest directory with `plumb.toml`, else the file's directory.
 pub fn find_root(file: &Path) -> PathBuf {
     let abs = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let mut dir = abs.parent().map(|p| p.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
     let start = dir.clone();
     loop {
-        if dir.join("lang.toml").exists() {
+        if dir.join("plumb.toml").exists() {
             return dir;
         }
         if !dir.pop() {
@@ -195,7 +195,7 @@ pub fn find_root(file: &Path) -> PathBuf {
 
 pub fn packages_dir() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home).join(".lang").join("packages")
+    PathBuf::from(home).join(".plumb").join("packages")
 }
 
 pub fn package_path(name: &str, commit: &str) -> PathBuf {
@@ -260,8 +260,8 @@ pub fn resolve(root: &Path, update: bool) -> Result<BTreeMap<String, PathBuf>, S
                 continue;
             }
             let dir = root.join(&dep.path);
-            if !dir.join(format!("{}.lang", name)).exists() {
-                return Err(format!("package `{}`: there is no {}.lang in {}", name, name, dir.display()));
+            if !dir.join(format!("{}.plumb", name)).exists() {
+                return Err(format!("package `{}`: there is no {}.plumb in {}", name, name, dir.display()));
             }
             if let Some(sub) = read_manifest(&dir)? {
                 for (n, d) in sub.deps {
@@ -286,7 +286,7 @@ pub fn resolve(root: &Path, update: bool) -> Result<BTreeMap<String, PathBuf>, S
                 // pinned but not downloaded here yet: fetch exactly that commit
                 let got = fetch(&name, &dep)?;
                 if got.commit != l.commit {
-                    return Err(format!("`{}` {} now points to commit {}, but lang.lock pins {}; run `lang update` if the change is expected", name, dep.version, got.commit, l.commit));
+                    return Err(format!("`{}` {} now points to commit {}, but plumb.lock pins {}; run `plumb update` if the change is expected", name, dep.version, got.commit, l.commit));
                 }
                 got
             }
@@ -296,8 +296,8 @@ pub fn resolve(root: &Path, update: bool) -> Result<BTreeMap<String, PathBuf>, S
             }
         };
         let dir = package_path(&name, &locked.commit).join(&dep.path);
-        if !dir.join(format!("{}.lang", name)).exists() {
-            return Err(format!("package `{}`: there is no {}.lang in {}{}", name, name, dep.git, if dep.path.is_empty() { String::new() } else { format!(" / {}", dep.path) }));
+        if !dir.join(format!("{}.plumb", name)).exists() {
+            return Err(format!("package `{}`: there is no {}.plumb in {}{}", name, name, dep.git, if dep.path.is_empty() { String::new() } else { format!(" / {}", dep.path) }));
         }
         if let Some(sub) = read_manifest(&dir)? {
             for (n, d) in sub.deps {

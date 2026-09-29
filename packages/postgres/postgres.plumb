@@ -1,0 +1,410 @@
+// postgres: a PostgreSQL client (the wire protocol over TCP), written in
+// the language itself.
+//
+//   with db = try postgres.connect("postgres://ada:secret@localhost:5432/app") {
+//     try db.execute("insert into users (name, age) values ($1, $2)", ["Ada", 36])
+//     let adults = try db.query<User>("select id, name, age from users where age >= $1", [18])
+//   }
+//
+// Like the built-in `db`: SQL is written right in the call ($1, $2, ... for
+// values), parameters are plain values, rows become records by column name.
+// Values travel apart from the SQL, so SQL injection can't happen.
+//
+// The address can end with ?sslmode=disable, prefer (the default: TLS if
+// the server offers it) or require. With TLS the server's certificate is
+// always checked.
+//
+// Install: plumb add postgres https://github.com/semenov/plumb --path packages/postgres
+
+import crypto
+import encoding
+import io
+import net
+import sql
+import url
+
+// A connection. Get one with `with db = try postgres.connect(...)`.
+pub type Connection {
+  conn: io.Stream
+
+  pub fn close(self) throws {
+    // tell the server we're leaving; it's fine if it's already gone
+    try self.conn.write(message("X", Bytes())) catch err {
+    }
+    try self.conn.close()
+  }
+
+  // A statement without rows: create, insert, update, delete.
+  pub fn execute(self, query: sql.Query, params: List<sql.Value>) throws {
+    let _ = try run(self.conn, query: query.value, params: params)
+  }
+
+  // The same, returning the number of rows it changed.
+  pub fn execute_counting(self, query: sql.Query, params: List<sql.Value>) throws -> Int {
+    let r = try run(self.conn, query: query.value, params: params)
+    let words = r.tag.split(" ")
+    return try (words.last() ?? "0").to_int() catch err {
+      return 0
+    }
+  }
+
+  // Rows as records, columns matched to fields by name.
+  pub fn query<T>(self, query: sql.Query, params: List<sql.Value>) throws -> List<T> {
+    let r = try run(self.conn, query: query.value, params: params)
+    return try sql.decode<T>(r.columns, rows: r.rows)
+  }
+
+  // The first row, or none.
+  pub fn query_one<T>(self, query: sql.Query, params: List<sql.Value>) throws -> T? {
+    let r = try run(self.conn, query: query.value, params: params)
+    let rows = try sql.decode<T>(r.columns, rows: r.rows.take(1))
+    return rows.first()
+  }
+
+  // Runs `work` in a transaction: everything or nothing. An error inside
+  // rolls the changes back and comes out of `transaction`.
+  pub fn transaction<R>(self, work: fn() throws -> R) throws -> R {
+    try self.execute("begin", [])
+    let result = try work() catch err {
+      try self.execute("rollback", [])
+      throw err
+    }
+    try self.execute("commit", [])
+    return result
+  }
+}
+
+// Connects to "postgres://user:password@host:port/database?sslmode=prefer".
+pub fn connect(address: String) throws -> Connection {
+  let u = try url.parse(address)
+  if u.scheme != "postgres" and u.scheme != "postgresql" {
+    throw Failure(message: "postgres: the address must start with postgres://")
+  }
+  let user = u.user ?? "postgres"
+  let password = u.password ?? ""
+  var database = u.path.slice(from: 1, to: u.path.length)
+  if database.is_empty() {
+    database = user
+  }
+  let mode = u.query["sslmode"] ?? "prefer"
+  with c = Connection(conn: try net.connect(u.host, u.port ?? 5432)) {
+    if mode != "disable" {
+      var req = Bytes()
+      req.append_int(8, size: 4)
+      req.append_int(80877103, size: 4)
+      try c.conn.write(req)
+      let answer = try c.conn.read_exact(1)
+      if answer.int_at(0, size: 1) == 83 {
+        try net.start_tls(c.conn, host: u.host) catch err {
+          throw Failure(message: "postgres: TLS failed (a self-signed certificate? on a trusted network, add ?sslmode=disable to the address)", cause: err)
+        }
+      } else if mode == "require" or mode == "verify-full" {
+        throw Failure(message: "postgres: the server doesn't offer TLS (sslmode=${mode})")
+      }
+    }
+    var startup = Bytes()
+    startup.append_int(196608, size: 4)
+    for pair in [["user", user], ["database", database], ["application_name", "plumb"], ["client_encoding", "UTF8"]] {
+      startup.append_text(pair[0])
+      startup.append(0)
+      startup.append_text(pair[1])
+      startup.append(0)
+    }
+    startup.append(0)
+    var packet = Bytes()
+    packet.append_int(startup.length + 4, size: 4)
+    packet.append_all(startup)
+    try c.conn.write(packet)
+    try authenticate(c.conn, user: user, password: password)
+    return c
+  }
+}
+
+// ---- login
+
+fn authenticate(conn: io.Stream, user: String, password: String) throws {
+  var nonce = ""
+  var first_bare = ""
+  var salted = Bytes()
+  var auth_message = ""
+  while true {
+    let m = try read_message(conn)
+    if m.kind == "E" {
+      throw server_error(m.body)
+    }
+    if m.kind == "Z" {
+      return
+    }
+    if m.kind != "R" {
+      continue
+    }
+    var r = Reader(data: m.body)
+    let code = r.int32()
+    if code == 0 {
+      continue
+    }
+    if code == 3 {
+      var body = Bytes()
+      body.append_text(password)
+      body.append(0)
+      try conn.write(message("p", body))
+    } else if code == 10 {
+      // SCRAM-SHA-256 (RFC 5802)
+      nonce = crypto.random_bytes(18).base64()
+      first_bare = "n=,r=${nonce}"
+      let first = "n,,${first_bare}"
+      var body = Bytes()
+      body.append_text("SCRAM-SHA-256")
+      body.append(0)
+      body.append_int(first.byte_length(), size: 4)
+      body.append_text(first)
+      try conn.write(message("p", body))
+    } else if code == 11 {
+      let server_first = try r.rest().text()
+      var fields: Map<String, String> = {}
+      for part in server_first.split(",") {
+        if part.byte_length() > 2 {
+          fields[part.slice(from: 0, to: 1)] = part.slice(from: 2, to: part.length)
+        }
+      }
+      let server_nonce = fields["r"] ?? ""
+      if not server_nonce.starts_with(nonce) {
+        throw Failure(message: "postgres: the server's login answer doesn't match")
+      }
+      let salt = try encoding.from_base64(fields["s"] ?? "")
+      let iterations = try (fields["i"] ?? "4096").to_int()
+      salted = crypto.pbkdf2_sha256(password.bytes(), salt: salt, iterations: iterations, length: 32)
+      let client_key = crypto.hmac_sha256(salted, data: "Client Key".bytes())
+      let stored_key = crypto.sha256(client_key)
+      let final_bare = "c=biws,r=${server_nonce}"
+      auth_message = "${first_bare},${server_first},${final_bare}"
+      let signature = crypto.hmac_sha256(stored_key, data: auth_message.bytes())
+      var proof = Bytes()
+      for i in 0..<client_key.length {
+        proof.append(client_key.int_at(i, size: 1).bit_xor(signature.int_at(i, size: 1)))
+      }
+      var body = Bytes()
+      body.append_text("${final_bare},p=${proof.base64()}")
+      try conn.write(message("p", body))
+    } else if code == 12 {
+      let server_final = try r.rest().text()
+      let server_key = crypto.hmac_sha256(salted, data: "Server Key".bytes())
+      let expected = crypto.hmac_sha256(server_key, data: auth_message.bytes()).base64()
+      if server_final != "v=${expected}" {
+        throw Failure(message: "postgres: the server couldn't prove it knows the password")
+      }
+    } else if code == 5 {
+      throw Failure(message: "postgres: the server asks for an MD5 password; set password_encryption = scram-sha-256 on the server")
+    } else {
+      throw Failure(message: "postgres: unsupported login method ${code}")
+    }
+  }
+}
+
+// ---- queries
+
+type Result {
+  columns: List<String>
+  types: List<Int>
+  rows: List<List<sql.Value>>
+  tag: String
+}
+
+fn run(conn: io.Stream, query: String, params: List<sql.Value>) throws -> Result {
+  var out = Bytes()
+  // Parse: an unnamed statement, the server infers parameter types
+  var parse = Bytes()
+  parse.append(0)
+  parse.append_text(query)
+  parse.append(0)
+  parse.append_int(0, size: 2)
+  out.append_all(message("P", parse))
+  // Bind: parameters as text
+  var bind = Bytes()
+  bind.append(0)
+  bind.append(0)
+  bind.append_int(0, size: 2)
+  bind.append_int(params.length, size: 2)
+  for p in params {
+    if param_text(p) is some(t) {
+      let b = t.bytes()
+      bind.append_int(b.length, size: 4)
+      bind.append_all(b)
+    } else {
+      bind.append_int(4294967295, size: 4)
+    }
+  }
+  bind.append_int(0, size: 2)
+  out.append_all(message("B", bind))
+  var describe = Bytes()
+  describe.append_text("P")
+  describe.append(0)
+  out.append_all(message("D", describe))
+  var execute = Bytes()
+  execute.append(0)
+  execute.append_int(0, size: 4)
+  out.append_all(message("E", execute))
+  out.append_all(message("S", Bytes()))
+  try conn.write(out)
+
+  var result = Result(columns: [], types: [], rows: [], tag: "")
+  var failure: Error? = none
+  while true {
+    let m = try read_message(conn)
+    if m.kind == "Z" {
+      break
+    }
+    if m.kind == "E" {
+      failure = server_error(m.body)
+    } else if m.kind == "T" {
+      var r = Reader(data: m.body)
+      let n = r.int16()
+      for _ in 0..<n {
+        result.columns.append(try r.cstring())
+        r.skip(6)
+        result.types.append(r.int32())
+        r.skip(8)
+      }
+    } else if m.kind == "D" {
+      var r = Reader(data: m.body)
+      let n = r.int16()
+      var row: List<sql.Value> = []
+      for i in 0..<n {
+        let len = r.int32()
+        if len < 0 {
+          row.append(sql.Value.Null)
+        } else {
+          row.append(try column_value(r.take(len), type_id: result.types[i]))
+        }
+      }
+      result.rows.append(row)
+    } else if m.kind == "C" {
+      var r = Reader(data: m.body)
+      result.tag = try r.cstring()
+    }
+  }
+  if failure is some(e) {
+    throw e
+  }
+  return result
+}
+
+fn param_text(v: sql.Value) -> String? {
+  return match v {
+    sql.Value.Null => none
+    sql.Value.Integer(value) => "${value}"
+    sql.Value.Real(value) => "${value}"
+    sql.Value.String(value) => value
+    sql.Value.Boolean(value) => if value { "true" } else { "false" }
+    sql.Value.Blob(value) => "\\x${value.hex()}"
+  }
+}
+
+// String from the server -> a value, by the column's type
+fn column_value(data: Bytes, type_id: Int) throws -> sql.Value {
+  let text = try data.text()
+  if type_id == 16 {
+    return sql.Value.Boolean(value: text == "t")
+  }
+  if type_id == 20 or type_id == 21 or type_id == 23 or type_id == 26 {
+    return sql.Value.Integer(value: try text.to_int())
+  }
+  if type_id == 700 or type_id == 701 {
+    return sql.Value.Real(value: try text.to_float())
+  }
+  if type_id == 17 and text.starts_with("\\x") {
+    return sql.Value.Blob(value: try encoding.from_hex(text.slice(from: 2, to: text.length)))
+  }
+  return sql.Value.String(value: text)
+}
+
+fn server_error(body: Bytes) -> Error {
+  var r = Reader(data: body)
+  var fields: Map<String, String> = {}
+  while r.pos < body.length {
+    let code = r.take(1)
+    if code.int_at(0, size: 1) == 0 {
+      break
+    }
+    let value = try r.cstring() catch err {
+      break
+    }
+    let name = try code.text() catch err {
+      break
+    }
+    fields[name] = value
+  }
+  var text = "postgres: ${fields["M"] ?? "error"}"
+  if fields["D"] is some(d) {
+    text = "${text} (${d})"
+  }
+  if fields["C"] is some(c) {
+    text = "${text} [${c}]"
+  }
+  return Failure(message: text)
+}
+
+// ---- messages
+
+type Message {
+  kind: String
+  body: Bytes
+}
+
+fn message(kind: String, body: Bytes) -> Bytes {
+  var out = Bytes()
+  out.append_text(kind)
+  out.append_int(body.length + 4, size: 4)
+  out.append_all(body)
+  return out
+}
+
+fn read_message(conn: io.Stream) throws -> Message {
+  let head = try conn.read_exact(5)
+  let length = head.int_at(1, size: 4) - 4
+  let body = if length > 0 { try conn.read_exact(length) } else { Bytes() }
+  return Message(kind: try head.slice(from: 0, to: 1).text(), body: body)
+}
+
+type Reader {
+  data: Bytes
+  pos: Int = 0
+
+  mutating fn int16() -> Int {
+    let v = self.data.int_at(self.pos, size: 2)
+    self.pos += 2
+    return v
+  }
+
+  // signed
+  mutating fn int32() -> Int {
+    var v = self.data.int_at(self.pos, size: 4)
+    self.pos += 4
+    if v >= 2147483648 {
+      v -= 4294967296
+    }
+    return v
+  }
+
+  mutating fn skip(count: Int) {
+    self.pos += count
+  }
+
+  mutating fn take(count: Int) -> Bytes {
+    let b = self.data.slice(from: self.pos, to: self.pos + count)
+    self.pos += count
+    return b
+  }
+
+  mutating fn rest() -> Bytes {
+    return self.take(self.data.length - self.pos)
+  }
+
+  // text up to a zero byte
+  mutating fn cstring() throws -> String {
+    let rest = self.data.slice(from: self.pos, to: self.data.length)
+    let end = rest.index_of(Bytes([0])) ?? rest.length
+    self.pos += end + 1
+    return try rest.slice(from: 0, to: end).text()
+  }
+}

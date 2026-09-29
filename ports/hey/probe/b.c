@@ -1081,11 +1081,11 @@ LT_INLINE void lt_assert(bool c, int line) {
 }
 
 static void lt_init(void) {
-    // started by `lang run`: remove the temporary executable (still running)
-    const char *self = getenv("LANG_RUN_EXE");
+    // started by `plumb run`: remove the temporary executable (still running)
+    const char *self = getenv("PLUMB_RUN_EXE");
     if (self) {
         unlink(self);
-        unsetenv("LANG_RUN_EXE");
+        unsetenv("PLUMB_RUN_EXE");
     }
     static char buf[1 << 16];
     setvbuf(stdout, buf, _IOFBF, sizeof buf);
@@ -2920,7 +2920,7 @@ static void lt_csv_field(lt_buf *b, lt_text *f) {
 }
 
 // ---------------------------------------------------------------- xml
-// The scanner turns a document into flat events for xml.lang to build a tree:
+// The scanner turns a document into flat events for xml.plumb to build a tree:
 // "open" name, then "attr" key value per attribute, "text" content, "close".
 
 #include <ctype.h>
@@ -4281,7 +4281,7 @@ static lt_text* f3_ChannelClosed_message(T7 l0) { // ChannelClosed.message
 b0:;
   return ((lt_text*)&lit3);
 }
-static const char *lt_file_init = "bug1.lang";
+static const char *lt_file_init = "bug1.plumb";
 int main(int argc, char **argv) {
   lt_argc = argc;
   lt_argv = argv;

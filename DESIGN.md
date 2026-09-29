@@ -198,7 +198,7 @@ used result is always a mutation or an action. The rule also catches the
 ### Modules and packages
 
 - **One file is one module.** The import path is the file's path from the
-  project root, with dots: `import store.users` loads `store/users.lang`;
+  project root, with dots: `import store.users` loads `store/users.plumb`;
   the code uses the last part: `users.find(...)`. Only root-relative paths,
   no `../` or relative imports (one way to write an import).
 - An alias only when two imports would have the same name:
@@ -218,11 +218,11 @@ used result is always a mutation or an action. The rule also catches the
   suggests moving the shared part into a third module.
 - The main file can't be imported.
 - **Where a name comes from:** the standard library first, then packages
-  from `lang.toml`, then the project's files.
-- **The project root** is the nearest directory with `lang.toml`; without
+  from `plumb.toml`, then the project's files.
+- **The project root** is the nearest directory with `plumb.toml`; without
   one, the directory of the file being run.
 - **Packages are git repositories** (like Go modules; no central registry
-  for now). `lang.toml` lists them with a version tag:
+  for now). `plumb.toml` lists them with a version tag:
 
   ```toml
   [package]
@@ -237,16 +237,16 @@ used result is always a mutation or an action. The rule also catches the
   "packages/redis"`), so one repository holds several, or a directory on
   this disk (`path` without `git`) while developing it.
 
-  `lang add <name> <git-url> --version <tag>` adds one; `lang.lock` pins the
+  `plumb add <name> <git-url> --version <tag>` adds one; `plumb.lock` pins the
   exact commit of every package (including the packages' own
   dependencies), so builds are reproducible. Packages are downloaded once
-  into `~/.lang/packages/<name>/<commit>/`. `lang fetch` downloads what the
-  lock file pins; `lang update` moves to the newest commits of the tags.
+  into `~/.plumb/packages/<name>/<commit>/`. `plumb fetch` downloads what the
+  lock file pins; `plumb update` moves to the newest commits of the tags.
 - **A package's main module** is the file named after the package
-  (`router/router.lang` → `import router`); its other files are
+  (`router/router.plumb` → `import router`); its other files are
   `import router.middleware`. One version of each package per build: two
   different sources for the same name are an error.
-- `lang new <name>` creates a project (`lang.toml`, `main.lang`).
+- `plumb new <name>` creates a project (`plumb.toml`, `main.plumb`).
 
 ### Numbers
 
@@ -355,7 +355,7 @@ used result is always a mutation or an action. The rule also catches the
 ### Tests and tooling
 
 - `test "name"` blocks live next to the code, in the same file, and can see
-  private functions. `lang test` runs everything, with no configuration.
+  private functions. `plumb test` runs everything, with no configuration.
 - One check form, `expect cond`. On failure, the compiler prints the value of
   each side of the expression (`left: 0`, `right: 5`). No `assertEqual`
   family.
@@ -368,12 +368,12 @@ used result is always a mutation or an action. The rule also catches the
   interface-typed parameter (`Clock`, `Mailer`). The standard library ships
   test implementations: a fixed clock, an in-memory file system, calling an
   HTTP handler without a network.
-- One binary: `lang run`, `lang build`, `lang test`, `lang fmt`, `lang doc`,
-  `lang guide`. The formatter has no settings.
+- One binary: `plumb run`, `plumb build`, `plumb test`, `plumb fmt`, `plumb doc`,
+  `plumb guide`. The formatter has no settings.
 - **The tool teaches the language.** An agent that has never seen it is
-  told "run `lang help`": `lang guide` is the whole language in one read
-  (with fixes for the common errors), and `lang doc http.Router` or
-  `lang doc --search gzip` look things up in the sources that are running.
+  told "run `plumb help`": `plumb guide` is the whole language in one read
+  (with fixes for the common errors), and `plumb doc http.Router` or
+  `plumb doc --search gzip` look things up in the sources that are running.
   Tested with fresh agents: they wrote working programs on the first
   compile.
 
@@ -442,7 +442,7 @@ used result is always a mutation or an action. The rule also catches the
   each has many ways to be used, changes with its server, and is written
   in the language on top of `net`, `crypto` and `sql`. SQLite is the
   exception, being a file format rather than a server.
-- **Static programs:** `lang build --static` (Linux) links everything into
+- **Static programs:** `plumb build --static` (Linux) links everything into
   one file that runs anywhere, like Go. On macOS the system libraries are
   always present, so it isn't needed.
 - **HTTP server:** a handler is `fn(Request) throws -> Response`. An error or
@@ -509,7 +509,7 @@ cgen (C) → clang`.
 - **Errors:** a failing function returns an error value; no unwinding.
 - **One C file** per program with the runtime (`src/runtime/rt.h`), so clang
   inlines across everything.
-- `lang run | build | test | check`, `--debug` (AddressSanitizer + leak
+- `plumb run | build | test | check`, `--debug` (AddressSanitizer + leak
   count), `--emit-c`. Tests: `compiler/tests/run.sh`.
 - **Decided while building:** bit operations are `Int` methods
   (`bit_and`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`), not

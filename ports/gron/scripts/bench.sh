@@ -1,5 +1,5 @@
 #!/bin/bash
-# Time and peak memory of the Go original and the lang port.
+# Time and peak memory of the Go original and the plumb port.
 # Needs /tmp/lt/big.json (53 MB), big.stream, go.gron (its gron output) and
 # med5000.gron (made by scripts/make_bench_data.py). If /tmp/lt/gron_nohttp
 # exists (a build without the URL branch, see GAPS.md) it is measured too.
@@ -8,9 +8,9 @@ LG=/tmp/port-gron/gron
 cd /tmp/lt
 run() { # label, args... ; stdin from $IN if set
   local label="$1"; shift
-  local impls="go lang"; [ -x /tmp/lt/gron_nohttp ] && impls="go lang nohttp"
+  local impls="go plumb"; [ -x /tmp/lt/gron_nohttp ] && impls="go plumb nohttp"
   for impl in $impls; do
-    local bin=$GO; [ $impl == lang ] && bin=$LG; [ $impl == nohttp ] && bin=/tmp/lt/gron_nohttp
+    local bin=$GO; [ $impl == plumb ] && bin=$LG; [ $impl == nohttp ] && bin=/tmp/lt/gron_nohttp
     best=999999; mem=0
     for i in 1 2 3; do
       /usr/bin/time -l $bin "$@" < ${IN:-/dev/null} > /dev/null 2> /tmp/lt/t.txt

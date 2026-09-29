@@ -16,41 +16,41 @@ use diag::Sources;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-const USAGE: &str = "lang: a language for CLI tools, scripts and backend services.
+const USAGE: &str = "plumb: a language for CLI tools, scripts and backend services.
 
 New to it (an AI agent, or a person)? Start here:
-  lang guide                        the language in one read: syntax, rules, fixes for common errors
-  lang guide <topic>                one part of it: lang guide errors, lang guide concurrency
-  lang doc                          the standard library's modules
-  lang doc <module>                 a module's API: lang doc http
-  lang doc <module>.<name>          one function or type: lang doc http.Router, lang doc List.map
-  lang doc --search <word>          find functions by name or description: lang doc --search gzip
+  plumb guide                       the language in one read: syntax, rules, fixes for common errors
+  plumb guide <topic>               one part of it: plumb guide errors, plumb guide concurrency
+  plumb doc                         the standard library's modules
+  plumb doc <module>                a module's API: plumb doc http
+  plumb doc <module>.<name>         one function or type: plumb doc http.Router, plumb doc List.map
+  plumb doc --search <word>         find functions by name or description: plumb doc --search gzip
 
 Programs:
-  lang run <file.lang> [args]       compile and run
-  lang fmt [files or dirs]          lay the code out the one standard way (--check: only report)
-  lang build <file.lang> [-o out]   compile an optimized binary
-  lang test <file.lang>             run the file's `test` blocks
-  lang check <file.lang>            only check for errors (fast)
+  plumb run <file.plumb> [args]     compile and run
+  plumb fmt [files or dirs]         lay the code out the one standard way (--check: only report)
+  plumb build <file.plumb> [-o out] compile an optimized binary
+  plumb test <file.plumb>           run the file's `test` blocks
+  plumb check <file.plumb>          only check for errors (fast)
 
 Projects and packages:
-  lang new <name>                   create a project (lang.toml, main.lang)
-  lang add <name> <git-url> [--version <tag>] [--path <dir in the repository>]
-  lang add <name> --path <dir>      a package on this disk
-  lang fetch                        download the packages in lang.lock
-  lang update                       move packages to their newest matching versions
+  plumb new <name>                  create a project (plumb.toml, main.plumb)
+  plumb add <name> <git-url> [--version <tag>] [--path <dir in the repository>]
+  plumb add <name> --path <dir>     a package on this disk
+  plumb fetch                       download the packages in plumb.lock
+  plumb update                      move packages to their newest matching versions
 
 Options:
   --debug                           check memory safety and leaks (slow)
   --static                          (build, Linux) one file that needs no libraries at all
   --emit-c <file.c>                 also write the generated C";
 
-// The standard library's modules, for `lang doc`.
+// The standard library's modules, for `plumb doc`.
 const STD_NAMES: &[&str] = &[
     "files", "path", "io", "process", "env", "cli", "term", "log", "time", "json", "http", "net", "sql", "db", "crypto", "encoding", "random", "regex", "csv", "xml", "template", "url", "zlib", "archive", "math",
 ];
 
-// `lang help`, `lang guide`, `lang doc`
+// `plumb help`, `plumb guide`, `plumb doc`
 fn learn_command(args: &[String]) -> Option<ExitCode> {
     let cmd = args.first().map(|s| s.as_str()).unwrap_or("help");
     match cmd {
@@ -77,20 +77,20 @@ fn learn_command(args: &[String]) -> Option<ExitCode> {
     }
 }
 
-// Modules `lang doc` can show: the prelude, the standard library, and the
+// Modules `plumb doc` can show: the prelude, the standard library, and the
 // packages of the project in the current directory.
 fn doc_sources() -> Vec<(String, String, bool)> {
-    let mut out = vec![("prelude".to_string(), include_str!("prelude.lang").to_string(), true)];
+    let mut out = vec![("prelude".to_string(), include_str!("prelude.plumb").to_string(), true)];
     for n in STD_NAMES {
         if let Some(src) = std_module(n) {
             out.push((n.to_string(), src.to_string(), false));
         }
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let root = project::find_root(&cwd.join("x.lang"));
+    let root = project::find_root(&cwd.join("x.plumb"));
     if let Ok(deps) = project::resolve(&root, false) {
         for (name, dir) in deps {
-            if let Ok(src) = std::fs::read_to_string(dir.join(format!("{}.lang", name))) {
+            if let Ok(src) = std::fs::read_to_string(dir.join(format!("{}.plumb", name))) {
                 out.push((name, src, false));
             }
         }
@@ -98,7 +98,7 @@ fn doc_sources() -> Vec<(String, String, bool)> {
     out
 }
 
-// `lang fmt [--check] [paths]`: the files given, or every .lang file under
+// `plumb fmt [--check] [paths]`: the files given, or every .plumb file under
 // the current directory.
 fn fmt_command(args: &[String]) -> ExitCode {
     let check = args.iter().any(|a| a == "--check");
@@ -120,7 +120,7 @@ fn fmt_command(args: &[String]) -> ExitCode {
                     collect(&e, out);
                 }
             }
-        } else if p.extension().map(|e| e == "lang").unwrap_or(false) {
+        } else if p.extension().map(|e| e == "plumb").unwrap_or(false) {
             out.push(p.to_path_buf());
         }
     }
@@ -157,7 +157,7 @@ fn fmt_command(args: &[String]) -> ExitCode {
     }
     if check {
         if changed > 0 {
-            eprintln!("{} file(s) not formatted: run `lang fmt`", changed);
+            eprintln!("{} file(s) not formatted: run `plumb fmt`", changed);
             return ExitCode::from(1);
         }
     } else if changed > 0 {
@@ -185,14 +185,14 @@ fn doc_command(args: &[String]) -> ExitCode {
                 let label = if n == "prelude" { "prelude (no import)".to_string() } else { n.clone() };
                 println!("  {:<20} {}", label, first);
             }
-            println!("\nMore: lang doc <module>, lang doc <module>.<name>, lang doc --search <word>");
+            println!("\nMore: plumb doc <module>, plumb doc <module>.<name>, plumb doc --search <word>");
             ExitCode::SUCCESS
         }
         Some("--search") => {
             let word = match args.get(1) {
                 Some(w) => w.to_lowercase(),
                 None => {
-                    eprintln!("usage: lang doc --search <word>");
+                    eprintln!("usage: plumb doc --search <word>");
                     return ExitCode::from(2);
                 }
             };
@@ -233,7 +233,7 @@ fn doc_command(args: &[String]) -> ExitCode {
             if prelude.items.iter().any(|i| i.name == parts[0]) {
                 return show_item(&prelude.items, &parts, q);
             }
-            eprintln!("there is no module or prelude type `{}`; see `lang doc` for the list", parts[0]);
+            eprintln!("there is no module or prelude type `{}`; see `plumb doc` for the list", parts[0]);
             ExitCode::from(1)
         }
     }
@@ -313,31 +313,31 @@ fn parse_args() -> Option<Opts> {
 // Standard library modules, embedded in the compiler.
 fn std_module(name: &str) -> Option<&'static str> {
     Some(match name {
-        "time" => include_str!("std/time.lang"),
-        "files" => include_str!("std/files.lang"),
-        "process" => include_str!("std/process.lang"),
-        "env" => include_str!("std/env.lang"),
-        "log" => include_str!("std/log.lang"),
-        "random" => include_str!("std/random.lang"),
-        "json" => include_str!("std/json.lang"),
-        "cli" => include_str!("std/cli.lang"),
-        "http" => include_str!("std/http.lang"),
-        "crypto" => include_str!("std/crypto.lang"),
-        "encoding" => include_str!("std/encoding.lang"),
-        "net" => include_str!("std/net.lang"),
-        "db" => include_str!("std/db.lang"),
-        "regex" => include_str!("std/regex.lang"),
-        "csv" => include_str!("std/csv.lang"),
-        "url" => include_str!("std/url.lang"),
-        "math" => include_str!("std/math.lang"),
-        "path" => include_str!("std/path.lang"),
-        "zlib" => include_str!("std/zlib.lang"),
-        "xml" => include_str!("std/xml.lang"),
-        "io" => include_str!("std/io.lang"),
-        "sql" => include_str!("std/sql.lang"),
-        "term" => include_str!("std/term.lang"),
-        "template" => include_str!("std/template.lang"),
-        "archive" => include_str!("std/archive.lang"),
+        "time" => include_str!("std/time.plumb"),
+        "files" => include_str!("std/files.plumb"),
+        "process" => include_str!("std/process.plumb"),
+        "env" => include_str!("std/env.plumb"),
+        "log" => include_str!("std/log.plumb"),
+        "random" => include_str!("std/random.plumb"),
+        "json" => include_str!("std/json.plumb"),
+        "cli" => include_str!("std/cli.plumb"),
+        "http" => include_str!("std/http.plumb"),
+        "crypto" => include_str!("std/crypto.plumb"),
+        "encoding" => include_str!("std/encoding.plumb"),
+        "net" => include_str!("std/net.plumb"),
+        "db" => include_str!("std/db.plumb"),
+        "regex" => include_str!("std/regex.plumb"),
+        "csv" => include_str!("std/csv.plumb"),
+        "url" => include_str!("std/url.plumb"),
+        "math" => include_str!("std/math.plumb"),
+        "path" => include_str!("std/path.plumb"),
+        "zlib" => include_str!("std/zlib.plumb"),
+        "xml" => include_str!("std/xml.plumb"),
+        "io" => include_str!("std/io.plumb"),
+        "sql" => include_str!("std/sql.plumb"),
+        "term" => include_str!("std/term.plumb"),
+        "template" => include_str!("std/template.plumb"),
+        "archive" => include_str!("std/archive.plumb"),
         _ => return None,
     })
 }
@@ -378,7 +378,7 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
         let f = sources.add(name.to_string(), src.to_string());
         lexer::lex(src, f).and_then(|t| parser::parse_module(t, privileged)).map_err(|d| eprint!("{}", sources.render(&d))).ok()
     };
-    let prelude = parse(sources, "<prelude>", include_str!("prelude.lang"), true)?;
+    let prelude = parse(sources, "<prelude>", include_str!("prelude.plumb"), true)?;
     let uf = sources.files.len() as u32;
     let mut user = parse(sources, path, &text, false)?;
     let abs_entry = std::fs::canonicalize(&entry).unwrap_or(entry.clone());
@@ -387,7 +387,7 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
         .ok()
         .map(|r| r.with_extension("").to_string_lossy().replace('/', "."))
         .unwrap_or_else(|| "main".into());
-    // a main file named like a standard module (json.lang) can still import it
+    // a main file named like a standard module (json.plumb) can still import it
     let entry_key = if std_module(&entry_key).is_some() { "main".to_string() } else { entry_key };
 
     let mut loaded: Vec<Loaded> = vec![Loaded { key: "<prelude>".into(), module: prelude, privileged: true }];
@@ -404,10 +404,10 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
                 (dotted.clone(), None, base.clone(), true)
             } else if let Some(dir) = deps.get(&imp.path[0]) {
                 let rel = if imp.path.len() == 1 { imp.path[0].clone() } else { imp.path[1..].join("/") };
-                (dotted.clone(), Some(dir.join(format!("{}.lang", rel))), Base { root: dir.clone(), prefix: imp.path[0].clone() }, false)
+                (dotted.clone(), Some(dir.join(format!("{}.plumb", rel))), Base { root: dir.clone(), prefix: imp.path[0].clone() }, false)
             } else {
                 let key = if base.prefix.is_empty() { dotted.clone() } else { format!("{}.{}", base.prefix, dotted) };
-                (key, Some(base.root.join(format!("{}.lang", imp.path.join("/")))), base.clone(), false)
+                (key, Some(base.root.join(format!("{}.plumb", imp.path.join("/")))), base.clone(), false)
             };
             imp.key = key.clone();
             graph.entry(from_key.to_string()).or_default().push((key.clone(), imp.span));
@@ -428,7 +428,7 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
                     Err(_) => {
                         let shown = f.strip_prefix(&root).map(|p| p.to_path_buf()).unwrap_or(f.clone());
                         let d = diag::Diag::new(imp.span, format!("there is no module `{}`", dotted))
-                            .help(format!("expected the file {}, a package in lang.toml, or a standard module", shown.display()));
+                            .help(format!("expected the file {}, a package in plumb.toml, or a standard module", shown.display()));
                         eprint!("{}", sources.render(&d));
                         ok = false;
                         continue;
@@ -545,7 +545,7 @@ fn merge_can_fail(ds: Vec<diag::Diag>, texts: &[String]) -> Vec<diag::Diag> {
     out
 }
 
-// `lang new`, `lang add`, `lang fetch`, `lang update`
+// `plumb new`, `plumb add`, `plumb fetch`, `plumb update`
 fn project_command(args: &[String]) -> Option<ExitCode> {
     let cmd = args.first()?.as_str();
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -557,7 +557,7 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
         "new" => {
             let name = match args.get(1) {
                 Some(n) => n.clone(),
-                None => return fail("usage: lang new <name>".into()),
+                None => return fail("usage: plumb new <name>".into()),
             };
             let dir = cwd.join(&name);
             if dir.exists() {
@@ -570,8 +570,8 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
             if let Err(e) = project::write_manifest(&dir, &m) {
                 return fail(e);
             }
-            let _ = std::fs::write(dir.join("main.lang"), format!("fn main() {{\n  print(\"hello from {}\")\n}}\n", name));
-            println!("created {}/ (lang.toml, main.lang)\nrun it: cd {} && lang run main.lang", name, name);
+            let _ = std::fs::write(dir.join("main.plumb"), format!("fn main() {{\n  print(\"hello from {}\")\n}}\n", name));
+            println!("created {}/ (plumb.toml, main.plumb)\nrun it: cd {} && plumb run main.plumb", name, name);
             Some(ExitCode::SUCCESS)
         }
         "add" => {
@@ -581,12 +581,12 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
             let (name, git) = match (args.get(1), args.get(2)) {
                 (Some(n), Some(g)) if !g.starts_with("--") => (n.clone(), g.clone()),
                 (Some(n), _) if !path.is_empty() => (n.clone(), String::new()),
-                _ => return fail("usage: lang add <name> <git-url> [--version <tag>] [--path <dir in the repository>], or lang add <name> --path <dir>".into()),
+                _ => return fail("usage: plumb add <name> <git-url> [--version <tag>] [--path <dir in the repository>], or plumb add <name> --path <dir>".into()),
             };
-            let root = project::find_root(&cwd.join("x.lang"));
+            let root = project::find_root(&cwd.join("x.plumb"));
             let mut m = match project::read_manifest(&root) {
                 Ok(Some(m)) => m,
-                Ok(None) => return fail("there is no lang.toml here; create a project with `lang new <name>`".into()),
+                Ok(None) => return fail("there is no plumb.toml here; create a project with `plumb new <name>`".into()),
                 Err(e) => return fail(e),
             };
             m.deps.insert(name.clone(), project::Dep { git, version, path });
@@ -595,7 +595,7 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
             }
             match project::resolve(&root, false) {
                 Ok(dirs) => {
-                    println!("added {} ({} package(s) pinned in lang.lock)
+                    println!("added {} ({} package(s) pinned in plumb.lock)
 use it: import {}", name, dirs.len(), name);
                     Some(ExitCode::SUCCESS)
                 }
@@ -603,7 +603,7 @@ use it: import {}", name, dirs.len(), name);
             }
         }
         "fetch" | "update" => {
-            let root = project::find_root(&cwd.join("x.lang"));
+            let root = project::find_root(&cwd.join("x.plumb"));
             match project::resolve(&root, cmd == "update") {
                 Ok(dirs) => {
                     for (n, d) in &dirs {
@@ -738,7 +738,7 @@ fn static_libs(libs: &[String]) -> Vec<String> {
 }
 
 fn build_dir() -> PathBuf {
-    let d = std::env::temp_dir().join("lang-build");
+    let d = std::env::temp_dir().join("plumb-build");
     let _ = std::fs::create_dir_all(&d);
     d
 }
@@ -776,18 +776,18 @@ fn main() -> ExitCode {
             if !compile(&opts, tests, false, &exe) {
                 return ExitCode::from(1);
             }
-            // `lang run` becomes the program, so signals (Ctrl-C, kill), the exit
+            // `plumb run` becomes the program, so signals (Ctrl-C, kill), the exit
             // status and standard input are its own; it deletes its temporary
-            // file when it starts (LANG_RUN_EXE)
+            // file when it starts (PLUMB_RUN_EXE)
             use std::os::unix::process::CommandExt;
-            let err = Command::new(&exe).arg0(&stem).args(&opts.args).env("LANG_RUN_EXE", &exe).exec();
+            let err = Command::new(&exe).arg0(&stem).args(&opts.args).env("PLUMB_RUN_EXE", &exe).exec();
             let _ = std::fs::remove_file(&exe);
             eprintln!("error: can't run the program: {}", err);
             ExitCode::from(1)
         }
         "build" => {
             if opts.static_link && cfg!(target_os = "macos") {
-                eprintln!("error: macOS doesn't allow fully static programs (Apple supports only the system's shared C library).\nThere is no need: `lang build` programs use only libraries that come with macOS, so they run on any Mac as they are.\nFor a static Linux program, build on Linux (Alpine is simplest: see tools/linux/Dockerfile).");
+                eprintln!("error: macOS doesn't allow fully static programs (Apple supports only the system's shared C library).\nThere is no need: `plumb build` programs use only libraries that come with macOS, so they run on any Mac as they are.\nFor a static Linux program, build on Linux (Alpine is simplest: see tools/linux/Dockerfile).");
                 return ExitCode::from(1);
             }
             if opts.static_link && cfg!(target_env = "gnu") {

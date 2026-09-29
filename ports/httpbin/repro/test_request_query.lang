@@ -1,9 +1,0 @@
-// http.request (for tests) doesn't split the query off the path.
-//   lang test test_request_query.lang  -> fails: path is "/x?a=1", query_params is {}
-import http
-
-test "a test request with a query" {
-  let req = http.request("GET", "/x?a=1")
-  expect req.path == "/x"
-  expect req.query("a") == "1"
-}

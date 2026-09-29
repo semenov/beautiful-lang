@@ -1,22 +1,22 @@
-# HTTP server: lang vs Go net/http vs fasthttp
+# HTTP server: Plumb vs Go net/http vs fasthttp
 
 `load.go` is a small keep-alive load generator; `cpu.sh` measures the CPU
 time a server spends per request (more telling than requests per second
 when the load generator runs on the same machine). Servers answer
-`GET /hello` with "hello": `hello.lang`, `gostd/`, `fast/`.
+`GET /hello` with "hello": `hello.plumb`, `gostd/`, `fast/`.
 
 ```
 go build -o /tmp/hb-load load.go
-lang build hello.lang -o /tmp/hb-lang && /tmp/hb-lang &
-./cpu.sh $(pgrep -f /tmp/hb-lang) http://127.0.0.1:8200/hello 64
+plumb build hello.plumb -o /tmp/hb-plumb && /tmp/hb-plumb &
+./cpu.sh $(pgrep -f /tmp/hb-plumb) http://127.0.0.1:8200/hello 64
 ```
 
 ## Results (Apple M-series, 2026-09-29, 64 connections)
 
 | server | req/s | CPU per request | memory |
 |---|---|---|---|
-| lang | 133k | 45 us | 9 MB |
-| lang, after the scheduler rewrite (2026-09-29) | 145k | 37 us | 9 MB |
+| Plumb | 133k | 45 us | 9 MB |
+| Plumb, after the scheduler rewrite (2026-09-29) | 145k | 37 us | 9 MB |
 | Go net/http | 133k | 42 us | 25 MB |
 | fasthttp | 138k | 39 us | 16 MB |
 

@@ -924,7 +924,7 @@ static CURL *lt_http_setup(const char *method, const char *url, lt_bytes *body, 
         curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
         curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, (long)(timeout_ms < 10000 ? timeout_ms : 10000));
     }
-    curl_easy_setopt(c, CURLOPT_USERAGENT, "lang-http/0.1");
+    curl_easy_setopt(c, CURLOPT_USERAGENT, "plumb-http/0.1");
 #if !defined(__APPLE__)
     const char *ca = lt_ca_file();
     if (ca) curl_easy_setopt(c, CURLOPT_CAINFO, ca);

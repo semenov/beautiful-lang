@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Writes STDLIB.md from the standard library's sources.
 
-The reference is the public part of compiler/src/prelude.lang and
-compiler/src/std/*.lang: doc comments, `pub` declarations and fields, with
+The reference is the public part of compiler/src/prelude.plumb and
+compiler/src/std/*.plumb: doc comments, `pub` declarations and fields, with
 bodies and private items left out. Run it after changing the stdlib:
 
     python3 tools/stdlib_doc.py
@@ -185,8 +185,8 @@ def builtin_type_open(out: list[str]) -> bool:
 
 def main() -> None:
     std = SRC / "std"
-    names = [n for n in ORDER if (std / f"{n}.lang").exists()]
-    names += sorted(p.stem for p in std.glob("*.lang") if p.stem not in names)
+    names = [n for n in ORDER if (std / f"{n}.plumb").exists()]
+    names += sorted(p.stem for p in std.glob("*.plumb") if p.stem not in names)
     doc = [
         "# Standard library",
         "",
@@ -200,12 +200,12 @@ def main() -> None:
         "",
     ]
     for n in names:
-        intro, api = public_api((std / f"{n}.lang").read_text(), prelude=False)
+        intro, api = public_api((std / f"{n}.plumb").read_text(), prelude=False)
         doc += [f"## {n}", ""]
         if intro:
             doc += [intro, ""]
         doc += ["```", api, "```", ""]
-    intro, api = public_api((SRC / "prelude.lang").read_text(), prelude=True)
+    intro, api = public_api((SRC / "prelude.plumb").read_text(), prelude=True)
     doc += ["## prelude", "", "Types and functions available in every file.", "", "```", api, "```", ""]
     (ROOT / "STDLIB.md").write_text("\n".join(doc))
     print(f"STDLIB.md: {len(names)} modules")

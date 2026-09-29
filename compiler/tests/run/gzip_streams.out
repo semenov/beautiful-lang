@@ -2,4 +2,4 @@ compressed to 462568 bytes
 gunzip counts 200000 lines
 read 200000 lines, last: line 199999 some repeated log text
 two members: ["a", "b", "c"]
-can't read "/tmp/lang-gz-test-not.gz": the data is not valid gzip
+can't read "/tmp/plumb-gz-test-not.gz": the data is not valid gzip

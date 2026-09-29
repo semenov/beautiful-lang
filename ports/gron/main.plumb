@@ -1,0 +1,559 @@
+// gron: transform JSON (from a file, URL, or stdin) into discrete
+// assignments to make it greppable, and back.
+
+import env
+import files
+import io
+import jsonraw
+import process
+import statements
+import term
+import token
+import urls
+
+// Exit codes
+let exit_ok = 0
+let exit_open_file = 1
+let exit_read_input = 2
+let exit_form_statements = 3
+let exit_fetch_url = 4
+let exit_parse_statements = 5
+let exit_json_encode = 6
+
+// The current gron version (Go sets it at build time with -ldflags).
+let gron_version = "dev"
+
+let usage = """
+  Transform JSON (from a file, URL, or stdin) into discrete assignments to make it greppable
+
+  Usage:
+    gron [OPTIONS] [FILE|URL|-]
+
+  Options:
+    -u, --ungron     Reverse the operation (turn assignments back into JSON)
+    -v, --values     Print just the values of provided assignments
+    -c, --colorize   Colorize output (default on tty)
+    -m, --monochrome Monochrome (don't colorize output)
+    -s, --stream     Treat each line of input as a separate JSON object
+    -k, --insecure   Disable certificate validation
+    -x, --proxy      Set proxy configuration
+        --noproxy    Comma-separated list of hosts for which not to use a proxy, if one is specified.
+    -j, --json       Represent gron data as JSON stream
+        --no-sort    Don't sort output (faster)
+        --version    Print version information
+
+  Exit Codes:
+    0\tOK
+    1\tFailed to open file
+    2\tFailed to read input
+    3\tFailed to form statements
+    4\tFailed to fetch URL
+    5\tFailed to parse statements
+    6\tFailed to encode JSON
+
+  Examples:
+    gron /tmp/apiresponse.json
+    gron http://jsonplaceholder.typicode.com/users/1 
+    curl -s http://jsonplaceholder.typicode.com/users/1 | gron
+    gron http://jsonplaceholder.typicode.com/users/1 | grep company | gron --ungron
+  """
+
+// The command-line flags, parsed the way Go's `flag` package does: `-x` and
+// `--x` are the same, `-x=value` or `-x value` for text, and parsing stops
+// at the first argument that isn't a flag.
+type Flags {
+  ungron: Bool = false
+  colorize: Bool = false
+  monochrome: Bool = false
+  stream: Bool = false
+  no_sort: Bool = false
+  version: Bool = false
+  insecure: Bool = false
+  json: Bool = false
+  values: Bool = false
+  // "-" when not given: an empty proxy turns the proxy off
+  proxy: String = "-"
+  no_proxy: String = "-"
+  args: List<String> = []
+}
+
+fn bad_flag(message: String) -> Never {
+  eprint(message)
+  eprint(usage)
+  process.exit(2)
+}
+
+fn parse_flags(args: List<String>) -> Flags {
+  var f = Flags()
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--" {
+      i += 1
+      break
+    }
+    if not arg.starts_with("-") or arg == "-" {
+      break
+    }
+    var name = if arg.starts_with("--") { arg.slice(from: 2, to: arg.length) } else { arg.slice(from: 1, to: arg.length) }
+    var value: String? = none
+    if name.index_of("=") is some(eq) {
+      value = name.slice(from: eq + 1, to: name.length)
+      name = name.slice(from: 0, to: eq)
+    }
+    i += 1
+    if name == "h" or name == "help" {
+      eprint(usage)
+      process.exit(0)
+    }
+    // Text flags take the next argument when there is no "=".
+    if name == "x" or name == "proxy" or name == "noproxy" {
+      var text = ""
+      if value is some(v) {
+        text = v
+      } else if i < args.length {
+        text = args[i]
+        i += 1
+      } else {
+        bad_flag("flag needs an argument: -${name}")
+      }
+      if name == "noproxy" {
+        f.no_proxy = text
+      } else {
+        f.proxy = text
+      }
+      continue
+    }
+    var on = true
+    if value is some(v) {
+      on = match v {
+        "1" => true
+        "t" => true
+        "T" => true
+        "true" => true
+        "TRUE" => true
+        "True" => true
+        "0" => false
+        "f" => false
+        "F" => false
+        "false" => false
+        "FALSE" => false
+        "False" => false
+        _ => bad_flag("invalid boolean value \"${v}\" for -${name}: parse error")
+      }
+    }
+    if name == "u" or name == "ungron" {
+      f.ungron = on
+    } else if name == "c" or name == "colorize" {
+      f.colorize = on
+    } else if name == "m" or name == "monochrome" {
+      f.monochrome = on
+    } else if name == "s" or name == "stream" {
+      f.stream = on
+    } else if name == "no-sort" {
+      f.no_sort = on
+    } else if name == "version" {
+      f.version = on
+    } else if name == "k" or name == "insecure" {
+      f.insecure = on
+    } else if name == "j" or name == "json" {
+      f.json = on
+    } else if name == "v" or name == "values" or name == "value" {
+      f.values = on
+    } else {
+      bad_flag("flag provided but not defined: -${name}")
+    }
+  }
+  f.args = args.drop(i)
+  return f
+}
+
+// What the actions get: options, and the input to read.
+type Options {
+  monochrome: Bool = false
+  no_sort: Bool = false
+  json: Bool = false
+}
+
+// Go reads lines with bufio.Scanner and a 1 MB limit: longer lines are an
+// error. plumb's read_line has no limit; the check keeps the same behavior.
+let max_line = 1_048_576
+
+// Where the input comes from. Files, standard input and URL bodies are
+// different types in plumb (io.Stream, http bodies as Bytes), so the actions
+// get two functions instead of one reader type.
+type Input {
+  read_line: fn() throws -> String?
+  read_all: fn() throws -> Bytes
+}
+
+// An action failed: the exit code and the message.
+type Fatal implements Error {
+  code: Int
+  text: String
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+fn fatal(code: Int, message: String) -> Never {
+  eprint(message)
+  process.exit(code)
+}
+
+fn main() {
+  try start() catch err {
+    fatal(exit_read_input, message: err.message())
+  }
+}
+
+fn start() throws {
+  let flags = parse_flags(process.args())
+
+  // Print version information
+  if flags.version {
+    print("gron version ${gron_version}")
+    process.exit(exit_ok)
+  }
+
+  // If executed as 'ungron' set the --ungron flag. (plumb has no way to get
+  // the program's own name, so this can't be done.)
+  let ungron_flag = flags.ungron
+
+  // The monochrome option is forced if the output isn't a terminal, like
+  // github.com/fatih/color decides (NO_COLOR, TERM=dumb).
+  let no_color = env.get("NO_COLOR") is some(_) or env.get("TERM") == "dumb" or not term.is_terminal()
+  let opts = Options(
+    monochrome: not flags.colorize and (flags.monochrome or no_color),
+    no_sort: flags.no_sort,
+    json: flags.json,
+  )
+
+  // Pick the action: gron, ungron, gron_values or gron_stream
+  let action: fn(Input, Options) throws = if ungron_flag {
+    ungron_action
+  } else if flags.values {
+    gron_values
+  } else if flags.stream {
+    gron_stream
+  } else {
+    gron
+  }
+
+  // The input: a file, a URL or standard input
+  let filename = flags.args.first() ?? ""
+  if filename == "" or filename == "-" {
+    with s = io.stdin() {
+      run(action, input: Input(read_line: () => try s.read_line(), read_all: () => try s.read_all()), opts: opts)
+    }
+  } else if urls.valid_url(filename) {
+    with body = try urls.get_url(filename, insecure: flags.insecure, proxy_url: flags.proxy, no_proxy: flags.no_proxy, version: gron_version) catch err {
+      fatal(exit_fetch_url, message: err.message())
+    } {
+      run(action, input: Input(read_line: () => try body.read_line(), read_all: () => try body.read_all()), opts: opts)
+    }
+  } else if files.is_dir(filename) {
+    // Go opens a directory without an error and fails on the first read;
+    // plumb's files.open refuses it, so the read error is made here.
+    let failed = Failure(message: "read ${filename}: is a directory")
+    run(action, input: Input(read_line: () => throw failed, read_all: () => throw failed), opts: opts)
+  } else {
+    with f = try files.open(filename) catch err {
+      fatal(exit_open_file, message: open_error(filename, err: err))
+    } {
+      run(action, input: Input(read_line: () => try f.read_line(), read_all: () => try f.read_all()), opts: opts)
+    }
+  }
+  process.exit(exit_ok)
+}
+
+// The error for a file that can't be opened, worded as Go's os.Open words
+// it. plumb's file errors are only text (`can't open "x": Permission
+// denied`), so the reason is guessed from what is known about the file.
+fn open_error(filename: String, err: Error) -> String {
+  if not files.exists(filename) {
+    return "open ${filename}: no such file or directory"
+  }
+  if err.message().ends_with(": Permission denied") {
+    return "open ${filename}: permission denied"
+  }
+  return err.message()
+}
+
+fn run(action: fn(Input, Options) throws, input: Input, opts: Options) {
+  try action(input, opts) catch err {
+    if err is Fatal {
+      fatal(err.code, message: err.text)
+    }
+    fatal(exit_read_input, message: err.message())
+  }
+}
+
+// Prints a statement, as JSON with --json.
+fn print_statement(s: statements.Statement, opts: Options) throws {
+  var out = s
+  if opts.json {
+    out = try s.jsonify()
+  }
+  if opts.monochrome {
+    print(out.to_string())
+  } else {
+    print(out.color_string())
+  }
+}
+
+// The default action: JSON in, assignment statements out.
+fn gron(input: Input, opts: Options) throws {
+  let data = try input.read_all() catch err {
+    throw Fatal(code: exit_form_statements, text: "failed to form statements: ${err.message()}")
+  }
+  var ss = try statements.statements_from_json(data, prefix: statements.json_prefix()) catch err {
+    throw Fatal(code: exit_form_statements, text: "failed to form statements: ${err.message()}")
+  }
+  // The output is sorted so that it's the same for the same input
+  if not opts.no_sort {
+    ss = statements.sort_statements(ss)
+  }
+  for s in ss {
+    try print_statement(s, opts: opts) catch err {
+      throw Fatal(code: exit_form_statements, text: "failed to form statements: ${err.message()}")
+    }
+  }
+}
+
+// Like gron, but each line of the input is a separate JSON value.
+fn gron_stream(input: Input, opts: Options) throws {
+  // The first line of output establishes that the top level is an array
+  let top = statements.Statement(tokens: [
+    token.Token(text: "json", typ: token.TokenType.Bare),
+    token.Token(text: "=", typ: token.TokenType.Equals),
+    token.Token(text: "[]", typ: token.TokenType.EmptyArray),
+    token.Token(text: ";", typ: token.TokenType.Semi),
+  ])
+  try print_statement(top, opts: opts)
+
+  var i = 0
+  while true {
+    let line = try input.read_line() catch err {
+      // (Go's format string has one %s too many)
+      throw Fatal(code: exit_form_statements, text: "error reading multiline input: ${err.message()}: %!s(MISSING)")
+    }
+    if line is none {
+      break
+    }
+    if line.byte_length() >= max_line {
+      throw Fatal(code: exit_form_statements, text: "error reading multiline input: bufio.Scanner: token too long: %!s(MISSING)")
+    }
+    let prefix = statements.json_prefix().with_numeric_key(i)
+    i += 1
+    var ss = try statements.statements_from_json(line.bytes(), prefix: prefix) catch err {
+      throw Fatal(code: exit_form_statements, text: "failed to form statements: ${err.message()}")
+    }
+    if not opts.no_sort {
+      ss = statements.sort_statements(ss)
+    }
+    for s in ss {
+      try print_statement(s, opts: opts) catch err {
+        throw Fatal(code: exit_form_statements, text: "failed to form statements: ${err.message()}")
+      }
+    }
+  }
+}
+
+// The reverse of gron: assignment statements in, JSON out.
+fn ungron_action(input: Input, opts: Options) throws {
+  var ss: List<statements.Statement> = []
+  while true {
+    let line = try input.read_line() catch _ {
+      throw Fatal(code: exit_read_input, text: "failed to read input statements")
+    }
+    if line is some(text) {
+      if text.byte_length() >= max_line {
+        throw Fatal(code: exit_read_input, text: "failed to read input statements")
+      }
+      let s = if opts.json {
+        try statements.statement_from_json_spec(text) catch err {
+          throw Fatal(code: exit_parse_statements, text: err.message())
+        }
+      } else {
+        statements.statement_from_string(text)
+      }
+      ss.append(s)
+    } else {
+      break
+    }
+  }
+
+  // Merge the statements into one value
+  var merged = try statements.to_value(ss) catch err {
+    throw Fatal(code: exit_parse_statements, text: err.message())
+  }
+
+  // If there's only one top level key and it's "json", make that the top
+  // level thing
+  if merged is jsonraw.Value.Object(fields) {
+    if fields.length == 1 and fields["json"] is some(inner) {
+      merged = inner
+    }
+  }
+
+  if opts.monochrome {
+    print(jsonraw.encode_pretty(merged))
+  } else {
+    print(colorize_json(merged))
+  }
+}
+
+// Prints just the values of gron statements, without quotes; a bit like
+// jq -r: `json[0].user.name = "Sam";` gives `Sam`.
+fn gron_values(input: Input, opts: Options) throws {
+  // The Go version reads standard input here whatever the input is (a bug
+  // kept for the same behavior).
+  while try io.read_line() is some(line) {
+    // Go's default line limit here is 64 KB, after which it silently stops
+    if line.byte_length() >= 65536 {
+      break
+    }
+    var s = statements.statement_from_string(line).tokens
+    if s.is_empty() {
+      throw Fatal(code: exit_parse_statements, text: "failed to parse '${line}' as gron statement")
+    }
+    // strip off the leading 'json' bare key
+    if s[0].typ == token.TokenType.Bare and s[0].text == "json" {
+      s = s.drop(1)
+    }
+    // strip off the leading dots
+    if s.length > 0 and (s[0].typ == token.TokenType.Dot or s[0].typ == token.TokenType.LBrace) {
+      s = s.drop(1)
+    }
+    for t in s {
+      if t.typ == token.TokenType.Str {
+        // just swallow errors and try to continue
+        let v = try jsonraw.decode_all(t.text.bytes()) catch _ { continue }
+        if v is jsonraw.Value.String(text) {
+          print(text)
+        }
+      } else if t.typ == token.TokenType.Number or t.typ == token.TokenType.True or t.typ == token.TokenType.False or t.typ == token.TokenType.Null {
+        print(t.text)
+      }
+    }
+  }
+}
+
+// JSON with terminal colors, compact, as github.com/nwidger/jsoncolor
+// formats it for gron.
+fn colorize_json(v: jsonraw.Value) -> String {
+  return jsonraw.write(v, style: jsonraw.Style(
+    indent: false,
+    bracket: b => token.brace_color.paint(b),
+    key: k => {
+      let quote = token.bare_color.paint("\"")
+      "${quote}${token.bare_color.paint(k.slice(from: 1, to: k.length - 1))}${quote}"
+    },
+    colon: token.bold.paint(":"),
+    comma: token.bold.paint(","),
+    scalar: color_scalar,
+  ))
+}
+
+fn color_scalar(v: jsonraw.Value) -> String {
+  return match v {
+    String(value) => {
+      let quoted = jsonraw.encode_string(value)
+      let quote = token.green.paint("\"")
+      "${quote}${token.str_color.paint(quoted.slice(from: 1, to: quoted.length - 1))}${quote}"
+    }
+    Number(text) => token.num_color.paint(text)
+    Bool(value) => token.bool_color.paint(if value { "true" } else { "false" })
+    _ => token.bool_color.paint("null")
+  }
+}
+
+test "flags" {
+  let f = parse_flags(["-u", "--no-sort", "-x", "http://proxy", "--json=true", "file.gron", "-m"])
+  expect f.ungron
+  expect f.no_sort
+  expect f.json
+  expect not f.monochrome
+  expect f.proxy == "http://proxy"
+  expect f.args == ["file.gron", "-m"]
+  expect parse_flags(["--", "-u"]).args == ["-u"]
+  expect parse_flags(["-"]).args == ["-"]
+}
+
+test "colorized JSON" {
+  let v = jsonraw.Value.Object(fields: {"a": jsonraw.Value.Number(text: "1")})
+  let colored = colorize_json(v)
+  expect colored == "\u{1b}[35m{\u{1b}[0m\u{1b}[34;1m\"\u{1b}[0;22m\u{1b}[34;1ma\u{1b}[0;22m\u{1b}[34;1m\"\u{1b}[0;22m\u{1b}[1m:\u{1b}[22m\u{1b}[31m1\u{1b}[0m\u{1b}[35m}\u{1b}[0m"
+}
+
+// The files the Go version ships with (copied to testdata/go).
+fn go_testdata() -> List<String> {
+  return ["one", "two", "three", "github"]
+}
+
+test "gron output matches the Go version's testdata" {
+  for name in go_testdata() {
+    let data = try files.read_bytes("testdata/go/${name}.json")
+    let want = try files.read("testdata/go/${name}.gron")
+    let ss = statements.sort_statements(try statements.statements_from_json(data, prefix: statements.json_prefix()))
+    let got = ss.map(s => "${s.to_string()}\n").join("")
+    expect got == want
+    let jwant = try files.read("testdata/go/${name}.jgron")
+    let jgot = try ss.map(s => "${(try s.jsonify()).to_string()}\n").join("")
+    expect jgot == jwant
+  }
+}
+
+test "ungron of gron gives the same value back" {
+  for name in go_testdata() {
+    let data = try files.read_bytes("testdata/go/${name}.json")
+    let lines = (try files.read("testdata/go/${name}.gron")).lines()
+    var merged = try statements.to_value(lines.map(l => statements.statement_from_string(l)))
+    if merged is jsonraw.Value.Object(fields) {
+      merged = fields["json"] ?? merged
+    }
+    expect jsonraw.encode_pretty(merged) == jsonraw.encode_pretty(try jsonraw.decode_first(data))
+  }
+}
+
+test "the JSON form reads back" {
+  let lines = (try files.read("testdata/go/one.jgron")).lines()
+  let ss = try lines.map(l => try statements.statement_from_json_spec(l))
+  // Keys come back quoted, as in the Go version
+  expect ss[1].to_string() == "json[\"abool\"] = true;"
+  let from_json = try statements.to_value(ss)
+  let from_gron = try statements.to_value((try files.read("testdata/go/one.gron")).lines().map(l => statements.statement_from_string(l)))
+  expect jsonraw.encode_pretty(from_json) == jsonraw.encode_pretty(from_gron)
+}
+
+test "file errors are worded as Go's" {
+  expect open_error("/no/such/file.json", err: Failure(message: "x")) == "open /no/such/file.json: no such file or directory"
+  let here = "testdata/go/one.json"
+  expect open_error(here, err: Failure(message: "can't open \"${here}\": Permission denied")) == "open ${here}: permission denied"
+}
+
+test "usage ends like Go's" {
+  expect usage.ends_with("gron --ungron")
+  expect usage.contains("  0\tOK\n")
+}
+
+// This file uses http, which makes the stack small: deep JSON must not
+// recurse (see repro/stack_overflow_silent).
+test "JSON 10000 levels deep, and no deeper" {
+  let depth = 10000
+  let deep = "${"{\"a\":".repeat(depth - 1)}[1]${"}".repeat(depth - 1)}"
+  let ss = try statements.statements_from_json(deep.bytes(), prefix: statements.json_prefix())
+  expect ss.length == depth + 1
+  var merged = try statements.to_value(ss)
+  if merged is jsonraw.Value.Object(fields) {
+    merged = fields["json"] ?? merged
+  }
+  expect jsonraw.encode_pretty(merged).lines().length == 2 * depth + 1
+  expect colorize_json(merged).byte_length() > 0
+  let too_deep = try statements.statements_from_json("[${deep}]".bytes(), prefix: statements.json_prefix()).length catch err {
+    expect err.message() == "exceeded max depth"
+    -1
+  }
+  expect too_deep == -1
+}

@@ -1,5 +1,5 @@
 // A small notes service, shaped like a real app's backend: the same API as
-// ../lang/server.lang, written the usual Go way (net/http, database/sql
+// ../plumb/server.plumb, written the usual Go way (net/http, database/sql
 // with mattn/go-sqlite3, encoding/json, log/slog).
 package main
 
@@ -195,7 +195,7 @@ func (s *server) createNote(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 201, Note{id, user, in.Title, in.Body, now})
 }
 
-// request logs, as lang's http.log_requests: one line per request
+// request logs, as plumb's http.log_requests: one line per request
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()

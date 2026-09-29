@@ -1,0 +1,37 @@
+import files
+import io
+import process
+import zlib
+
+fn main() throws {
+  with out = try zlib.create_gzip("/tmp/plumb-gz-test-log.gz") {
+    for i in 0..<200000 {
+      try out.write_text("line ${i} some repeated log text\n")
+    }
+  }
+  print("compressed to ${(try files.read_bytes("/tmp/plumb-gz-test-log.gz")).length} bytes")
+  // the system's gunzip agrees
+  let check = try process.run("sh", ["-c", "gunzip -c /tmp/plumb-gz-test-log.gz | wc -l"])
+  print("gunzip counts ${check.stdout.trim()} lines")
+  var n = 0
+  var last = ""
+  with f = try zlib.open_gzip("/tmp/plumb-gz-test-log.gz") {
+    while try f.read_line() is some(line) {
+      n += 1
+      last = line
+    }
+  }
+  print("read ${n} lines, last: ${last}")
+  // a file made by the system's gzip, two members concatenated
+  let _ = try process.run("sh", ["-c", "printf 'a\\nb\\n' | gzip > /tmp/plumb-gz-test-two.gz; printf 'c\\n' | gzip >> /tmp/plumb-gz-test-two.gz"])
+  with f = try zlib.open_gzip("/tmp/plumb-gz-test-two.gz") {
+    print("two members: ${(try f.read_all().text()).lines()}")
+  }
+  try files.write("/tmp/plumb-gz-test-not.gz", "plain text")
+  with f = try zlib.open_gzip("/tmp/plumb-gz-test-not.gz") {
+    let _ = try f.read_all() catch err {
+      print(err.message())
+      return
+    }
+  }
+}

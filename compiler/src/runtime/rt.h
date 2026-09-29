@@ -1422,11 +1422,11 @@ static void lt_catch_overflow(void) {
 
 static void lt_init(void) {
     lt_catch_overflow();
-    // started by `lang run`: remove the temporary executable (still running)
-    const char *self = getenv("LANG_RUN_EXE");
+    // started by `plumb run`: remove the temporary executable (still running)
+    const char *self = getenv("PLUMB_RUN_EXE");
     if (self) {
         unlink(self);
-        unsetenv("LANG_RUN_EXE");
+        unsetenv("PLUMB_RUN_EXE");
     }
     static char buf[1 << 16];
     setvbuf(stdout, buf, _IOFBF, sizeof buf);

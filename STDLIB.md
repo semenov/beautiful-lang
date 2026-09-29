@@ -53,10 +53,10 @@ pub fn is_dir(path: String) -> Bool
 // Names of the entries in a directory, sorted.
 pub fn list(dir: String) throws -> List<String>
 // Every file under a directory, at any depth, as paths starting with
-// `dir` ("src/a/b.lang"; for "." just "a/b.lang"), sorted. Symlinked
+// `dir` ("src/a/b.plumb"; for "." just "a/b.plumb"), sorted. Symlinked
 // directories aren't followed.
 pub fn walk(dir: String) throws -> List<String>
-// The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
+// The files matching a pattern, sorted: "*.txt", "src/**/*.plumb",
 // "logs/2026-*.{log,gz}" (see `path.matches`).
 pub fn glob(pattern: String) throws -> List<String>
 // Deletes a file or an empty directory.
@@ -130,7 +130,7 @@ pub fn clean(path: String) -> String
 // Whether a path matches a glob pattern: `*` is any text within one part of
 // the path, `?` one character, `**` any number of parts (including none),
 // `[a-z]` / `[!a-z]` one character from a set, `{a,b}` either text.
-//   matches("src/net/tcp.lang", pattern: "src/**/*.lang") == true
+//   matches("src/net/tcp.plumb", pattern: "src/**/*.plumb") == true
 pub fn matches(path: String, pattern: String) -> Bool
 ```
 

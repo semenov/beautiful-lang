@@ -1,26 +1,26 @@
-# Writing lang: a guide for agents
+# Writing Plumb: a guide for agents
 
-Everything needed to write correct code on the first try (`lang guide`
+Everything needed to write correct code on the first try (`plumb guide`
 prints this). Look up any library from the command line:
 
 ```
-lang doc                     the modules
-lang doc http                one module's API, with its comments
-lang doc http.Router         one type or function
-lang doc List.map            built-in types: List, Map, Set, String, Bytes, Int, ...
-lang doc --search gzip       find by name or description
-lang guide errors            one section of this guide
+plumb doc                     the modules
+plumb doc http                one module's API, with its comments
+plumb doc http.Router         one type or function
+plumb doc List.map            built-in types: List, Map, Set, String, Bytes, Int, ...
+plumb doc --search gzip       find by name or description
+plumb guide errors            one section of this guide
 ```
 
-`lang doc` also shows the packages of the project you're in. In the
+`plumb doc` also shows the packages of the project you're in. In the
 language's repository, the same reference is in `STDLIB.md` and the
 reasons behind the rules are in `DESIGN.md`.
 
 ## Files and programs
 
 - A file is a module. A program is a file with `fn main()` (or
-  `fn main() throws`). Run it: `lang run app.lang`. Tests: `lang test app.lang`.
-- `import json`, `import store.users` (the file `store/users.lang` from the
+  `fn main() throws`). Run it: `plumb run app.plumb`. Tests: `plumb test app.plumb`.
+- `import json`, `import store.users` (the file `store/users.plumb` from the
   project root). Use names with the module prefix: `json.decode<T>(text)`,
   `users.find(id)`. No `from`, no `*`, no relative paths.
 - Without `pub`, a function or type is private to its file.
@@ -97,7 +97,7 @@ Patterns: literals, `_`, a name, `some(p)`, `none`, `Variant(p, ...)`, a
 record type inside an interface (`NotFound(id)`), and `p | q`.
 
 No semicolons. Braces always. `if` conditions have no parentheses.
-Two-space indentation; `lang fmt` lays files out the standard way.
+Two-space indentation; `plumb fmt` lays files out the standard way.
 
 ## Types
 

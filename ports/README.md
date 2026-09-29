@@ -1,7 +1,7 @@
 # Ports of open-source programs
 
 Real programs ported to the language by agents that learned it only from
-`lang help`, `lang guide` and `lang doc`. Each port found gaps in the
+`plumb help`, `plumb guide` and `plumb doc`. Each port found gaps in the
 language, the library, the error messages or the docs; its `GAPS.md` lists
 them, and `repro/` has small programs that show them. `TODO.md` tracks what
 was fixed.
@@ -18,7 +18,7 @@ httpbin tests), so they keep up with the language.
 How to run them:
 
 ```
-cd ports/hey && lang run hey.lang -n 1000 -c 50 http://localhost:8080/
-cd ports/httpbin && lang run main.lang -- --port 8080     # lang test tests.lang: its tests
-cd ports/gron && lang run main.lang testdata/edge.json    # scripts/compare.sh: against Go's gron
+cd ports/hey && plumb run hey.plumb -n 1000 -c 50 http://localhost:8080/
+cd ports/httpbin && plumb run main.plumb -- --port 8080     # plumb test tests.plumb: its tests
+cd ports/gron && plumb run main.plumb testdata/edge.json    # scripts/compare.sh: against Go's gron
 ```

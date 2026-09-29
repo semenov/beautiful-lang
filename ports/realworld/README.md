@@ -1,4 +1,4 @@
-# Conduit (RealWorld) backend in lang
+# Conduit (RealWorld) backend in Plumb
 
 The [RealWorld](https://realworld-docs.netlify.app/specifications/backend/introduction/)
 "Conduit" API (a Medium clone's backend) with SQLite: users and JWT
@@ -11,11 +11,11 @@ Gaps found in the language and its library: [GAPS.md](GAPS.md).
 ## Build and run
 
 ```
-lang build main.lang -o conduit
+plumb build main.plumb -o conduit
 CONDUIT_SECRET=change-me ./conduit --port 3000 --db conduit.db
 ```
 
-(or `lang run main.lang -- --port 3000`). The API is under
+(or `plumb run main.plumb -- --port 3000`). The API is under
 `http://localhost:3000/api`. `--db :memory:` keeps nothing on disk.
 Without `CONDUIT_SECRET` a random JWT secret is made at start, so tokens
 don't survive a restart. Passwords are stored with `crypto.hash_password`
@@ -23,13 +23,13 @@ don't survive a restart. Passwords are stored with `crypto.hash_password`
 
 | file | what |
 |---|---|
-| `main.lang` | flags, the secret, the database, `http.serve` |
-| `server.lang` | the routes |
-| `api.lang` | `App` (connection + secret + write lock), `ApiError` and the error middleware, JSON in and out |
-| `auth.lang` | JWTs (the `jwt` package from `packages/jwt`) |
-| `schema.lang` | tables and the `article_view` view |
-| `users.lang`, `profiles.lang`, `articles.lang`, `comments.lang` | the endpoints |
-| `tests.lang` | router tests without a network: `lang test tests.lang` |
+| `main.plumb` | flags, the secret, the database, `http.serve` |
+| `server.plumb` | the routes |
+| `api.plumb` | `App` (connection + secret + write lock), `ApiError` and the error middleware, JSON in and out |
+| `auth.plumb` | JWTs (the `jwt` package from `packages/jwt`) |
+| `schema.plumb` | tables and the `article_view` view |
+| `users.plumb`, `profiles.plumb`, `articles.plumb`, `comments.plumb` | the endpoints |
+| `tests.plumb` | router tests without a network: `plumb test tests.plumb` |
 | `tests/api-tests.sh` | the official API suites against a running server |
 | `repro/` | small programs showing the gaps |
 
@@ -74,7 +74,7 @@ need 8 characters (NIST 800-63B, as the hurl suite checks on update).
 
 | | lines (without blanks and comments) | total |
 |---|---|---|
-| lang port (9 files, without tests) | 883 | 1078 |
+| Plumb port (9 files, without tests) | 883 | 1078 |
 | Go reference (without `_test.go`) | 1395 | 1737 |
 
 The Go reference leans on gorm (no SQL); the port writes its SQL (78

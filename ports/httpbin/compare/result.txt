@@ -20,9 +20,9 @@ DIFF  post multipart
       ---
       >       "multipart/form-data; boundary=------------------------Nqnl41xZflKA7mYfJe56CY"
       28c28
-      <   "data": "--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"f\"; filename=\"lang.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------JW7yDUAmERUjjywssRgCqA--\r\n",
+      <   "data": "--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------JW7yDUAmERUjjywssRgCqA\r\nContent-Disposition: form-data; name=\"f\"; filename=\"plumb.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------JW7yDUAmERUjjywssRgCqA--\r\n",
       ---
-      >   "data": "--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"f\"; filename=\"lang.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------Nqnl41xZflKA7mYfJe56CY--\r\n",
+      >   "data": "--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n2\r\n--------------------------Nqnl41xZflKA7mYfJe56CY\r\nContent-Disposition: form-data; name=\"f\"; filename=\"plumb.toml\"\r\nContent-Type: application/octet-stream\r\n\r\n[package]\nname = \"httpbin\"\nversion = \"0.1.0\"\n\r\n--------------------------Nqnl41xZflKA7mYfJe56CY--\r\n",
 SAME  post text
 SAME  post binary
 SAME  post no ct

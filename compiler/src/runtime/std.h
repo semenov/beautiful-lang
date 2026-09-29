@@ -710,7 +710,7 @@ static int lt_log_rank(const char *level) {
     return 1;
 }
 
-// `lang test` collects each test's log lines here and shows them only if
+// `plumb test` collects each test's log lines here and shows them only if
 // the test fails
 static lt_buf *lt_log_capture;
 
@@ -1514,7 +1514,7 @@ static void lt_csv_field(lt_buf *b, lt_text *f) {
 }
 
 // ---------------------------------------------------------------- xml
-// The scanner turns a document into flat events for xml.lang to build a tree:
+// The scanner turns a document into flat events for xml.plumb to build a tree:
 // "open" name, then "attr" key value per attribute, "text" content, "close".
 
 #include <ctype.h>

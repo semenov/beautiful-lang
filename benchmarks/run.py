@@ -16,8 +16,8 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BIN = os.path.join(ROOT, "bin")
 BENCHES = ["records", "trees", "sort", "words", "json", "maps", "csv", "nbody", "lines", "channels", "spawn"]
-# ONLY=Go,Lang python3 run.py   to compare just those
-RUNTIMES = [r for r in ["Node", "Deno", "Bun", "Go", "Rust", "C", "Lang"] if not os.environ.get("ONLY") or r in os.environ["ONLY"].split(",")]
+# ONLY=Go,Plumb python3 run.py   to compare just those
+RUNTIMES = [r for r in ["Node", "Deno", "Bun", "Go", "Rust", "C", "Plumb"] if not os.environ.get("ONLY") or r in os.environ["ONLY"].split(",")]
 RUNS = int(os.environ.get("RUNS", "3"))
 BUN = shutil.which("bun") or os.path.expanduser("~/.bun/bin/bun")
 
@@ -34,11 +34,11 @@ def build(selected):
         subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=os.path.join(ROOT, "rust"), check=True)
     compiler = os.path.join(ROOT, "..", "compiler")
     subprocess.run(["cargo", "build", "--release", "--quiet"], cwd=compiler, check=True)
-    lang = os.path.join(compiler, "target", "release", "lang")
+    plumb = os.path.join(compiler, "target", "release", "plumb")
     for bench in selected:
-        source = os.path.join(ROOT, "lang", f"{bench}.lang")
+        source = os.path.join(ROOT, "plumb", f"{bench}.plumb")
         if os.path.exists(source):
-            subprocess.run([lang, "build", source, "-o", os.path.join(BIN, f"lang_{bench}")], check=True)
+            subprocess.run([plumb, "build", source, "-o", os.path.join(BIN, f"plumb_{bench}")], check=True)
 
 
 def commands(bench):
@@ -50,9 +50,9 @@ def commands(bench):
     rust = os.path.join(ROOT, "rust", "target", "release", bench)
     if os.path.exists(rust):
         found["Rust"] = [rust]
-    lang = os.path.join(BIN, f"lang_{bench}")
-    if os.path.exists(os.path.join(ROOT, "lang", f"{bench}.lang")):
-        found["Lang"] = [lang]
+    plumb = os.path.join(BIN, f"plumb_{bench}")
+    if os.path.exists(os.path.join(ROOT, "plumb", f"{bench}.plumb")):
+        found["Plumb"] = [plumb]
     native_c = os.path.join(BIN, f"c_{bench}")
     if os.path.exists(native_c):
         found["C"] = [native_c]

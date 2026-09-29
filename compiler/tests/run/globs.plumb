@@ -1,0 +1,26 @@
+import files
+import path
+
+fn short(root: String, found: List<String>) -> List<String> {
+  return found.map(f => f.slice(from: root.length + 1, to: f.length))
+}
+
+fn main() throws {
+  let root = "/tmp/plumb-glob-test"
+  try files.delete_all(root)
+  for f in ["src/a.plumb", "src/b.txt", "src/net/tcp.plumb", "src/net/deep/x.plumb", "logs/2026-01.log", "logs/2026-02.gz", "logs/2025-12.log"] {
+    let p = path.join(root, f)
+    try files.make_dir(path.parent(p))
+    try files.write(p, "")
+  }
+  print("${short(root, found: try files.walk(root))}")
+  print("${short(root, found: try files.glob("${root}/src/**/*.plumb"))}")
+  print("${short(root, found: try files.glob("${root}/logs/2026-*.{log,gz}"))}")
+  print("${path.matches("a/b/c.txt", pattern: "**/*.txt")} ${path.matches("a/c.txt", pattern: "*.txt")} ${path.matches("b.md", pattern: "[a-c].{md,txt}")}")
+  try files.write("${root}/sized.txt", "12345")
+  let info = try files.info("${root}/sized.txt")
+  let dir = try files.info(root)
+  print("info: ${info.size} ${info.is_dir} ${dir.is_dir} ${info.modified > 1700000000}")
+  try files.delete_all(root)
+  print("gone: ${not files.exists(root)}")
+}

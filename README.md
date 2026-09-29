@@ -1,8 +1,11 @@
-# lang
+# Plumb
 
 A programming language for code that **AI agents write and people review**:
 CLI tools, scripts and backend services. It compiles to native programs that
 run about as fast as Go.
+
+(Named after a plumb line: code that reads straight down, with nothing
+hidden. The command is `plumb`, files end in `.plumb`.)
 
 ```
 import db
@@ -44,7 +47,7 @@ fn main() throws {
 }
 ```
 
-`lang build notes.lang` gives one native binary. It uses all cores, and every
+`plumb build notes.plumb` gives one native binary. It uses all cores, and every
 request runs in its own lightweight task.
 
 ## Why another language
@@ -139,11 +142,11 @@ The full reference, generated from the sources, is in
 ## Packages
 
 A package is a git repository (or a directory inside one), pinned by commit
-in `lang.lock`:
+in `plumb.lock`:
 
 ```
-lang new shop && cd shop
-lang add postgres https://github.com/semenov/beautiful-lang --path packages/postgres
+plumb new shop && cd shop
+plumb add postgres https://github.com/semenov/plumb --path packages/postgres
 ```
 
 This repository has several, all written in the language itself:
@@ -171,16 +174,16 @@ The compiler is written in Rust and produces C, which the system's C
 compiler turns into a native program.
 
 ```
-cd compiler && cargo build --release      # the `lang` binary: target/release/lang
+cd compiler && cargo build --release      # the `Plumb` binary: target/release/plumb
 
-lang run app.lang [args]     # compile and run
-lang build app.lang -o app   # an optimized binary
-lang build --static app.lang # Linux: one file with no library dependencies
-lang test app.lang           # run the `test` blocks
-lang check app.lang          # only check for errors
-lang fmt                     # lay out every .lang file the standard way
-lang run --debug app.lang    # with memory checking and a leak count
-lang new / add / fetch / update   # projects and packages
+plumb run app.plumb [args]     # compile and run
+plumb build app.plumb -o app   # an optimized binary
+plumb build --static app.plumb # Linux: one file with no library dependencies
+plumb test app.plumb           # run the `test` blocks
+plumb check app.plumb          # only check for errors
+plumb fmt                     # lay out every .plumb file the standard way
+plumb run --debug app.plumb    # with memory checking and a leak count
+plumb new / add / fetch / update   # projects and packages
 ```
 
 It needs `cc` (clang or gcc), plus libcurl, SQLite and zlib for the modules
@@ -193,7 +196,7 @@ running the tests on Linux.
 Programs compile to C and then to native code. Memory is managed by
 reference counting that the compiler inserts, with no garbage collector.
 
-| benchmark | lang | Go |
+| benchmark | Plumb | Go |
 |---|---|---|
 | records (allocation-heavy) | 0.43 s, 156 MB | 0.55 s, 396 MB |
 | binary trees | 2.76 s, 130 MB | 4.70 s, 137 MB |
@@ -208,7 +211,7 @@ reference counting that the compiler inserts, with no garbage collector.
 | spawning 200k small tasks | 0.06 s, 7 MB | 0.06 s, 14 MB |
 | HTTP file server, 2 KB files | 75-93k req/s, 7 MB | 55k req/s, 27 MB |
 
-(`benchmarks/`: `ONLY=Go,Lang python3 run.py`; median of 3 runs on an
+(`benchmarks/`: `ONLY=Go,Plumb python3 run.py`; median of 3 runs on an
 Apple M-series laptop, 2026-09-29. Where we lose, `TODO.md` says why.)
 
 ## How tasks run

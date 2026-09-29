@@ -19,11 +19,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       files, concurrency); report memory (peak RSS) next to time / req/s.
       Where we lose to Go, find out why (profile) and fix it or write down
       the reason
-  - [x] json: Lang 1.64 s / 349 MB vs Go 2.38 s / 283 MB (was 876 MB: the
+  - [x] json: Plumb 1.64 s / 349 MB vs Go 2.38 s / 283 MB (was 876 MB: the
         parser's containers grew by copying inside the arena, and big buffers
         freed to macOS malloc stay resident; now a scratch stack and the
         runtime's allocator for big buffers)
-  - [x] benchmarks against Go (benchmarks/, `ONLY=Go,Lang python3 run.py`):
+  - [x] benchmarks against Go (benchmarks/, `ONLY=Go,Plumb python3 run.py`):
         maps, csv, nbody, lines, channels, spawn added. Fixed from them:
         nbody 4x slower (copy-on-write check at every list store: now a
         dataflow pass knows which lists are unique), spawn 5x slower and
@@ -52,7 +52,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         gave the memory back either way in that test)
   - [x] lt_dyn is 80 bytes per JSON node: a union would halve it
 - [x] **A realistic backend vs Go** (Vlad, 2026-09-29): benchmarks/backend
-      (notes service, SQLite, JSON, auth, logs): Lang 28k req/s, 91 us CPU
+      (notes service, SQLite, JSON, auth, logs): Plumb 28k req/s, 91 us CPU
       per request, 10 MB vs Go 17k req/s, 348 us, 45 MB. Found and fixed: a
       query with `limit ?` failed (column names freed by SQLite's re-prepare);
       `last_id` racy with shared connections (now `conn.insert`)
@@ -77,10 +77,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [x] **Postgres package** (`packages/postgres`, not stdlib): wire protocol v3
       over `net`, SCRAM-SHA-256 auth, parameters, typed rows, transactions,
-      TLS. Installable with `lang add`.
+      TLS. Installable with `plumb add`.
 - [x] **Redis package** (`packages/redis`): RESP over `net`, commands,
       pipelining, pub/sub.
-  - [x] `lang add` of a package in a subdirectory of a repository (so both
+  - [x] `plumb add` of a package in a subdirectory of a repository (so both
         can live in this repo under `packages/`), and local packages
   - [x] a way for packages to take query parameters without `db`'s
         compiler magic (the `sql` module)
@@ -164,9 +164,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [ ] `expect` only directly inside `test`, not in helpers
     - [ ] slugs: no transliteration, no trimming of given characters
     - [ ] jwt errors untyped (expired vs forged)
-    - [ ] `lang add --path` says "pinned in lang.lock" but writes none;
-          `lang fmt --check` exits 0 on a file that doesn't parse
-    - [ ] docs: cli `T?` without `= none`; `lang doc String` shows
+    - [ ] `plumb add --path` says "pinned in plumb.lock" but writes none;
+          `plumb fmt --check` exits 0 on a file that doesn't parse
+    - [ ] docs: cli `T?` without `= none`; `plumb doc String` shows
           `__find`; db sharing; route order; sql `none`
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
@@ -210,16 +210,16 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] **Top npm packages by downloads**: reviewed in research/npm-top-packages.md;
       the resulting work is the next section
 
-- [x] **The `lang` CLI teaches the language**: tell an agent that knows
-      nothing about it "run `lang help`", and it can learn the syntax and
+- [x] **The `Plumb` CLI teaches the language**: tell an agent that knows
+      nothing about it "run `plumb help`", and it can learn the syntax and
       look up any stdlib module or function from the command line
-      (`lang guide`, `lang doc http`, `lang doc http.Router`), built from the
+      (`plumb guide`, `plumb doc http`, `plumb doc http.Router`), built from the
       sources so it's never out of date
 - [ ] **Designed but never built** (DESIGN.md promises them):
-  - [x] `lang fmt`: indentation and whitespace (spacing inside lines: not yet)
+  - [x] `plumb fmt`: indentation and whitespace (spacing inside lines: not yet)
   - [x] `Decimal` for money
   - [x] `time.timeout(duration, work)`
-  - [x] `lang doc`
+  - [x] `plumb doc`
   - [x] a `Date` type (calendar dates apart from instants)
   - [x] decode key naming: loose matching when decoding, `json.encode_camel`
   - [ ] test doubles: a fixed clock, calling handlers without a network (done
@@ -230,7 +230,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       queues. Measure with benchmarks/http/cpu.sh (45 us/request now)
 - [ ] From the newcomer-agent test (all 3 programs worked first try):
   - [x] crash on `spawn` inside a lambda -> a clear error
-  - [x] `lang run` passes signals to the program (it execs it)
+  - [x] `plumb run` passes signals to the program (it execs it)
   - [x] guide: maps, shared state in handlers, tests with a body, task lists
   - [x] one "this call can fail" per chain, not per call (with the fixed line)
   - [x] String: character tests (is_letter of any script, is_digit, ...), index_of, trim_start/end
@@ -239,20 +239,20 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       notes server with SQLite and WebSockets, a `tidy` tool with
       subcommands and archives: all worked, 3 compile errors total):
   - [x] `cli.decode_from<T>([])` crashed (field defaults weren't generated)
-  - [x] `lang doc files` stopped halfway (a `{` inside a string), and so did STDLIB.md
+  - [x] `plumb doc files` stopped halfway (a `{` inside a string), and so did STDLIB.md
   - [x] `-> Never` couldn't be written though the docs show it
   - [x] docs: `?.` in the websocket example, Decimal in SQL, no top-level
         constants, the file operations, Ctrl-C, broadcasting to listeners
   - [x] `Channel.try_send` (a slow listener must not stall a broadcast)
   - [x] errors in the source's words: `the option --count: ...`,
         `csv: line 4, column quantity: ...`, `db: row 2, column age: ...`
-  - [x] `--help` shows defaults; `lang run` shows the program's name, not a temp file
+  - [x] `--help` shows defaults; `plumb run` shows the program's name, not a temp file
   - [x] `files.info`: size, permissions, modification time
   - [x] `term.table` aligns number columns to the right
   - [x] a server started with SIGINT ignored (`&` in a script) keeps it
         ignored, and gives back the program's own Ctrl-C handler when it stops
   - [x] `archive`: streaming tar writing (`create_tar`, `add_file`, `add_dir`); real modes and times
-  - [x] `lang test`: log lines show only under a failing test
+  - [x] `plumb test`: log lines show only under a failing test
   - [x] `--help`: field comments as option descriptions
   - [x] `--debug` after `process.exit`: no false leak count
 
@@ -340,20 +340,20 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       representation: (pointer, length, owner) values or views into the parent
 - [x] Performance: HTTP file server, small files: 93k req/s vs Go's 100k
       (README; Vlad asked again 2026-09-29). Re-measured (100 files of 2 KB,
-      64 connections): lang 75-93k req/s, 7 MB; Go FileServer 55k, 27 MB
+      64 connections): Plumb 75-93k req/s, 7 MB; Go FileServer 55k, 27 MB
 
 ## Done
 
 - [x] Language design from first principles (DESIGN.md)
 - [x] Fast compiler producing efficient code (Rust → C → cc; Go-level speed)
-- [x] Modules (one file = one module), packages (`lang add`, git + lock file)
+- [x] Modules (one file = one module), packages (`plumb add`, git + lock file)
 - [x] Stdlib: files, process, env, log, random, json, cli, http, time
 - [x] Stdlib additions: TCP/UDP (`net`), crypto, encoding, db (SQLite),
       regex, csv, url, math
 - [x] Public GitHub repo, milestone commits pushed
 - [x] `path`, `url`, `zlib`, client TLS (`net.connect_tls`)
 - [x] `xml`
-- [x] `lang build --static` (Linux; macOS explains why not needed)
+- [x] `plumb build --static` (Linux; macOS explains why not needed)
 - [x] Linux support tested in Docker (tools/linux)
 - [x] Streams: `io.Stream` for files, connections, stdin/stdout, programs;
       reading stdin; binary chunks; `process.start`; `io.copy`

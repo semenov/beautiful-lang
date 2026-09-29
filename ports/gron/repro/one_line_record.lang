@@ -1,9 +1,0 @@
-// `lang guide` (section Errors) shows `type NotFound implements Error { id: Int  fn message(self) ... }`
-// on one line, but fields separated by two spaces on one line do not parse.
-// (`lang guide errors` now shows it on several lines; the main guide
-// doesn't.) The same goes for `enum K { A  B }`.
-type K { a: String  b: Int }
-
-fn main() {
-  print(K(a: "x", b: 1).a)
-}

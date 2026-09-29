@@ -1,4 +1,4 @@
-// `lang guide` and `lang doc`: the language and its libraries, explained from
+// `plumb guide` and `plumb doc`: the language and its libraries, explained from
 // the command line. The guide is AGENTS.md, built into the compiler; the
 // library reference is read from the modules' sources (doc comments and
 // public declarations), so it is always the code that's running.

@@ -13,12 +13,12 @@ short version: what's in flight, what waits for Vlad, and what to do next.
 - After each milestone:
   - run `compiler/tests/run.sh`;
   - run the Linux suite:
-    `docker run --rm -v "$PWD":/src -w /src lang-linux sh -c 'cd compiler && CARGO_TARGET_DIR=target-linux cargo build --release && LANG_BIN=/src/compiler/target-linux/release/lang tests/run.sh'`;
+    `docker run --rm -v "$PWD":/src -w /src lang-linux sh -c 'cd compiler && CARGO_TARGET_DIR=target-linux cargo build --release && PLUMB_BIN=/src/compiler/target-linux/release/plumb tests/run.sh'`;
   - run `python3 tools/stdlib_doc.py` when the stdlib changed;
   - commit and push.
 - Every commit ends with the `Co-Authored-By` and `Claude-Session` lines
   (see `git log`).
-- `lang fmt` must pass: the test suite checks it.
+- `plumb fmt` must pass: the test suite checks it.
 
 ## Next, in this order
 
@@ -27,9 +27,9 @@ State at the end of 2026-09-29 (all pushed unless noted):
   heap found inline from the thread register: 1.75x -> ~1.04x); top-level
   `let` built once; json numbers; Unicode; Vlad's four decisions
   (`to_string`, `json.encode_with`, `json.Number`, `?.`); gron's small
-  items; benchmarks vs Go with memory (`ONLY=Go,Lang python3
+  items; benchmarks vs Go with memory (`ONLY=Go,Plumb python3
   benchmarks/run.py`); scheduler rewrite (per-worker queues, runnext, one
-  wake per burst); realistic backend vs Go (benchmarks/backend: Lang wins);
+  wake per burst); realistic backend vs Go (benchmarks/backend: Plumb wins);
   HTTP server timeouts; cookie Expires; README scheduler section.
 - **The last commit (inline heap lookup) passed the macOS suite but the
   Linux suite wasn't run yet: run it first** (the Linux path uses

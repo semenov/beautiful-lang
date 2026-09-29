@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "lang"
+name = "plumb"
 version = "0.1.0"

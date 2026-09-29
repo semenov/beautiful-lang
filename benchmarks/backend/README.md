@@ -1,8 +1,8 @@
-# A backend like a real app's, in Lang and in Go
+# A backend like a real app's, in Plumb and in Go
 
 A small notes service: users, token login (HMAC), notes per user in SQLite
 (WAL), JSON in and out, validation, an auth check in every handler, and a
-log line per request. `lang/server.lang` (167 lines) and `go/main.go`
+log line per request. `plumb/server.plumb` (167 lines) and `go/main.go`
 (net/http, database/sql with mattn/go-sqlite3 (the same C SQLite),
 encoding/json, log/slog; 251 lines) have the same API.
 
@@ -15,14 +15,14 @@ and its peak memory.
 ## Results (Apple M-series, 2026-09-29, 64 connections, 10 s)
 
 ```
-lang: 28704 req/s, p50 2.045ms, p99 4.863ms, 0 failed of 287042; CPU 90.1 us per request; peak 10 MB
+Plumb: 28704 req/s, p50 2.045ms, p99 4.863ms, 0 failed of 287042; CPU 90.1 us per request; peak 10 MB
 go: 17126 req/s, p50 2.408ms, p99 21.983ms, 0 failed of 171263; CPU 343.6 us per request; peak 44 MB
 ```
 
 The load generator runs on the same machine, so requests per second are
 limited by it too; CPU per request and memory are the better comparison.
 
-## What this found in Lang
+## What this found in Plumb
 
 - **A bug:** a query with a bound `limit ?` failed with "the query result
   has no column". Column names were read before the first step, and SQLite
