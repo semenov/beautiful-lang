@@ -127,7 +127,9 @@ Tests: 29 `test` blocks over 8 files, all passing (`lang test <file>.lang`).
 
 ### Compiler / runtime bugs
 
-- **A stack overflow is a silent crash** (major): SIGBUS/SIGSEGV, exit
+- *Fixed:* a stack overflow is now a panic ("stack overflow: too many
+  nested calls"), and a task's stack is 8 MB like the main thread's.
+  Was: **A stack overflow is a silent crash** (major): SIGBUS/SIGSEGV, exit
   138/139, no message. **And a program that uses http gets a much smaller
   stack**: without http, 100000 simple frames are fine; with an http call
   anywhere, even one never run, it dies below that. gron's recursive JSON
@@ -140,7 +142,9 @@ Tests: 29 `test` blocks over 8 files, all passing (`lang test <file>.lang`).
 
 ### Performance
 
-- **Using http (or `spawn`, or `net`) anywhere slows the whole program
+- *Mostly fixed:* the allocator was the cause (system malloc with tasks);
+  now per-thread free lists: the repro went from 1.75x to 1.16x. Was:
+  **Using http (or `spawn`, or `net`) anywhere slows the whole program
   1.7-2.4x** (major). The same gron with the URL branch removed: 53 MB in
   3.3 s instead of 5.9 s, `-v` in 5.1 s instead of 11.6 s. Presumably
   thread-safe reference counting or allocation for the whole program. No

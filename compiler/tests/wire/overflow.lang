@@ -1,0 +1,13 @@
+// Deep recursion on the main thread (no tasks in this program).
+import process
+
+fn depth(n: Int) -> Int {
+  if n == 0 {
+    return 0
+  }
+  return 1 + depth(n - 1)
+}
+
+fn main() throws {
+  print("${depth(try process.args()[0].to_int())}")
+}

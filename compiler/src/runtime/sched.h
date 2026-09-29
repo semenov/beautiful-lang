@@ -140,8 +140,14 @@ typedef struct lt_task {
     char result[] __attribute__((aligned(16)));
 } lt_task;
 
-#define LT_STACK_SIZE ((size_t)1 << 20)
+// A task's stack: 8 MB, like a program's main thread. Only the pages a task
+// touches take memory.
+#define LT_STACK_SIZE ((size_t)8 << 20)
 #define LT_GUARD ((size_t)16384)
+// A stack back in the pool gives its deep pages back to the system if the
+// task went deeper than this (a marker word there was overwritten).
+#define LT_STACK_KEEP ((size_t)256 << 10)
+#define LT_STACK_MARK 0x5ac4ed5ac4ed5ac4ULL
 
 static pthread_mutex_t lt_q_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t lt_q_cv = PTHREAD_COND_INITIALIZER;
@@ -167,23 +173,6 @@ LT_INLINE void lt_to_task(lt_task *t) {
     lt_ctx_switch(&lt_worker_ctx, &t->ctx);
 }
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define LT_ASAN 1
-void __asan_unpoison_memory_region(void const volatile *addr, size_t size);
-#endif
-#endif
-
-#if defined(__has_feature)
-#if __has_feature(thread_sanitizer)
-#define LT_TSAN 1
-void *__tsan_get_current_fiber(void);
-void *__tsan_create_fiber(unsigned flags);
-void __tsan_destroy_fiber(void *fiber);
-void __tsan_switch_to_fiber(void *fiber, unsigned flags);
-#endif
-#endif
-
 static lt_spin lt_stack_lock;
 static char *lt_stack_pool[64];
 static int lt_stack_count;
@@ -200,12 +189,22 @@ static char *lt_stack_get(void) {
         return s;
     }
     lt_spin_unlock(&lt_stack_lock);
-    char *s = (char *)mmap(NULL, LT_STACK_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    int flags = MAP_PRIVATE | MAP_ANON;
+#ifdef MAP_NORESERVE
+    flags |= MAP_NORESERVE;
+#endif
+    char *s = (char *)mmap(NULL, LT_STACK_SIZE, PROT_READ | PROT_WRITE, flags, -1, 0);
     if (s == MAP_FAILED) lt_oom();
     mprotect(s, LT_GUARD, PROT_NONE); // overflow hits the guard page
+    *(uint64_t *)(s + LT_STACK_SIZE - LT_STACK_KEEP) = LT_STACK_MARK;
     return s;
 }
 static void lt_stack_put(char *s) {
+    uint64_t *mark = (uint64_t *)(s + LT_STACK_SIZE - LT_STACK_KEEP);
+    if (*mark != LT_STACK_MARK) {
+        madvise(s + LT_GUARD, LT_STACK_SIZE - LT_STACK_KEEP - LT_GUARD, MADV_DONTNEED);
+        *mark = LT_STACK_MARK;
+    }
     lt_spin_lock(&lt_stack_lock);
     if (lt_stack_count < 64) {
         lt_stack_pool[lt_stack_count++] = s;
@@ -217,6 +216,12 @@ static void lt_stack_put(char *s) {
 }
 
 __attribute__((noinline)) static lt_task *lt_current(void) { return lt_cur; }
+
+// For the fault handler: is `addr` in the guard page of the running task?
+static bool lt_task_overflowed(char *addr) {
+    lt_task *t = lt_cur;
+    return t && t->stack && addr >= t->stack - LT_PAGE && addr < t->stack + LT_GUARD + LT_PAGE;
+}
 
 static void lt_task_free(lt_task *t) {
     if (!t->error.obj && t->state == LT_DONE && t->drop_result) t->drop_result(t->result);
@@ -459,6 +464,7 @@ static void lt_worker_loop(void) {
 
 static void *lt_worker_thread(void *arg) {
     (void)arg;
+    lt_alt_stack();
     lt_worker_loop();
     return NULL;
 }
@@ -1062,6 +1068,7 @@ static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task
     m->rc = 2; // returned to the caller + running
     lt_main_task = m;
     lt_panic_hook = lt_task_panic_hook;
+    lt_overflow_hook = lt_task_overflowed;
     if (pipe(lt_interrupt_pipe) == 0) {
         pthread_t it;
         pthread_create(&it, NULL, lt_interrupt_thread, NULL);

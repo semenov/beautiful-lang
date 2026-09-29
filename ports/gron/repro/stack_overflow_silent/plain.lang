@@ -1,4 +1,4 @@
-// BUG: a stack overflow kills the program with SIGBUS/SIGSEGV (exit 138/139)
+// FIXED (now a "stack overflow" panic; tasks get 8 MB stacks). Was: a stack overflow kills the program with SIGBUS/SIGSEGV (exit 138/139)
 // and no message at all. And a program that contains an http call gets a
 // much smaller stack: plain.lang handles depth 100000, with_http.lang
 // dies between 10000 and 100000 (gron's recursive JSON reader died at

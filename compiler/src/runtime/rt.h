@@ -19,6 +19,21 @@
 #include <math.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define LT_ASAN 1
+void __asan_unpoison_memory_region(void const volatile *addr, size_t size);
+#endif
+#if __has_feature(thread_sanitizer)
+#define LT_TSAN 1
+void *__tsan_get_current_fiber(void);
+void *__tsan_create_fiber(unsigned flags);
+void __tsan_destroy_fiber(void *fiber);
+void __tsan_switch_to_fiber(void *fiber, unsigned flags);
+#endif
+#endif
 
 #define LT_INLINE static inline __attribute__((always_inline))
 #define LT_NOINLINE static __attribute__((noinline))
@@ -1257,7 +1272,71 @@ static void lt_signals_restore(struct sigaction old[2]) {
     sigaction(SIGTERM, &old[1], NULL);
 }
 
+// ---------------------------------------------------------------- stack overflow
+// A stack overflow runs into a guard page and faults. The handler runs on
+// its own small stack (the thread's stack is full) and reports it.
+
+static char *lt_main_stack_lo; // the lowest address of the main thread's stack
+static bool (*lt_overflow_hook)(char *addr); // with tasks: in a task's guard?
+
+static void lt_write_err(const char *s) {
+    ssize_t r = write(2, s, strlen(s));
+    (void)r;
+}
+
+static void lt_on_fault(int sig, siginfo_t *info, void *uc) {
+    (void)uc;
+    char *addr = (char *)info->si_addr;
+    static int reported;
+    if (__atomic_exchange_n(&reported, 1, __ATOMIC_ACQ_REL)) {
+        for (;;) pause(); // another thread is reporting its fault and exiting
+    }
+    bool overflow = lt_overflow_hook && lt_overflow_hook(addr);
+    // the main thread's stack: the fault is just below its lowest address
+    if (!overflow && lt_main_stack_lo && addr < lt_main_stack_lo + 65536 && addr >= lt_main_stack_lo - ((size_t)4 << 20))
+        overflow = true;
+    if (ftrylockfile(stdout) == 0) {
+        fflush(stdout);
+        funlockfile(stdout);
+    }
+    if (overflow) {
+        lt_write_err("panic: stack overflow: too many nested calls (most likely a recursion that doesn't stop)\n");
+        _exit(101);
+    }
+    lt_write_err(sig == SIGBUS ? "panic: crashed (bus error)\n" : "panic: crashed (segmentation fault)\n");
+    signal(sig, SIG_DFL); // returning faults again, now with the default action
+}
+
+// Every thread that runs the program's code needs one.
+static void lt_alt_stack(void) {
+#if !defined(LT_ASAN) && !defined(LT_TSAN)
+    stack_t ss;
+    ss.ss_size = 65536;
+    ss.ss_sp = mmap(NULL, ss.ss_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    ss.ss_flags = 0;
+    if (ss.ss_sp != MAP_FAILED) sigaltstack(&ss, NULL);
+#endif
+}
+
+static void lt_catch_overflow(void) {
+#if !defined(LT_ASAN) && !defined(LT_TSAN)
+    struct rlimit rl;
+    char here;
+    if (getrlimit(RLIMIT_STACK, &rl) == 0 && rl.rlim_cur != RLIM_INFINITY && rl.rlim_cur < ((rlim_t)1 << 40))
+        lt_main_stack_lo = &here - rl.rlim_cur;
+    lt_alt_stack();
+    struct sigaction sa;
+    memset(&sa, 0, sizeof sa);
+    sa.sa_sigaction = lt_on_fault;
+    sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+#endif
+}
+
 static void lt_init(void) {
+    lt_catch_overflow();
     // started by `lang run`: remove the temporary executable (still running)
     const char *self = getenv("LANG_RUN_EXE");
     if (self) {

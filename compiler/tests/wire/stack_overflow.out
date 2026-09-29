@@ -1,0 +1,8 @@
+100000
+exit 0
+panic: stack overflow: too many nested calls (most likely a recursion that doesn't stop)
+exit 101
+100000
+exit 0
+panic: stack overflow: too many nested calls (most likely a recursion that doesn't stop)
+exit 101

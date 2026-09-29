@@ -34,9 +34,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         Fixed from it: list capacity bug, O(n) `String.slice`, slow
         `io.stdout()`, Float text, or-patterns, list sort keys.
         Still open (ports/gron/GAPS.md, repros in ports/gron/repro):
-    - [ ] **stack overflow kills the program silently** (SIGBUS/SIGSEGV, no
+    - [x] **stack overflow kills the program silently** (SIGBUS/SIGSEGV, no
           message); programs with http/spawn get a much smaller stack (task
           stacks): give a clear "stack overflow" panic, and bigger stacks
+          (done: a fault handler on its own stack; tasks get 8 MB)
+    - [ ] spawn costs ~5.5 us per task (Go: ~0.3 us): calloc, stack pool
+          spin lock, the global run queue
     - [ ] **using http, spawn or net anywhere makes the whole program 1.7-2.4x
           slower** (the multi-threaded runtime: atomic refcounts?): measure,
           pay only where values are shared
