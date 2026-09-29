@@ -1379,8 +1379,14 @@ pub type Url {
   password: String? = none
 }
 
-// "https://example.com:8080/a/b?x=1#top"
+// "https://example.com:8080/a/b?x=1#top". Relative references parse too,
+// with an empty scheme and host: "/a/b?x=1", "b/c", "//cdn.example/x".
 pub fn parse(text: String) throws -> Url
+
+// A reference resolved against the page it's on, as browsers do (RFC 3986):
+// resolve("https://a.example/docs/x.html?q=1", reference: "../img/b.png")
+// is "https://a.example/img/b.png".
+pub fn resolve(base: String, reference: String) -> String
 
 // Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"
 pub fn encode(text: String) -> String
@@ -1594,6 +1600,9 @@ builtin type String {
   // none if it isn't there. From a position: s.slice(from: i, to: s.length).index_of(x)
   fn index_of(self, part: String) -> Int?
   fn __find(self, part: String, from: Int) -> Int
+  // The position of the last `part`; none if it isn't there.
+  fn last_index_of(self, part: String) -> Int?
+  fn __rfind(self, part: String) -> Int
   fn trim_start(self) -> String
   fn trim_end(self) -> String
   // Every character is 0-9 (and there is at least one).

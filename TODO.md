@@ -64,7 +64,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] stdlib: seeded random (`random.seeded`), wall-clock ms
           (`time.unix_millis`), env listing (`env.all`), Duration
           `divided_by` / `is_shorter_than`, `Int.wrapping_*`
-    - [ ] stdlib: relative `url.parse`, JSON field renames / omit-empty
+    - [x] stdlib: relative `url.parse`, `url.resolve`, `String.last_index_of`
+    - [ ] JSON field renames / omit-empty: needs field attributes, to raise with Vlad
     - [x] docs: `http.bytes` example, query/path decoding, middleware order
     - [x] tests over real connections (compiler/tests/wire, curl)
 

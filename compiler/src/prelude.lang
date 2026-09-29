@@ -88,6 +88,15 @@ builtin type String {
     return i
   }
   fn __find(self, part: String, from: Int) -> Int
+  // The position of the last `part`; none if it isn't there.
+  fn last_index_of(self, part: String) -> Int? {
+    let i = self.__rfind(part)
+    if i < 0 {
+      return none
+    }
+    return i
+  }
+  fn __rfind(self, part: String) -> Int
   fn trim_start(self) -> String
   fn trim_end(self) -> String
   // Every character is 0-9 (and there is at least one).

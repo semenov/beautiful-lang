@@ -1445,6 +1445,21 @@ static int64_t lt_text_find(lt_text *t, lt_text *part, int64_t from) {
     return n;
 }
 
+// the character index of the last `part`, or -1
+static int64_t lt_text_rfind(lt_text *t, lt_text *part) {
+    if (part->len > t->len) return -1;
+    for (int64_t i = t->len - part->len; i >= 0; i--) {
+        if (memcmp(t->data + i, part->data, (size_t)part->len) == 0) {
+            if (lt_text_ascii(t)) return i;
+            int64_t n = 0;
+            for (int64_t j = 0; j < i; j++)
+                if (((unsigned char)t->data[j] & 0xC0) != 0x80) n++;
+            return n;
+        }
+    }
+    return -1;
+}
+
 static lt_text *lt_text_trim_side(lt_text *t, bool start, bool end) {
     int64_t a = 0, b = t->len;
     if (start)

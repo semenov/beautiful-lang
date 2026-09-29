@@ -1,0 +1,20 @@
+[] [] /a/b {"x": "1"} top
+cdn.example 8080 /x
+g -> http://a/b/c/g
+./g -> http://a/b/c/g
+g/ -> http://a/b/c/g/
+/g -> http://a/g
+//g -> http://g
+?y -> http://a/b/c/d;p?y
+g?y -> http://a/b/c/g?y
+#s -> http://a/b/c/d;p?q#s
+g#s -> http://a/b/c/g#s
+.. -> http://a/b/
+../ -> http://a/b/
+../g -> http://a/b/g
+../.. -> http://a/
+../../g -> http://a/g
+../../../g -> http://a/g
+g/./h/../i -> http://a/b/c/g/i
+https://x.org/y -> https://x.org/y
+ -> http://a/b/c/d;p?q

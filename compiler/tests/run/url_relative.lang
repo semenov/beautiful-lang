@@ -1,0 +1,12 @@
+// Relative URLs: parsing them, and resolving them against a base (the RFC 3986 examples).
+import url
+fn main() throws {
+  let r = try url.parse("/a/b?x=1#top")
+  print("[${r.scheme}] [${r.host}] ${r.path} ${r.query} ${r.fragment ?? "-"}")
+  let c = try url.parse("//cdn.example:8080/x")
+  print("${c.host} ${c.port ?? 0} ${c.path}")
+  let base = "http://a/b/c/d;p?q"
+  for ref in ["g", "./g", "g/", "/g", "//g", "?y", "g?y", "#s", "g#s", "..", "../", "../g", "../..", "../../g", "../../../g", "g/./h/../i", "https://x.org/y", ""] {
+    print("${ref} -> ${url.resolve(base, reference: ref)}")
+  }
+}

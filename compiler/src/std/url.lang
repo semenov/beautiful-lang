@@ -12,14 +12,21 @@ pub type Url {
   password: String? = none
 }
 
-// "https://example.com:8080/a/b?x=1#top"
+// "https://example.com:8080/a/b?x=1#top". Relative references parse too,
+// with an empty scheme and host: "/a/b?x=1", "b/c", "//cdn.example/x".
 pub fn parse(text: String) throws -> Url {
   let scheme_end = text.split("://")
-  if scheme_end.length < 2 {
-    throw Failure(message: "url: \"${text}\" has no scheme (like https://)")
+  var scheme = ""
+  var rest = text
+  var has_authority = false
+  if scheme_end.length >= 2 and is_scheme(scheme_end[0]) {
+    scheme = scheme_end[0].lower()
+    rest = scheme_end.drop(1).join("://")
+    has_authority = true
+  } else if text.starts_with("//") {
+    rest = text.slice(from: 2, to: text.length)
+    has_authority = true
   }
-  let scheme = scheme_end[0].lower()
-  var rest = scheme_end.drop(1).join("://")
   var fragment: String? = none
   let hash_parts = rest.split("#")
   if hash_parts.length > 1 {
@@ -37,6 +44,9 @@ pub fn parse(text: String) throws -> Url {
       query[try decode(kv[0])] = try decode(kv.drop(1).join("="))
     }
     rest = q_parts[0]
+  }
+  if not has_authority {
+    return Url(scheme: "", host: "", port: none, path: rest, query: query, fragment: fragment)
   }
   let slash = rest.split("/")
   var authority = slash[0]
@@ -62,6 +72,80 @@ pub fn parse(text: String) throws -> Url {
     }
   }
   return Url(scheme: scheme, host: host.lower(), port: port, path: full_path, query: query, fragment: fragment, user: user, password: password)
+}
+
+fn is_scheme(s: String) -> Bool {
+  if s.is_empty() or not s.slice(from: 0, to: 1).is_letter() {
+    return false
+  }
+  return s.chars().all(c => c.is_letter() or c.is_digit() or c == "+" or c == "-" or c == ".")
+}
+
+// A reference resolved against the page it's on, as browsers do (RFC 3986):
+// resolve("https://a.example/docs/x.html?q=1", reference: "../img/b.png")
+// is "https://a.example/img/b.png".
+pub fn resolve(base: String, reference: String) -> String {
+  let ref_scheme = reference.split("://")
+  if ref_scheme.length >= 2 and is_scheme(ref_scheme[0]) {
+    return reference
+  }
+  let parts = base.split("://")
+  if parts.length < 2 {
+    return reference
+  }
+  let scheme = parts[0]
+  let after = parts.drop(1).join("://")
+  let slash = after.index_of("/") ?? after.length
+  let q = after.index_of("?") ?? after.length
+  let h = after.index_of("#") ?? after.length
+  let auth_end = min(slash, min(q, h))
+  let origin = "${scheme}://${after.slice(from: 0, to: auth_end)}"
+  let path_end = min(q, h)
+  let path = if auth_end < path_end { after.slice(from: auth_end, to: path_end) } else { "/" }
+  let no_fragment = after.slice(from: 0, to: h)
+  if reference.is_empty() {
+    return "${scheme}://${no_fragment}"
+  }
+  if reference.starts_with("//") {
+    return "${scheme}:${reference}"
+  }
+  if reference.starts_with("#") {
+    return "${scheme}://${no_fragment}${reference}"
+  }
+  if reference.starts_with("?") {
+    return "${origin}${path}${reference}"
+  }
+  // the reference's path, and what follows it
+  let rq = reference.index_of("?") ?? reference.length
+  let rh = reference.index_of("#") ?? reference.length
+  let ref_path = reference.slice(from: 0, to: min(rq, rh))
+  let tail = reference.slice(from: min(rq, rh), to: reference.length)
+  let merged = if ref_path.starts_with("/") { ref_path } else { "${path.slice(from: 0, to: (path.last_index_of("/") ?? -1) + 1)}${ref_path}" }
+  return "${origin}${remove_dots(merged)}${tail}"
+}
+
+// "/a/b/../c/./d" -> "/a/c/d"
+fn remove_dots(path: String) -> String {
+  var out: List<String> = []
+  let segs = path.split("/")
+  for s in segs.indexed() {
+    if s.value == "." {
+      if s.index == segs.length - 1 {
+        out.append("")
+      }
+    } else if s.value == ".." {
+      if out.length > 1 {
+        out = out.take(out.length - 1)
+      }
+      if s.index == segs.length - 1 {
+        out.append("")
+      }
+    } else {
+      out.append(s.value)
+    }
+  }
+  let joined = out.join("/")
+  return if joined.starts_with("/") { joined } else { "/${joined}" }
 }
 
 // Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"

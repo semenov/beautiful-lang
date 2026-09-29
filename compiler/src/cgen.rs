@@ -2776,6 +2776,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "String.upper" => format!("lt_text_upper({})", a[0]),
             "String.trim" => format!("lt_text_trim({})", a[0]),
             "String.__find" => format!("lt_text_find({}, {}, {})", a[0], a[1], a[2]),
+            "String.__rfind" => format!("lt_text_rfind({}, {})", a[0], a[1]),
             "String.trim_start" => format!("lt_text_trim_side({}, true, false)", a[0]),
             "String.trim_end" => format!("lt_text_trim_side({}, false, true)", a[0]),
             "String.is_digit" => format!("lt_text_all({}, 0)", a[0]),
