@@ -1,0 +1,49 @@
+// Conduit: the RealWorld example backend (https://realworld-docs.netlify.app).
+//
+//   lang run main.lang -- --port 3000 --db conduit.db
+//
+// The JWT secret comes from CONDUIT_SECRET; without it, a random one is
+// made at start (tokens then don't survive a restart).
+
+import api
+import crypto
+import db
+import cli
+import env
+import http
+import log
+import schema
+import users
+
+type Options {
+  // the port to listen on
+  port: Int = 3000
+  // the SQLite database file (":memory:" for one that lives only while the server runs)
+  db: String = "conduit.db"
+}
+
+fn routes(app: api.App) -> http.Router {
+  var router = http.Router()
+  router.use(http.log_requests())
+  router.use(http.cors(["*"]))
+  router.use(api.errors())
+
+  router.post("/api/users", req => try users.register(req, app))
+  router.post("/api/users/login", req => try users.login(req, app))
+  router.get("/api/user", req => try users.current(req, app))
+  router.put("/api/user", req => try users.update(req, app))
+  return router
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>()
+  var secret = env.get("CONDUIT_SECRET") ?? ""
+  if secret.is_empty() {
+    log.warn("CONDUIT_SECRET is not set: using a random secret; tokens won't survive a restart")
+    secret = crypto.random_bytes(32).hex()
+  }
+  with conn = try db.open(opts.db) {
+    try schema.create(conn)
+    try http.serve(routes(api.App(conn: conn, secret: secret)), port: opts.port)
+  }
+}

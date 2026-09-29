@@ -1,0 +1,6 @@
+conduit
+*.db
+*.db-shm
+*.db-wal
+scratch/
+server.log

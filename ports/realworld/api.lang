@@ -1,0 +1,144 @@
+// What every handler shares: the app's state, the API's error answers, and
+// reading and writing the JSON bodies.
+
+import db
+import http
+import json
+import sql
+import time
+
+// The state every request needs.
+pub type App {
+  conn: db.Connection
+  // signs and checks the JWTs
+  secret: String
+}
+
+// An answer in the API's error shape instead of the normal one:
+// {"errors": {"body": ["can't be blank"]}}. Handlers throw it; the
+// `errors` middleware turns it into the response.
+pub type ApiError implements Error {
+  status: Int
+  field: String
+  problem: String
+
+  fn message(self) -> String {
+    return "${self.status}: ${self.field} ${self.problem}"
+  }
+}
+
+type ErrorBody {
+  errors: Map<String, List<String>>
+}
+
+pub fn blank(field: String) -> ApiError {
+  return ApiError(status: 422, field: field, problem: "can't be blank")
+}
+
+pub fn invalid(field: String, problem: String) -> ApiError {
+  return ApiError(status: 422, field: field, problem: problem)
+}
+
+pub fn taken(field: String) -> ApiError {
+  return ApiError(status: 409, field: field, problem: "has already been taken")
+}
+
+pub fn not_found(what: String) -> ApiError {
+  return ApiError(status: 404, field: what, problem: "not found")
+}
+
+pub fn forbidden(what: String) -> ApiError {
+  return ApiError(status: 403, field: what, problem: "forbidden")
+}
+
+pub fn unauthorized(problem: String) -> ApiError {
+  return ApiError(status: 401, field: "token", problem: problem)
+}
+
+// Middleware that answers an `ApiError` thrown by a handler.
+pub fn errors() -> http.Middleware {
+  return (req, next) => {
+    try next(req) catch err {
+      if err is ApiError {
+        reply(err.status, ErrorBody(errors: {err.field: [err.problem]}))
+      } else {
+        throw err
+      }
+    }
+  }
+}
+
+// A JSON answer with the API's camelCase keys (tag_list -> tagList).
+pub fn reply<T>(status: Int, value: T) -> http.Response {
+  return http.bytes(status, data: json.encode_camel(value).bytes(), content_type: "application/json; charset=utf-8")
+}
+
+// The body as a T; anything unreadable is a 422 naming what's wrong.
+pub fn decode<T>(req: http.Request) throws -> T {
+  let text = try req.text() catch err {
+    throw invalid("body", problem: "is not UTF-8")
+  }
+  return try json.decode<T>(text) catch err {
+    throw invalid("body", problem: err.message())
+  }
+}
+
+// The fields inside the body's wrapper object: {"user": {...}} with
+// wrapper "user". For updates, where a field left out (keep the value)
+// differs from a field set to null (clear it).
+pub fn fields(req: http.Request, wrapper: String) throws -> Map<String, json.Value> {
+  let text = try req.text() catch err {
+    throw invalid("body", problem: "is not UTF-8")
+  }
+  let doc = try json.parse(text) catch err {
+    throw invalid("body", problem: err.message())
+  }
+  if doc is json.Value.Object(top) {
+    if top[wrapper] is some(json.Value.Object(inner)) {
+      return inner
+    }
+  }
+  throw invalid(wrapper, problem: "is missing")
+}
+
+// A text field that may not be null or empty.
+pub fn required_text(value: json.Value, field: String) throws -> String {
+  if value is json.Value.String(text) {
+    if text.trim().is_empty() {
+      throw blank(field)
+    }
+    return text
+  }
+  if value is json.Value.Null {
+    throw blank(field)
+  }
+  throw invalid(field, problem: "must be text")
+}
+
+// A text field that may be cleared: null and "" both give none.
+pub fn optional_text(value: json.Value, field: String) throws -> String? {
+  if value is json.Value.String(text) {
+    return if text.is_empty() { none } else { text }
+  }
+  if value is json.Value.Null {
+    return none
+  }
+  throw invalid(field, problem: "must be text")
+}
+
+// An optional text as an SQL parameter: none is NULL. (A `String?` isn't
+// accepted in the parameter list by itself.)
+pub fn nullable(text: String?) -> sql.Value {
+  if text is some(t) {
+    return sql.Value.String(value: t)
+  }
+  return sql.Value.Null
+}
+
+// The current moment as the API writes it: "2026-09-29T12:00:00.123Z".
+pub fn now() -> String {
+  let millis = time.unix_millis()
+  let moment = time.from_unix(millis.div(1000))
+  let fraction = "${millis % 1000}".pad_start(3, fill: "0")
+  return "${moment.format("%Y-%m-%dT%H:%M:%S")}.${fraction}Z"
+}
