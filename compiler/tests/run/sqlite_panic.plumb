@@ -1,0 +1,40 @@
+// A panic in an HTTP handler inside a transaction rolls it back and gives
+// its connection back: the next request can use the database.
+
+import db
+import http
+import process
+import time
+
+type Count {
+  n: Int
+}
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table t (x int)", [])
+    var router = http.Router()
+    router.get("/boom", req => {
+      try conn.transaction(() => {
+        try conn.execute("insert into t values (1)", [])
+        let xs: List<Int> = []
+        print("${xs[5]}")
+      })
+      http.text(200, "no")
+    })
+    router.get("/ok", req => {
+      try conn.transaction(() => {
+        try conn.execute("insert into t values (2)", [])
+      })
+      let rows = try conn.query<Count>("select count(*) as n from t", [])
+      http.text(200, "rows ${rows[0].n}")
+    })
+    let server = spawn http.serve(router, port: 8391)
+    try time.sleep(time.millis(200))
+    let a = try http.get("http://127.0.0.1:8391/boom")
+    print("boom: ${a.status}")
+    let b = try http.get("http://127.0.0.1:8391/ok")
+    print("ok: ${b.status} ${b.text()}")
+    process.exit(0)
+  }
+}

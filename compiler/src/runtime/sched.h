@@ -139,6 +139,8 @@ typedef struct lt_task {
     void *panic_jmp;                       // a jmp_buf: a panic ends this request only
     struct lt_lock *held[8];               // locks held, released after such a panic
     int nheld;
+    void *txs[4];                          // db connections it has a transaction on (db.h)
+    int ntxs;
     int deep;                              // its stack was opened past the top part
     char result[] __attribute__((aligned(16)));
 } lt_task;
@@ -1430,6 +1432,15 @@ static void lt_spawn_detached(void (*run)(lt_task *), const void *arg, size_t ar
     lt_ready(t);
 }
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+void __asan_unpoison_memory_region(void const volatile *addr, size_t size);
+#endif
+#endif
+
+// set by db.h: rolls back the task's open transactions
+static void (*lt_tx_abort_hook)(lt_task *t);
+
 // A panic in a task that set panic_jmp (an HTTP handler) ends only that task's
 // current request: its locks are released and control returns to the setjmp.
 static void lt_task_panic_hook(const char *msg, int line) {
@@ -1439,6 +1450,17 @@ static void lt_task_panic_hook(const char *msg, int line) {
     if (line > 0) fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);
     else fprintf(stderr, "panic: %s\n", msg);
     while (t->nheld > 0) lt_lock_release(t->held[t->nheld - 1]);
+    if (t->ntxs && lt_tx_abort_hook) lt_tx_abort_hook(t);
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+    // AddressSanitizer clears the frames a longjmp skips only on a thread's
+    // own stack; on a task's stack, clear them here
+    {
+        char here;
+        __asan_unpoison_memory_region(&here, (size_t)((char *)t->panic_jmp - &here));
+    }
+#endif
+#endif
     longjmp(*(jmp_buf *)t->panic_jmp, 1);
 }
 

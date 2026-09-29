@@ -349,6 +349,41 @@ static lt_err lt_db_close(lt_handle *h) {
     return e;
 }
 
+#ifdef LT_THREADS
+static void lt_db_forget_tx(lt_db *d) {
+    lt_task *t = lt_current();
+    if (!t) return;
+    for (int i = 0; i < t->ntxs; i++)
+        if (t->txs[i] == d) {
+            t->txs[i] = t->txs[--t->ntxs];
+            lt_handle_drop(&d->h);
+            return;
+        }
+}
+
+// after a panic: roll back the task's transactions, give the handles back
+static void lt_db_abort(lt_task *t) {
+    while (t->ntxs > 0) {
+        lt_db *d = (lt_db *)t->txs[--t->ntxs];
+        lt_spin_lock(&d->spin);
+        int p = lt_db_pin_of(d, t);
+        sqlite3 *db = NULL;
+        if (p >= 0) {
+            db = d->pins[p].db;
+            d->pins[p] = d->pins[--d->npins];
+        }
+        lt_spin_unlock(&d->spin);
+        if (db) {
+            sqlite3_exec(db, "rollback", NULL, NULL, NULL);
+            lt_db_put(d, db, false);
+        }
+        lt_handle_drop(&d->h);
+    }
+}
+#else
+static void lt_db_forget_tx(lt_db *d) { (void)d; }
+#endif
+
 // db.Connection.transaction: the task keeps one handle until lt_db_end.
 // Inside a transaction, another one is a savepoint.
 static lt_err lt_db_begin(lt_handle *h) {
@@ -395,6 +430,16 @@ static lt_err lt_db_begin(lt_handle *h) {
         d->pins[i].depth = 1;
     }
     lt_spin_unlock(&d->spin);
+#ifdef LT_THREADS
+    // a panic in an HTTP handler ends the request, not the task: the
+    // transaction is rolled back then (lt_db_abort)
+    lt_task *t = lt_current();
+    if (!pinned && t && t->ntxs < 4) {
+        lt_tx_abort_hook = lt_db_abort;
+        lt_handle_dup(&d->h);
+        t->txs[t->ntxs++] = d;
+    }
+#endif
     return (lt_err){ 0 };
 }
 
@@ -425,6 +470,9 @@ static lt_err lt_db_end(lt_handle *h, bool commit) {
         // handle can go back to the pool
         if (depth == 0 && !sqlite3_get_autocommit(db)) sqlite3_exec(db, "rollback", NULL, NULL, NULL);
     }
-    if (depth == 0) lt_db_put(d, db, false);
+    if (depth == 0) {
+        lt_db_put(d, db, false);
+        lt_db_forget_tx(d);
+    }
     return e;
 }
