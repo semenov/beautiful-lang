@@ -1061,7 +1061,15 @@ impl Parser {
                         break;
                     }
                     let k = self.expr()?;
-                    self.expect(&Tok::Colon, "`:` between a key and a value")?;
+                    let first = entries.is_empty();
+                    // `x ?? { log(...); fallback }`: a block where a value goes
+                    self.expect(&Tok::Colon, "`:` between a key and a value").map_err(|d| {
+                        if first {
+                            d.help("a `{` where a value goes starts a map (`{\"a\": 1}`), not a block of statements; for statements before a fallback: `if x is some(v) { v } else { ...; fallback }`")
+                        } else {
+                            d
+                        }
+                    })?;
                     self.skip_newlines();
                     let v = self.expr()?;
                     entries.push((k, v));

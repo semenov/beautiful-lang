@@ -160,12 +160,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] `time.DateTime` has no milliseconds
     - [ ] no plain mutex (a `Shared<Int>` nobody reads); middleware can't pass
           the signed-in user to handlers; no route groups / prefixes
-    - [ ] a `{` block after `??` parses as a map literal (unclear error)
+    - [x] a `{` block after `??` parses as a map literal (unclear error)
     - [ ] `expect` only directly inside `test`, not in helpers
     - [ ] slugs: no transliteration, no trimming of given characters
     - [ ] jwt errors untyped (expired vs forged)
     - [x] `plumb add --path` says "pinned in plumb.lock" but writes none
-    - [ ] `plumb fmt --check` exits 0 on a file that doesn't parse
+    - [x] `plumb fmt --check` exits 0 on a file that doesn't parse
     - [ ] docs: cli `T?` without `= none`; `plumb doc String` shows
           `__find`; db sharing; route order; sql `none`
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,

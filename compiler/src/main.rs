@@ -138,6 +138,14 @@ fn fmt_command(args: &[String]) -> ExitCode {
                 continue;
             }
         };
+        // a file that doesn't parse isn't formatted (and isn't touched)
+        let mut sources = Sources::default();
+        let fid = sources.add(f.display().to_string(), src.clone());
+        if let Err(d) = lexer::lex(&src, fid).and_then(|t| parser::parse_module(t, true)) {
+            eprint!("{}", sources.render(&d));
+            failed = true;
+            continue;
+        }
         let out = fmt::format(&src);
         if out == src {
             continue;
