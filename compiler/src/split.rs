@@ -331,10 +331,11 @@ pub fn split(c: &str) -> Option<Units> {
         }
     }
     // stand-ins for callbacks this program doesn't define
-    for (_, sig) in &callbacks {
-        runtime += "\n__attribute__((weak)) ";
+    // (not for names a macro stands for, as lt_block_enter without threads)
+    for (name, sig) in &callbacks {
+        runtime += &format!("\n#ifndef {name}\n__attribute__((weak)) ");
         runtime += sig;
-        runtime += " { abort(); }";
+        runtime += " { abort(); }\n#endif";
     }
     runtime += "\n";
     // the program defines its callbacks without `static`
