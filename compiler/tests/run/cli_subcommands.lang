@@ -2,7 +2,9 @@
 import cli
 
 type AddOptions {
+  // what to add
   name: String
+  // how many, at least 1
   count: Int = 1
   dry_run: Bool = false
 }
@@ -36,6 +38,7 @@ fn main() {
     ["add", "--name", "x", "--colour", "red"],
     ["add", "--name", "x", "--count", "lots"],
     [],
+    ["add", "--help"],
   ]
   for args in calls {
     try run(args) catch err {

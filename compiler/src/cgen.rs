@@ -1514,13 +1514,14 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             _ => vec![],
         };
         let ty = self.ty_of(id);
-        let (has_default, default_texts): (Vec<bool>, Vec<Option<String>>) = match &ty {
+        let (has_default, default_texts, docs): (Vec<bool>, Vec<Option<String>>, Vec<Option<String>>) = match &ty {
             Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
-                TypeKind::Record { fields } => (fields.iter().map(|f| f.default.is_some()).collect(), fields.iter().map(|f| f.default_text.clone()).collect()),
-                _ => (vec![], vec![]),
+                TypeKind::Record { fields } => (fields.iter().map(|f| f.default.is_some()).collect(), fields.iter().map(|f| f.default_text.clone()).collect(), fields.iter().map(|f| f.doc.clone()).collect()),
+                _ => (vec![], vec![], vec![]),
             },
-            _ => (vec![], vec![]),
+            _ => (vec![], vec![], vec![]),
         };
+        let c_esc = |t: &str| t.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%");
         let n = fields.len().max(1);
         if !cli {
             let mut s = format!("static lt_err {}({} *out) {{ lt_arena ar = {{0}}; lt_dyn o; memset(&o, 0, sizeof o); o.kind = LT_D_OBJ; o.items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * {n}); o.keys = (const char **)lt_arena_alloc(&ar, sizeof(char *) * {n}); o.klens = (int64_t *)lt_arena_alloc(&ar, sizeof(int64_t) * {n});", name, c, n = n);
@@ -1559,12 +1560,15 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             let req = if self.is_opt(*fid) || has_default[i] || kind == 1 || kind == 2 { "" } else { "  (required)" };
             // the default, when it says something ("false", "[]" and `none` don't)
             let shown = match default_texts.get(i).cloned().flatten() {
-                Some(t) if kind == 0 && t != "none" && t.len() <= 40 => format!("  (default: {})", t.replace('\\', "\\\\").replace('"', "\\\"").replace('%', "%%")),
+                Some(t) if kind == 0 && t != "none" && t.len() <= 40 => format!("  (default: {})", c_esc(&t)),
                 _ => String::new(),
             };
             if kind != 2 {
                 let dashes = if flag.chars().count() == 1 { "-" } else { "--" };
                 usage += &format!("  {}{}{}{}{}{}\\n", dashes, flag, what, req, shown, if kind == 3 { "  (can repeat)" } else { "" });
+                if let Some(d) = docs.get(i).cloned().flatten() {
+                    usage += &format!("      {}\\n", c_esc(&d));
+                }
             }
         }
         let has_args = kinds.contains(&2);
@@ -3600,7 +3604,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
                     FnKind::Test(n) => n.clone(),
                     _ => String::new(),
                 };
-                let _ = writeln!(main, "  {{ lt_err e = {}(); if (e.obj) {{ failed++; lt_text *m = lt_error_message(e); printf(\"FAIL  %s\\n      %.*s\\n\", {}, (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); }} else {{ passed++; printf(\"ok    %s\\n\", {}); }} }}", f.name, c_str(&name), c_str(&name));
+                let _ = writeln!(main, "  {{ lt_buf logs = {{0}}; lt_log_capture = &logs; lt_err e = {}(); flockfile(stderr); lt_log_capture = NULL; funlockfile(stderr); if (e.obj) {{ failed++; lt_text *m = lt_error_message(e); printf(\"FAIL  %s\\n      %.*s\\n\", {}, (int)m->len, m->data); if (logs.len) {{ printf(\"      its log:\\n\"); lt_print_indented(logs.d, logs.len); }} lt_text_drop(m); lt_iface_drop(e); }} else {{ passed++; printf(\"ok    %s\\n\", {}); }} free(logs.d); }}", f.name, c_str(&name), c_str(&name));
                 let _ = i;
             }
             main += "  printf(\"\\n%d passed, %d failed\\n\", passed, failed);\n  lt_tests_failed = failed;\n}\n";

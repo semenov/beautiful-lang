@@ -465,6 +465,9 @@ static lt_texts *lt_process_args(void) {
 }
 
 static _Noreturn void lt_process_exit(int64_t status) {
+#ifdef LT_DEBUG_ALLOC
+    lt_exited_early = 1;
+#endif
     fflush(stdout);
     fflush(stderr);
     exit((int)status);
@@ -650,6 +653,21 @@ static int lt_log_rank(const char *level) {
     return 1;
 }
 
+// `lang test` collects each test's log lines here and shows them only if
+// the test fails
+static lt_buf *lt_log_capture;
+
+// a failing test's log, each line indented under it
+static void lt_print_indented(const char *d, int64_t n) {
+    int64_t start = 0;
+    for (int64_t i = 0; i < n; i++) {
+        if (d[i] == '\n') {
+            printf("        %.*s\n", (int)(i - start), d + start);
+            start = i + 1;
+        }
+    }
+}
+
 static void lt_log(const char *level, lt_text *msg) {
     static int min_rank = -1, json = -1;
     if (min_rank < 0) {
@@ -678,8 +696,15 @@ static void lt_log(const char *level, lt_text *msg) {
         lt_buf_put(&b, "\",\"message\":", 12);
         lt_json_str(&b, msg->data, msg->len);
         lt_buf_put(&b, "}\n", 2);
-        fwrite(b.d, 1, (size_t)b.len, stderr);
+        if (lt_log_capture) lt_buf_put(lt_log_capture, b.d, b.len);
+        else fwrite(b.d, 1, (size_t)b.len, stderr);
         free(b.d);
+    } else if (lt_log_capture) {
+        char head[80];
+        int hl = snprintf(head, sizeof head, "%sZ %s ", stamp, level);
+        lt_buf_put(lt_log_capture, head, hl);
+        lt_buf_put(lt_log_capture, msg->data, msg->len);
+        lt_buf_c(lt_log_capture, '\n');
     } else {
         fprintf(stderr, "%sZ %s %.*s\n", stamp, level, (int)msg->len, msg->data);
     }

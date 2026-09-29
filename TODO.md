@@ -78,8 +78,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] a server started with SIGINT ignored (`&` in a script) keeps it
         ignored, and gives back the program's own Ctrl-C handler when it stops
   - [ ] `archive`: streaming tar writing (big directories, Ctrl-C in the middle)
-  - [ ] `lang test`: hide log lines of passing tests (request logs clutter it)
-  - [ ] `--help`: field comments as option descriptions
+  - [x] `lang test`: log lines show only under a failing test
+  - [x] `--help`: field comments as option descriptions
+  - [x] `--debug` after `process.exit`: no false leak count
 
 ## Stdlib gaps from the npm review (research/npm-top-packages.md), in order
 

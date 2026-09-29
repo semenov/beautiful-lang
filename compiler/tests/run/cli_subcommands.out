@@ -6,3 +6,11 @@ error: the option --name is required (see --help)
 error: unknown option --colour (see --help)
 error: the option --count: expected a whole number, found "lots"
 usage: tool add|stats
+usage: cli_subcommands [options]
+options:
+  --name <text>  (required)
+      what to add
+  --count <whole number>  (default: 1)
+      how many, at least 1
+  --dry-run
+  --help

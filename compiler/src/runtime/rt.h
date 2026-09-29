@@ -108,7 +108,13 @@ LT_NOINLINE void *lt_arena_refill(size_t n) {
 
 #ifdef LT_DEBUG_ALLOC
 static int64_t lt_live_objects, lt_total_objects;
+// set by process.exit: whatever was alive then was never meant to be freed
+static int lt_exited_early;
 static void lt_report_leaks(void) {
+    if (lt_exited_early) {
+        fprintf(stderr, "debug: %lld allocations, exited with process.exit (no leak count)\n", (long long)lt_total_objects);
+        return;
+    }
     fprintf(stderr, "debug: %lld allocations, %lld not freed\n", (long long)lt_total_objects, (long long)lt_live_objects);
 }
 LT_INLINE void *lt_alloc(size_t n) {

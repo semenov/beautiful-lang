@@ -79,6 +79,8 @@ pub struct FieldDef {
     pub default: Option<TExpr>,
     // the default as written, for `--help`
     pub default_text: Option<String>,
+    // the comment above the field, for `--help`
+    pub doc: Option<String>,
     pub span: Span,
 }
 

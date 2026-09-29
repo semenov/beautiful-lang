@@ -481,7 +481,8 @@ impl Checker {
                         if r.builtin {
                             props.push((f.name.clone(), ty));
                         } else {
-                            fields.push(FieldDef { name: f.name.clone(), ty, default: None, default_text: None, span: f.span });
+                            let doc = self.comment_above(f.span);
+                            fields.push(FieldDef { name: f.name.clone(), ty, default: None, default_text: None, doc, span: f.span });
                         }
                     }
                     let def = &mut self.prog.defs[d];
@@ -506,6 +507,7 @@ impl Checker {
                                 ty: self.resolve_texpr(&f.ty, &e.generics, md),
                                 default: None,
                                 default_text: None,
+                                doc: None,
                                 span: f.span,
                             })
                             .collect();
@@ -898,6 +900,27 @@ impl Checker {
             // a `throws` function that can never fail is allowed (interfaces), no error
         }
         self.prog.fns[id].body = Some(tb);
+    }
+
+    // The `//` lines right above a declaration, joined.
+    fn comment_above(&self, span: Span) -> Option<String> {
+        let src = self.source_texts.get(span.file as usize)?;
+        let before = src.get(..span.lo as usize)?;
+        let mut lines: Vec<&str> = before.lines().collect();
+        lines.pop(); // the declaration's own line, up to it
+        let mut doc: Vec<String> = vec![];
+        while let Some(l) = lines.pop() {
+            match l.trim().strip_prefix("//") {
+                Some(c) => doc.push(c.trim().to_string()),
+                None => break,
+            }
+        }
+        doc.reverse();
+        if doc.is_empty() {
+            None
+        } else {
+            Some(doc.join(" "))
+        }
     }
 
     fn block_returns(&self, b: &ast::Block) -> bool {
