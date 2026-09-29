@@ -22,25 +22,33 @@ short version: what's in flight, what waits for Vlad, and what to do next.
 
 ## Next, in this order
 
-Done on 2026-09-29: stack overflow panic, the tasks slowdown (allocator),
-top-level `let` built once, json numbers, Unicode, all four of Vlad's
-decisions (`to_string`, `json.encode_with`, `json.Number`, `?.`), the small
-gron items, benchmarks against Go with memory (`benchmarks/`, `ONLY=Go,Lang
-python3 run.py`), the scheduler rewrite (per-worker queues, runnext), the
-README scheduler section.
+State at the end of 2026-09-29 (all pushed unless noted):
+- Done today: stack overflow panic; tasks slowdown (allocator, then the
+  heap found inline from the thread register: 1.75x -> ~1.04x); top-level
+  `let` built once; json numbers; Unicode; Vlad's four decisions
+  (`to_string`, `json.encode_with`, `json.Number`, `?.`); gron's small
+  items; benchmarks vs Go with memory (`ONLY=Go,Lang python3
+  benchmarks/run.py`); scheduler rewrite (per-worker queues, runnext, one
+  wake per burst); realistic backend vs Go (benchmarks/backend: Lang wins);
+  HTTP server timeouts; cookie Expires; README scheduler section.
+- **The last commit (inline heap lookup) passed the macOS suite but the
+  Linux suite wasn't run yet: run it first** (the Linux path uses
+  tpidr_el0/%fs:0 + a local-exec TLS offset).
+- **A port is running/ran in a git worktree:** the RealWorld "Conduit"
+  API (ports/realworld, with GAPS.md and newman API tests), by a newcomer
+  agent. Find its branch with `git worktree list` / `git branch -a`; review
+  it, merge ports/realworld into main, and fix the gaps it lists (as with
+  gron and httpbin).
 
-1. **A realistic backend vs Go** (Vlad): a service shaped like a real app
-   (JSON API, routing, middleware, auth header, validation, SQLite, logging)
-   in both languages; load it, compare req/s, latency, CPU per request,
-   memory; fix where we lose.
-2. **Where the benchmarks still lose** (TODO "More benchmarks"): words
-   (strings are heap objects per piece: needs a text representation change),
-   spawn (3x Go), memory in sort / json / maps.
+1. Merge and work through the RealWorld port's GAPS.md.
+2. **Where benchmarks still lose** (TODO "More benchmarks"): words (map
+   layout / short strings), spawn (1.6x), memory in sort and maps; atomic
+   reference counts (~5-10% in task programs).
 3. **Question for Vlad:** is a String always UTF-8 (bad bytes replaced on
    the way in) or any bytes like Go? (`read_line` vs `Bytes.text()`.)
-4. Server timeouts (timer wheel first), HTTP repeated headers / trailers /
-   cookie Expires, the I/O path (poll from idle workers), mysql, reviews,
-   another port.
+4. db: blocking SQLite calls block a worker thread; a pool; repeated
+   request headers / trailers; the I/O path (poll from idle workers);
+   mysql; reviews; another port.
 
 ## Decided by Vlad (2026-09-29), built
 

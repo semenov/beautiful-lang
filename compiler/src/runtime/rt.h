@@ -90,14 +90,55 @@ typedef struct lt_heap {
 #ifdef LT_THREADS
 // A task can move to another OS thread at any wait, and C compilers may keep
 // the address of a thread-local variable across such a point (they assume
-// the thread never changes inside a function). So the heap is found through
-// a call the compiler can't see into, once per allocation.
+// the thread never changes inside a function). So the heap is found from
+// the thread register, read with an `asm volatile` the compiler must repeat:
+// on macOS through the thread's specific-data slots (as pthread_getspecific
+// does), on Linux at the heap's fixed offset from the thread pointer.
+// Elsewhere, through a call the compiler can't see into.
+#if defined(__APPLE__) && (defined(__aarch64__) || defined(__x86_64__))
+static pthread_key_t lt_heap_key;
+static void lt_oom(void);
+__attribute__((constructor)) static void lt_heap_key_make(void) { pthread_key_create(&lt_heap_key, NULL); }
+LT_NOINLINE lt_heap *lt_heap_new_here(void) {
+    lt_heap *h = (lt_heap *)calloc(1, sizeof(lt_heap));
+    if (!h) lt_oom();
+    pthread_setspecific(lt_heap_key, h);
+    return h;
+}
+LT_INLINE lt_heap *lt_heap_here(void) {
+    lt_heap *h;
+#if defined(__aarch64__)
+    uintptr_t tsd;
+    __asm__ volatile("mrs %0, tpidrro_el0" : "=r"(tsd));
+    h = ((lt_heap **)(tsd & ~(uintptr_t)7))[lt_heap_key];
+#else
+    __asm__ volatile("movq %%gs:(,%1,8), %0" : "=r"(h) : "r"((uintptr_t)lt_heap_key));
+#endif
+    return LT_LIKELY(h != NULL) ? h : lt_heap_new_here();
+}
+#elif defined(__linux__) && (defined(__aarch64__) || defined(__x86_64__))
+static __thread lt_heap lt_thread_heap __attribute__((tls_model("local-exec")));
+static intptr_t lt_heap_off;
+LT_INLINE char *lt_thread_pointer(void) {
+    char *tp;
+#if defined(__aarch64__)
+    __asm__ volatile("mrs %0, tpidr_el0" : "=r"(tp));
+#else
+    __asm__ volatile("movq %%fs:0, %0" : "=r"(tp));
+#endif
+    return tp;
+}
+// the offset is the same in every thread (the program's own TLS block)
+__attribute__((constructor)) static void lt_heap_off_find(void) { lt_heap_off = (char *)&lt_thread_heap - lt_thread_pointer(); }
+LT_INLINE lt_heap *lt_heap_here(void) { return (lt_heap *)(lt_thread_pointer() + lt_heap_off); }
+#else
 static __thread lt_heap lt_thread_heap;
 __attribute__((noinline)) static lt_heap *lt_heap_here(void) {
     lt_heap *h = &lt_thread_heap;
     __asm__ volatile("" : "+r"(h) : : "memory");
     return h;
 }
+#endif
 #else
 static lt_heap lt_the_heap;
 #define lt_heap_here() (&lt_the_heap)

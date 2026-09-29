@@ -103,7 +103,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           pay only where values are shared
       - [x] 90% of it was the allocator (system malloc with tasks): now
             per-thread free lists with a shared pool; 1.75x -> 1.16x
-      - [ ] the rest: atomic refcounts, and a call to find the thread's heap
+      - [x] a call to find the thread's heap: now inline from the thread
+            register (macOS TSD slot / Linux TLS offset): repro 1.16x -> 1.04x
+      - [ ] the rest: atomic refcounts
     - [x] top-level `let` list rebuilt on every use (230 ns per read of a
           2000-element table): make them static, built once
     - [x] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
