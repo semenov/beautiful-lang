@@ -1,4 +1,4 @@
-// A top-level `let` list is rebuilt on every use: reading one element of a
+// FIXED (built once on first use, now ~1 ms). Was: a top-level `let` list is rebuilt on every use: reading one element of a
 // 2000-element table costs ~230 ns (the size of the table), while the same
 // list passed in as an argument costs ~0. Lookup tables (Unicode ranges in
 // unicode.lang) have to be kept small or copied into a local first.

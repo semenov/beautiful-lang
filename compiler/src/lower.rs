@@ -93,6 +93,7 @@ pub struct Lowerer<'a> {
     fbs: Vec<Fb<'a>>,
     user_file: u32,
     default_fns: Vec<(Ty, usize)>,
+    consts: Vec<usize>,
     decoded: std::collections::HashSet<Ty>,
 }
 
@@ -121,6 +122,7 @@ impl<'a> Lowerer<'a> {
             fbs: vec![],
             user_file,
             default_fns: vec![],
+            consts: vec![],
             decoded: std::collections::HashSet::new(),
         }
     }
@@ -155,7 +157,7 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts }
     }
 
     fn drain(&mut self) {
@@ -168,6 +170,9 @@ impl<'a> Lowerer<'a> {
             let ret = if no_throw { strip_throws(&ret) } else { ret };
             let name = self.funcs[idx].name.clone();
             let src_name = self.funcs[idx].source_name.clone();
+            if f.is_const {
+                self.consts.push(idx);
+            }
             let lowered = self.build(body, targs, no_throw, name, FnKind::Normal, ret, throws, f.self_mode == SelfMode::Mutating, src_name);
             self.funcs[idx] = lowered;
         }

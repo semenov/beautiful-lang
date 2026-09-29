@@ -2111,7 +2111,51 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             self.term(fi, &term, &mut body);
         }
         body += "}\n";
+        if self.m.consts.contains(&fi) {
+            body = self.const_cache(fi, body);
+        }
         out.push_str(&body);
+    }
+
+    // A top-level `let` whose value is allocated is built on its first use
+    // and kept; the kept object is immortal (its count is negative), so uses
+    // don't count references to it, and changing a copy copies it first.
+    fn const_cache(&mut self, fi: usize, body: String) -> String {
+        let ret = self.m.funcs[fi].ret.clone();
+        let tid = self.tid(&ret);
+        if !self.tys[tid].rc {
+            return body;
+        }
+        let name = self.m.funcs[fi].name.clone();
+        let c = self.tys[tid].c.clone();
+        let body = body.replacen(&format!("{}(", name), &format!("{}_build(", name), 1);
+        let dup = self.dup(tid, "v");
+        let drop_v = self.drop_(tid, "v");
+        let drop_c = self.drop_(tid, &format!("{}_cache", name));
+        let top = match &self.tys[tid].kind {
+            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Bytes | Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => Some("v".to_string()),
+            Kind::Opt { niche: Niche::Ptr, inner } if matches!(self.tys[*inner].kind, Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Bytes | Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. }) => Some("v".to_string()),
+            _ => None,
+        };
+        let (immortal, mortal) = match &top {
+            // (a literal is immortal already, and stays so)
+            Some(v) => (format!("if ({v} && ((lt_obj *){v})->rc > 0) {{ ((lt_obj *){v})->rc = -1; {n}_owned = 1; }}", v = v, n = name), format!("if ({n}_owned) ((lt_obj *){n}_cache)->rc = 1;", n = name)),
+            None => (String::new(), String::new()),
+        };
+        let mut out = body;
+        let _ = writeln!(out, "static {c} {n}_cache;\nstatic int {n}_state, {n}_owned;", c = c, n = name);
+        let _ = writeln!(out, "#ifdef LT_DEBUG_ALLOC\nstatic void {n}_free(void) {{ {mortal} {drop_c} }}\n#endif", n = name, mortal = mortal, drop_c = drop_c);
+        let _ = writeln!(
+            out,
+            "static {c} {n}(void) {{\n  if (LT_UNLIKELY(__atomic_load_n(&{n}_state, __ATOMIC_ACQUIRE) != 2)) {{\n    {c} v = {n}_build();\n    int z = 0;\n    if (__atomic_compare_exchange_n(&{n}_state, &z, 1, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {{\n      {immortal}\n      {n}_cache = v;\n#ifdef LT_DEBUG_ALLOC\n      atexit({n}_free);\n#endif\n      __atomic_store_n(&{n}_state, 2, __ATOMIC_RELEASE);\n    }} else {{\n      {drop_v}\n      while (__atomic_load_n(&{n}_state, __ATOMIC_ACQUIRE) != 2) {{ }}\n    }}\n  }}\n  {c} v = {n}_cache;\n  {dup}\n  return v;\n}}",
+            c = c,
+            n = name,
+            immortal = immortal,
+            drop_v = drop_v,
+            dup = dup
+        );
+        let _ = writeln!(self.protos, "static {} {}_build(void);", c, name);
+        out
     }
 
     fn place_lvalue_read(&mut self, fi: usize, p: &Place) -> String {

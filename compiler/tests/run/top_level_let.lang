@@ -18,6 +18,8 @@ let names = {"a": "Ada", "b": "Bob"}
 let price: Decimal = 19.99
 let level = High(amount: 3)
 let tag: String? = none
+let nested = [limits, [7]]
+let books = {"x": [origin]}
 let usage = """
 usage: tool [options]
   --retries  (default: ${max_retries})
@@ -40,4 +42,20 @@ fn main() {
     High(amount) => print("high ${amount}")
   }
   print(usage)
+  // built once and kept: a changed copy doesn't change the original
+  var mine = limits
+  mine.append(4)
+  mine[0] = 9
+  var more = names
+  more["c"] = "Cy"
+  var deep = nested
+  deep[0].append(8)
+  var shelf = books
+  shelf["x"] = []
+  print("${mine} ${limits} ${more.length} ${names.length} ${deep} ${nested} ${shelf} ${books.length}")
+  var total = 0
+  for i in 0..<1000 {
+    total += limits[i.bit_and(1)] + nested[1][0]
+  }
+  print("${total}")
 }

@@ -165,6 +165,8 @@ pub struct Module {
     pub closed_vtable: usize,
     // records with field defaults -> a function building one with the defaults
     pub default_fns: Vec<(Ty, FnIdx)>,
+    // top-level `let`s: built once, on first use
+    pub consts: Vec<FnIdx>,
 }
 
 impl Stmt {

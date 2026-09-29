@@ -46,7 +46,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       - [x] 90% of it was the allocator (system malloc with tasks): now
             per-thread free lists with a shared pool; 1.75x -> 1.16x
       - [ ] the rest: atomic refcounts, and a call to find the thread's heap
-    - [ ] top-level `let` list rebuilt on every use (230 ns per read of a
+    - [x] top-level `let` list rebuilt on every use (230 ns per read of a
           2000-element table): make them static, built once
     - [ ] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
     - [ ] JSON numbers as written (`json.Value.Number` is a Float; gron wrote
@@ -189,7 +189,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] channels: try_receive (a timeout: time.timeout around receive); select: not yet
 - [x] `-> Never` in user code
 - [x] constants: top-level `let` (Vlad chose it over `const`)
-- [ ] top-level `let` of a list, map or interpolated string is rebuilt at each use: cache it if it shows up in profiles
+- [x] top-level `let` of a list, map or interpolated string is rebuilt at each use: now built once, on first use, and kept (immortal)
 - [x] signals: Ctrl-C cancels main's tasks; process.interrupted()
 - [x] a field default can't use a type declared later in the file
 - [x] Float.format: NaN text (width: use pad_start)
@@ -202,6 +202,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
   - `catch` without `try` in front is a parse error with a vague message
 - [ ] Performance: `words` benchmark is slower than Go (Text is not a view)
+      (2026-09-29, Vlad asked again: 1.37 s vs Go 0.95 s)
+- [ ] Performance: HTTP file server, small files: 93k req/s vs Go's 100k
+      (README; Vlad asked again 2026-09-29)
 
 ## Done
 
