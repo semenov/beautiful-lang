@@ -1328,7 +1328,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 };
                 let (ac, oc) = (self.tys[arr].c.clone(), self.tys[obj].c.clone());
                 format!("switch (d->kind) {{ case LT_D_NULL: *out = {n0}; {ok} case LT_D_BOOL: *out = {n1}; {ok} case LT_D_NUM: *out = {n2}; {ok} case LT_D_STR: *out = {n3}; {ok} case LT_D_ARR: {{ {ac} a; lt_err e = dec_{arr}(src, d, p, lenient, &a); if (e.obj) return e; *out = {n4}; {ok} }} default: {{ {oc} o; lt_err e = dec_{obj}(src, d, p, lenient, &o); if (e.obj) return e; *out = {n5}; {ok} }} }}",
-                    n0 = mk(0, ""), n1 = mk(1, ", .u.v1 = { d->b }"), n2 = mk(2, ", .u.v2 = { d->is_int ? (double)d->i : d->num }"), n3 = mk(3, ", .u.v3 = { lt_text_from(d->s, d->slen) }"), n4 = mk(4, ", .u.v4 = { a }"), n5 = mk(5, ", .u.v5 = { o }"),
+                    n0 = mk(0, ""), n1 = mk(1, ", .u.v1 = { d->b }"), n2 = mk(2, ", .u.v2 = { { lt_json_number_text(d) } }"), n3 = mk(3, ", .u.v3 = { lt_text_from(d->s, d->slen) }"), n4 = mk(4, ", .u.v4 = { a }"), n5 = mk(5, ", .u.v5 = { o }"),
                     ok = ok, ac = ac, oc = oc, arr = arr, obj = obj)
             }
             Kind::Enum { variants, boxed, .. } => {
@@ -1492,7 +1492,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 let (arr, obj) = (variants[4].1[0].1, variants[5].1[0].1);
                 self.need(H::Enc, arr);
                 self.need(H::Enc, obj);
-                format!("switch ({p}tag) {{ case 0: lt_buf_put(b, \"null\", 4); break; case 1: if ({p}u.v1.f0) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5); break; case 2: lt_json_num(b, {p}u.v2.f0); break; case 3: lt_json_str(b, {p}u.v3.f0->data, {p}u.v3.f0->len); break; case 4: enc_{arr}({p}u.v4.f0, b); break; default: enc_{obj}({p}u.v5.f0, b); }}", p = p, arr = arr, obj = obj)
+                format!("switch ({p}tag) {{ case 0: lt_buf_put(b, \"null\", 4); break; case 1: if ({p}u.v1.f0) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5); break; case 2: lt_json_number_put(b, {p}u.v2.f0.f0); break; case 3: lt_json_str(b, {p}u.v3.f0->data, {p}u.v3.f0->len); break; case 4: enc_{arr}({p}u.v4.f0, b); break; default: enc_{obj}({p}u.v5.f0, b); }}", p = p, arr = arr, obj = obj)
             }
             Kind::Enum { variants, boxed, .. } => {
                 let p = if *boxed { "v->v." } else { "v." };

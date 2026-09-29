@@ -9,8 +9,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] `fn to_string(self)` used by `"${x}"`; readable stdlib types
         (Duration, Date, DateTime, Zoned; errors print their message)
   - [ ] `?.`
-  - [ ] exact JSON numbers (`json.Value.Number` as written)
+  - [x] exact JSON numbers (`json.Value.Number` as written, `json.Number`)
   - [ ] `json.encode` options: `keys:` naming, `omit_empty:`
+- [ ] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
+      pool of OS threads, stacks, parking, I/O and timers; its strengths and
+      its possible weak spots
 
 - [x] **Rename `Text` to `String`** (the type, its methods' docs, messages,
       the guide, stdlib, packages, tests)
@@ -57,8 +60,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           2000-element table): make them static, built once
     - [x] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
           (-0 stays -0; too large is an error, as in Go)
-    - [ ] JSON numbers as written (`json.Value.Number` is a Float; gron wrote
-          a 700-line JSON of its own) -- waits for Vlad
+    - [x] JSON numbers as written (`json.Value.Number` is a Float; gron wrote
+          a 700-line JSON of its own): now `json.Number`, the text as written
     - [x] Unicode: `is_letter` is not the letter category (digits of other
           scripts, marks, Ⅻ); code point <-> character conversion
           (generated tables: L/Lu/Ll and case mappings, so lower/upper work

@@ -127,6 +127,7 @@ static lt_err lt_dec_error(const char *source, const lt_path *p, const char *wha
     if (len < sizeof buf) {
         if (!found) snprintf(buf + len, sizeof buf - len, ": %s", what);
         else if (found->kind == LT_D_STR) snprintf(buf + len, sizeof buf - len, ": expected %s, found \"%.*s\"", what, (int)(found->slen > 60 ? 60 : found->slen), found->s);
+        else if (found->kind == LT_D_NUM && found->s) snprintf(buf + len, sizeof buf - len, ": expected %s, found %.*s", what, (int)(found->slen > 40 ? 40 : found->slen), found->s);
         else if (found->kind == LT_D_NUM) snprintf(buf + len, sizeof buf - len, ": expected %s, found %g", what, found->num);
         else snprintf(buf + len, sizeof buf - len, ": expected %s, found %s", what, lt_dyn_kind_name(found));
     }
@@ -202,10 +203,11 @@ static lt_err lt_dec_int(const char *src, const lt_dyn *d, const lt_path *p, int
     return lt_dec_error(src, p, "a whole number", d);
 }
 static lt_err lt_dec_float(const char *src, const lt_dyn *d, const lt_path *p, int lenient, double *out) {
-    if (d->kind == LT_D_NUM) {
+    if (d->kind == LT_D_NUM && !isinf(d->num)) {
         *out = d->is_int ? (double)d->i : d->num;
         return (lt_err){ 0 };
     }
+    if (d->kind == LT_D_NUM) return lt_dec_error(src, p, "a number that fits a Float", d);
     if (lenient && d->kind == LT_D_STR) {
         lt_text *t = lt_text_from(d->s, d->slen);
         lt_err e = lt_text_to_float(t, out);
@@ -462,10 +464,6 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
             p->s = st;
             return lt_jp_fail(p, "a bad number");
         }
-        if (isinf(d->num)) {
-            p->s = st;
-            return lt_jp_fail(p, "the number is too large for a Float");
-        }
         if (!frac) {
             errno = 0;
             long long v = strtoll(tmp, &e, 10);
@@ -569,15 +567,42 @@ static void lt_json_float(lt_buf *b, double v) {
     lt_buf_put(b, t->data, t->len);
     lt_text_drop(t);
 }
-// a number of unknown kind (json.Value): as JavaScript writes it
-static void lt_json_num(lt_buf *b, double v) {
-    if (!isfinite(v)) {
-        lt_buf_put(b, "null", 4);
-        return;
-    }
+// json.Number: the text of a number as written (or made from its value)
+static lt_text *lt_json_number_text(const lt_dyn *d) {
+    if (d->s) return lt_text_from(d->s, d->slen);
+    if (d->is_int) return lt_int_to_text(d->i);
     char t[48];
-    int n = lt_float_js(v, t);
-    lt_buf_put(b, t, n);
+    int n = lt_float_js(d->num, t);
+    return lt_text_from(t, n);
+}
+// is it a number in JSON's grammar? -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
+static bool lt_json_number_ok(const char *s, int64_t n) {
+    int64_t i = 0;
+    if (i < n && s[i] == '-') i++;
+    if (i < n && s[i] == '0') i++;
+    else if (i < n && s[i] >= '1' && s[i] <= '9')
+        while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+    else return false;
+    if (i < n && s[i] == '.') {
+        i++;
+        if (!(i < n && s[i] >= '0' && s[i] <= '9')) return false;
+        while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+    }
+    if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+        i++;
+        if (i < n && (s[i] == '+' || s[i] == '-')) i++;
+        if (!(i < n && s[i] >= '0' && s[i] <= '9')) return false;
+        while (i < n && s[i] >= '0' && s[i] <= '9') i++;
+    }
+    return i == n;
+}
+static void lt_json_number_put(lt_buf *b, lt_text *t) {
+    if (!lt_json_number_ok(t->data, t->len)) {
+        char m[160];
+        snprintf(m, sizeof m, "json.Number(text: \"%.*s\") is not a JSON number", (int)(t->len > 60 ? 60 : t->len), t->data);
+        lt_panic_at(m, 0);
+    }
+    lt_buf_put(b, t->data, t->len);
 }
 static void lt_json_key(lt_buf *b, const char *k, bool first) {
     if (!first) lt_buf_c(b, ',');

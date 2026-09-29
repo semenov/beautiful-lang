@@ -51,6 +51,16 @@ for d in ../../../ports/*/; do
     fi
   done
 done
+# the packages (packages/) and their examples compile
+for d in ../../../packages/*/; do
+  for e in "$d"examples/*.lang; do
+    [ -f "$e" ] || continue
+    rm -rf /tmp/lang-pkg && mkdir -p /tmp/lang-pkg && cp "$d"*.lang "$e" /tmp/lang-pkg/
+    if ! (cd /tmp/lang-pkg && $LANG_BIN check "$(basename "$e")" >/tmp/lang-port-err 2>&1); then
+      echo "FAIL package example $e: doesn't compile"; head -5 /tmp/lang-port-err; fail=1
+    fi
+  done
+done
 # the language's own code is laid out the standard way
 if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then
   echo "FAIL lang fmt --check:"; cat /tmp/lang-fmt-err; fail=1

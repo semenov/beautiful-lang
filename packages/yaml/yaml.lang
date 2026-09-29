@@ -503,7 +503,7 @@ fn emit(v: json.Value, indent: Int) -> String {
   return match v {
     json.Value.Null => "null"
     json.Value.Bool(value) => if value { "true" } else { "false" }
-    json.Value.Number(value) => if value == value.round().to_float() and value.abs() < 1000000000000000.0 { value.round().to_string() } else { json.encode(value) }
+    json.Value.Number(n) => n.text
     json.Value.String(value) => if value.contains("\n") { block(value, indent: indent) } else { quote_if_needed(value) }
     json.Value.Array(items) => if items.is_empty() { "[]" } else { items.map(i => "\n${pad}- ${emit_nested(i, indent: indent + 2)}").join("") }
     json.Value.Object(fields) => if fields.is_empty() { "{}" } else { fields.entries().map(e => "\n${pad}${quote_if_needed(e.key)}:${emit_value(e.value, indent: indent + 2)}").join("") }

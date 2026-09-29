@@ -1,5 +1,6 @@
-// JSON numbers keep what they say: -0 stays negative zero, and a number
-// too large for a Float is an error, not Infinity.
+// JSON numbers keep what they say: json.Value holds a number as written
+// (-0, 1.50, 20 digits, 1e400), converted when asked; decoding into a Float
+// that can't hold it is an error, not Infinity.
 import json
 
 type P {
@@ -7,15 +8,32 @@ type P {
   f: Float
 }
 
+type Big {
+  f: Float
+}
+
 fn main() throws {
-  print(json.encode(try json.parse("[-0, -0.0, 1e-400, 12, -3, 0.5]")))
+  let v = try json.parse("[-0, -0.0, 1.50, 1e5, 12345678901234567890, 1e400, 3]")
+  print(json.encode(v))
+  if v is json.Value.Array(items) {
+    for it in items {
+      if it is json.Value.Number(n) {
+        let i = try n.to_int() catch _ { -1 }
+        let d = try n.to_decimal() catch _ { 0.0 }
+        print("${n}: int ${i}, decimal ${d}")
+      }
+    }
+  }
   let p = try json.decode<P>("{\"n\": -0, \"f\": -0}")
   print("${p.n} ${p.f}")
-  for text in ["[1, 1e400]", "-1e999"] {
-    let v = try json.parse(text) catch e {
-      print(e.message())
-      continue
-    }
-    print(json.encode(v))
+  let big = try json.decode<Big>("{\"f\": 1e400}") catch e {
+    print(e.message())
+    return
   }
+  print("${big.f}")
+}
+
+test "building values" {
+  let v = json.Value.Object(fields: {"t": json.number(0.7), "n": json.integer(512), "x": json.number(1.0)})
+  expect json.encode(v) == "{\"t\":0.7,\"n\":512,\"x\":1.0}"
 }

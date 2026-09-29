@@ -320,10 +320,10 @@ fn request_json(chat: Chat, stream: Bool, schema: String?) -> json.Value {
   fields["model"] = text_value(chat.model)
   fields["messages"] = json.Value.Array(items: chat.messages.map(m => message_json(m)))
   if chat.temperature is some(t) {
-    fields["temperature"] = json.Value.Number(value: t)
+    fields["temperature"] = json.number(t)
   }
   if chat.max_tokens is some(n) {
-    fields["max_tokens"] = json.Value.Number(value: n.to_float())
+    fields["max_tokens"] = json.integer(n)
   }
   if not chat.tools.is_empty() {
     fields["tools"] = json.Value.Array(items: chat.tools.map(t => tool_json(t)))

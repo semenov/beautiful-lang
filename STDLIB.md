@@ -640,11 +640,32 @@ pub fn schema<T>() -> String
 pub enum Value {
   Null
   Bool(value: Bool)
-  Number(value: Float)
+  // the number as written: `1.50` stays 1.50, `12345678901234567890` all digits
+  Number(value: Number)
   String(value: String)
   Array(items: List<Value>)
   Object(fields: Map<String, Value>)
 }
+
+// A JSON number exactly as it was written ("1.50", "1e5", "-0",
+// "12345678901234567890"); converted when you ask for a kind.
+pub type Number {
+  text: String
+  // Its text in "${n}": as written.
+  pub fn to_string(self) -> String
+  pub fn to_float(self) throws -> Float
+  // An error unless it's a whole number that fits an Int ("1.5", "1e3" and
+  // 20-digit numbers fail).
+  pub fn to_int(self) throws -> Int
+  // Exactly: "0.10" is 0.10.
+  pub fn to_decimal(self) throws -> Decimal
+}
+
+// A Float as a JSON value (NaN and infinities have no JSON form: null).
+pub fn number(value: Float) -> Value
+
+// An Int as a JSON value.
+pub fn integer(value: Int) -> Value
 
 // Reads any JSON into a `Value`.
 pub fn parse(text: String) throws -> Value

@@ -340,6 +340,11 @@ let sub = try cli.decode_from<AddOptions>(args.drop(1)) // subcommands: match on
 let rows = try conn.query<User>("select id, name from users where age > ?", [18])
 ```
 
+JSON of unknown shape: `let v = try json.parse(text)` gives a `json.Value`
+(`Null`, `Bool`, `Number`, `String`, `Array`, `Object`). A number stays as
+written: `if v is json.Value.Number(n) { let id = try n.to_int() }`. To
+build one: `json.number(0.7)`, `json.integer(512)`.
+
 SQL is always written right in the call, with `?` (SQLite) or `$1`
 (Postgres) for values. Building SQL from text is a compile error. Parameters
 are plain values: `[name, 36, true]`.

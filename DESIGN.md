@@ -394,7 +394,10 @@ used result is always a mutation or an action. The rule also catches the
   A missing required field is an error that names the field. A `T?` field or
   a field with a default is optional. There are no annotations: name mapping
   is a decode option (`keys: CamelCase`). Anything unusual is decoded by hand
-  through `json.Value`.
+  through `json.Value`. Its numbers are kept as written (`json.Number`:
+  `1.50`, `1e5` and 20-digit ids survive a round trip) and converted when
+  asked (`n.to_int()`, `n.to_float()`, `n.to_decimal()`), as Go's
+  `UseNumber`; decoding into a Float that can't hold a number is an error.
 - **SQL:** the query text must be a string literal, and parameters are passed
   separately. Concatenation or interpolation is a compile error. The rule
   lives in the `sql` module (`sql.Query` accepts only a literal; `sql.Value`
