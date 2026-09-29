@@ -569,13 +569,23 @@ pub type ServerOptions {
   host: String = ""
   // bigger request bodies are answered with 413
   max_body: Int = 67108864
+  // A connection is closed when the client takes longer than this to start
+  // its next request (keep-alive).
+  idle_timeout: time.Duration = time.seconds(60)
+  // ...to send a request's whole head once it started, or the next piece of
+  // its body (slow clients can't hold connections open).
+  read_timeout: time.Duration = time.seconds(60)
+  // ...to take the whole response (a stream, `http.stream`, isn't limited).
+  // A handler itself runs as long as it needs. A zero Duration turns a
+  // timeout off.
+  write_timeout: time.Duration = time.seconds(60)
 }
 
 pub fn serve_with(router: Router, options: ServerOptions) throws {
-  try __serve_on(options.host, port: options.port, max_body: options.max_body, handler: req => try router.handle(req))
+  try __serve_on(options.host, port: options.port, max_body: options.max_body, idle_ns: options.idle_timeout.nanos, read_ns: options.read_timeout.nanos, write_ns: options.write_timeout.nanos, handler: req => try router.handle(req))
 }
 
-fn __serve_on(host: String, port: Int, max_body: Int, handler: fn(Request) throws -> Response) throws
+fn __serve_on(host: String, port: Int, max_body: Int, idle_ns: Int, read_ns: Int, write_ns: Int, handler: fn(Request) throws -> Response) throws
 
 // ---- client (HTTPS works) ----
 // A response with any status is not an error: check `response.status`.

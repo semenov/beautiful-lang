@@ -803,12 +803,24 @@ static void lt_timer_wait(int64_t ns) {
 static void lt_timer_setup(void) {}
 #endif
 
+// Set by an HTTP server: called about once a second (holding lt_timer_mu)
+// to close connections past their timeouts.
+static void (*lt_sweep_hook)(int64_t now);
+static int64_t lt_sweep_last;
+
 static void *lt_timer_thread(void *arg) {
     (void)arg;
     pthread_mutex_lock(&lt_timer_mu);
     for (;;) {
         int64_t now = lt_monotonic_nanos();
         int64_t next = INT64_MAX;
+        if (lt_sweep_hook) {
+            if (now - lt_sweep_last >= 1000000000) {
+                lt_sweep_last = now;
+                lt_sweep_hook(now);
+            }
+            next = lt_sweep_last + 1000000000;
+        }
         for (lt_deadline **p = &lt_deadlines; *p;) {
             lt_deadline *d = *p;
             if (d->at <= now) {

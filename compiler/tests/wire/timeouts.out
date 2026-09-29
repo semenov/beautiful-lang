@@ -1,0 +1,4 @@
+half a head: closed in time: true
+idle: closed in time: true
+slow body: closed in time: true
+a slow handler: true

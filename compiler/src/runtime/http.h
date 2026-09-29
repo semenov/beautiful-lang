@@ -26,7 +26,70 @@ typedef struct {
     int64_t body_len;
     // the client's IP address as text
     const char *client_ip;
+    // the connection's timeouts (see lt_hconn), for reading the body
+    struct lt_hconn *hc;
+    int64_t read_ns;
 } lt_http_raw;
+
+#ifdef LT_THREADS
+// ---------------------------------------------------------------- server timeouts
+// Every open connection is in a list with its deadline: when it must have
+// sent the next request (idle), its whole head, the next piece of its body,
+// or taken the whole response. The timer thread sweeps the list once a
+// second and cancels a connection's task past its deadline, which ends its
+// wait on the socket, and the connection is closed. A request's handler
+// runs without a deadline.
+typedef struct lt_hconn {
+    struct lt_task *task;
+    int64_t deadline; // 0: none; -1: timed out (the sweep took it)
+    struct lt_hconn *prev, *next;
+} lt_hconn;
+static lt_spin lt_hconn_lock;
+static lt_hconn *lt_hconns;
+
+static void lt_hconn_sweep(int64_t now) {
+    lt_spin_lock(&lt_hconn_lock);
+    for (lt_hconn *c = lt_hconns; c; c = c->next) {
+        int64_t d = __atomic_load_n(&c->deadline, __ATOMIC_SEQ_CST);
+        if (d > 0 && d <= now && __atomic_compare_exchange_n(&c->deadline, &d, -1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) lt_task_cancel(c->task);
+    }
+    lt_spin_unlock(&lt_hconn_lock);
+}
+static void lt_hconn_add(lt_hconn *c, struct lt_task *t) {
+    c->task = t;
+    c->deadline = 0;
+    c->prev = NULL;
+    lt_spin_lock(&lt_hconn_lock);
+    c->next = lt_hconns;
+    if (lt_hconns) lt_hconns->prev = c;
+    lt_hconns = c;
+    lt_spin_unlock(&lt_hconn_lock);
+    if (!__atomic_load_n(&lt_sweep_hook, __ATOMIC_ACQUIRE)) {
+        pthread_mutex_lock(&lt_timer_mu);
+        lt_sweep_hook = lt_hconn_sweep;
+        lt_timer_kick();
+        pthread_mutex_unlock(&lt_timer_mu);
+    }
+}
+static void lt_hconn_remove(lt_hconn *c) {
+    lt_spin_lock(&lt_hconn_lock);
+    if (c->prev) c->prev->next = c->next;
+    else lt_hconns = c->next;
+    if (c->next) c->next->prev = c->prev;
+    lt_spin_unlock(&lt_hconn_lock);
+}
+// The next deadline, `ns` from now (0: none); false if the connection has
+// already timed out.
+static bool lt_hconn_set(lt_hconn *c, int64_t ns) {
+    int64_t d = ns > 0 ? lt_monotonic_nanos() + ns : 0;
+    int64_t old = __atomic_exchange_n(&c->deadline, d, __ATOMIC_SEQ_CST);
+    if (old == -1) {
+        __atomic_store_n(&c->deadline, -1, __ATOMIC_SEQ_CST);
+        return false;
+    }
+    return true;
+}
+#endif
 
 typedef struct {
     int64_t status;
@@ -126,6 +189,7 @@ static void lt_http_simple(int fd, int status, const char *msg) {
 typedef struct {
     int fd;
     lt_fn handler;
+    int64_t idle_ns, read_ns, write_ns; // the server's timeouts (0: none)
 } lt_conn_arg;
 
 // Writes the status line and headers: the handler's, then `extra` (lines
@@ -355,6 +419,10 @@ static bool lt_http_fill(int fd, char **buf, size_t *cap, size_t *len, size_t ne
         ssize_t n = lt_sock_read(fd, *buf + *len, *cap - *len);
         if (n <= 0) return false;
         *len += (size_t)n;
+#ifdef LT_THREADS
+        // each piece of the body resets the read timeout
+        if (r && r->hc && !lt_hconn_set(r->hc, r->read_ns)) return false;
+#endif
     }
     return true;
 }
@@ -443,8 +511,13 @@ static void lt_http_conn(lt_task *t) {
     bool keep = true;
     char client_ip[64];
     lt_http_client_ip(fd, client_ip, sizeof client_ip);
+    lt_hconn hc;
+    lt_hconn_add(&hc, t);
     while (keep && !lt_http_stop) {
-        // the head: up to the empty line
+        // the head: up to the empty line, all of it within the read timeout
+        // once it has started; before that, the idle timeout
+        bool started = len > 0;
+        if (!lt_hconn_set(&hc, started ? a.read_ns : a.idle_ns)) goto done;
         char *end = NULL;
         size_t scanned = 0;
         for (;;) {
@@ -467,9 +540,15 @@ static void lt_http_conn(lt_task *t) {
             ssize_t n = lt_sock_read(fd, buf + len, cap - len);
             if (n <= 0) goto done;
             len += (size_t)n;
+            if (!started) {
+                started = true;
+                if (!lt_hconn_set(&hc, a.read_ns)) goto done;
+            }
         }
         lt_http_raw r;
         memset(&r, 0, sizeof r);
+        r.hc = &hc;
+        r.read_ns = a.read_ns;
         char *p = buf, *head_end = end;
         // request line: METHOD SP TARGET SP VERSION
         char *sp1 = memchr(p, ' ', (size_t)(head_end - p));
@@ -552,7 +631,13 @@ static void lt_http_conn(lt_task *t) {
         }
         lt_http_out out;
         memset(&out, 0, sizeof out);
+        if (!lt_hconn_set(&hc, 0)) {
+            free(chunked_body);
+            goto done;
+        }
         lt_http_dispatch(a.handler, &r, &out);
+        // the response within the write timeout (a stream may take its time)
+        lt_hconn_set(&hc, out.writer.fn ? 0 : a.write_ns);
         bool head_only = r.method_len == 4 && memcmp(r.method, "HEAD", 4) == 0;
         bool ok;
         if (out.writer.fn) ok = lt_http_send_stream(fd, &r, &out, keep, head_only);
@@ -572,6 +657,7 @@ static void lt_http_conn(lt_task *t) {
         len -= need;
     }
 done:
+    lt_hconn_remove(&hc);
     close(fd);
     free(buf);
     lt_fn_drop(a.handler);
@@ -579,14 +665,15 @@ done:
 
 // `host`: "" listens on every address (IPv4 and IPv6), "127.0.0.1" or
 // "::1" only on this machine, or an interface's address.
-static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, lt_fn handler);
+static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, int64_t idle_ns, int64_t read_ns, int64_t write_ns, lt_fn handler);
 static lt_err lt_http_serve(int64_t port, lt_fn handler) {
     lt_text *all = lt_text_cstr("");
-    lt_err e = lt_http_serve_on(all, port, 64 * 1024 * 1024, handler);
+    int64_t minute = (int64_t)60 * 1000000000;
+    lt_err e = lt_http_serve_on(all, port, 64 * 1024 * 1024, minute, minute, minute, handler);
     lt_text_drop(all);
     return e;
 }
-static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, lt_fn handler) {
+static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, int64_t idle_ns, int64_t read_ns, int64_t write_ns, lt_fn handler) {
     lt_http_max_body = max_body;
     int fd;
     int one = 1, zero = 0;
@@ -674,7 +761,7 @@ bound:
 #ifdef SO_NOSIGPIPE
         setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof one);
 #endif
-        lt_conn_arg ca = { c, handler };
+        lt_conn_arg ca = { c, handler, idle_ns, read_ns, write_ns };
         lt_fn_dup(handler);
         lt_spawn_detached(lt_http_conn, &ca, sizeof ca);
     }

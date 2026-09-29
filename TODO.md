@@ -143,7 +143,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] test helper `http.request` splits off the query
     - [ ] repeated headers; trailers; cookie Domain/Expires
     - [x] server options: bind address, body size limit (`http.serve_with`)
-    - [ ] server timeouts (slow clients, idle keep-alive): needs a timer wheel first; deadlines are a locked linked list now, too slow to arm per request
+    - [x] server timeouts (slow clients, idle keep-alive): `ServerOptions`
+          idle_timeout / read_timeout / write_timeout (60 s each); each
+          connection keeps a deadline, swept once a second (no lock per
+          request); tests/wire/timeouts.sh
     - [x] language: hex literals, `\u{...}` escapes, calling a stored
           function `r.handler(x)`, `if a is some(x) or ...` message, named
           function types take plain functions

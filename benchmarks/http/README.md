@@ -16,6 +16,7 @@ lang build hello.lang -o /tmp/hb-lang && /tmp/hb-lang &
 | server | req/s | CPU per request | memory |
 |---|---|---|---|
 | lang | 133k | 45 us | 9 MB |
+| lang, after the scheduler rewrite (2026-09-29) | 145k | 37 us | 9 MB |
 | Go net/http | 133k | 42 us | 25 MB |
 | fasthttp | 138k | 39 us | 16 MB |
 

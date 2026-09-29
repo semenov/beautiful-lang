@@ -1,0 +1,43 @@
+// Clients that are too slow get their connection closed: one that sends
+// half a head, one that stays idle, one that sends its body too slowly.
+// A handler that takes longer than the timeouts is fine.
+import io
+import net
+import process
+import time
+
+// Reads until the server closes; the answer says whether that happened
+// about when the 2-second timeout says (the check runs once a second).
+fn closed_in_time(conn: io.Stream) throws -> Bool {
+  let t0 = time.now()
+  while true {
+    let got = try conn.read(1000) catch _ { break }
+    if got.is_empty() {
+      break
+    }
+  }
+  let ms = t0.elapsed().millis()
+  return ms >= 1000 and ms <= 4500
+}
+
+fn main() throws {
+  let port = try process.args()[0].to_int()
+  with c = try net.connect("127.0.0.1", port: port) {
+    try c.write_text("GET /slow HTTP/1.1\r\nhost: x\r\n")
+    print("half a head: closed in time: ${try closed_in_time(c)}")
+  }
+  with c = try net.connect("127.0.0.1", port: port) {
+    print("idle: closed in time: ${try closed_in_time(c)}")
+  }
+  with c = try net.connect("127.0.0.1", port: port) {
+    try c.write_text("POST /echo HTTP/1.1\r\nhost: x\r\ncontent-length: 10\r\n\r\nab")
+    try time.sleep(time.seconds(1))
+    try c.write_text("cd")
+    print("slow body: closed in time: ${try closed_in_time(c)}")
+  }
+  with c = try net.connect("127.0.0.1", port: port) {
+    try c.write_text("GET /slow HTTP/1.1\r\nhost: x\r\nconnection: close\r\n\r\n")
+    let answer = try c.read_all()
+    print("a slow handler: ${(try answer.text()).contains("slow but fine")}")
+  }
+}

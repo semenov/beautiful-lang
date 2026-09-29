@@ -1,0 +1,15 @@
+// A server with short timeouts, for timeouts.sh.
+import env
+import http
+import time
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "18191").to_int()
+  var router = http.Router()
+  router.post("/echo", req => http.text(200, "${req.body.length} bytes"))
+  router.get("/slow", req => {
+    try time.sleep(time.seconds(3))
+    http.text(200, "slow but fine")
+  })
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1", idle_timeout: time.seconds(2), read_timeout: time.seconds(2), write_timeout: time.seconds(2)))
+}

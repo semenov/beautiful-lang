@@ -265,7 +265,9 @@ Weak spots, known:
   each time) and hands ready tasks over from a separate poller thread.
   Go polls from the idle workers themselves.
 - **`time.timeout` deadlines** are a list behind a mutex: fine for a few,
-  not for arming one per request (server timeouts need a timer wheel).
+  not for thousands at once. (HTTP server timeouts don't use them: each
+  connection keeps its deadline, and the timer thread sweeps them once a
+  second, so they're up to a second late.)
 - **Spawning** costs about three times what it costs in Go (see the table).
 - **Atomic reference counts** in any program that uses tasks cost about 10%
   on allocation-heavy code, even for values that never leave one task.

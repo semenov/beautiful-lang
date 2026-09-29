@@ -949,6 +949,16 @@ pub type ServerOptions {
   host: String = ""
   // bigger request bodies are answered with 413
   max_body: Int = 67108864
+  // A connection is closed when the client takes longer than this to start
+  // its next request (keep-alive).
+  idle_timeout: time.Duration = time.seconds(60)
+  // ...to send a request's whole head once it started, or the next piece of
+  // its body (slow clients can't hold connections open).
+  read_timeout: time.Duration = time.seconds(60)
+  // ...to take the whole response (a stream, `http.stream`, isn't limited).
+  // A handler itself runs as long as it needs. A zero Duration turns a
+  // timeout off.
+  write_timeout: time.Duration = time.seconds(60)
 }
 
 pub fn serve_with(router: Router, options: ServerOptions) throws
