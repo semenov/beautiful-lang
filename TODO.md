@@ -14,18 +14,18 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         (its -O1 compile is 0.38 s of the 0.62); smaller generated C
         (stdlib code such as Router.route is compiled into every program);
         `build` with the cached runtime too, if it doesn't cost speed
-- [ ] **A critic's review of the language** (research/critique.md, the
-      answers in research/critique-response.md; Vlad's choices in DESIGN.md
-      "After the critic's review"):
-  - [ ] new errors: optional in text; `m[k] op=`; lambda + later-assigned
+- [x] **A critic's review of the language** (Vlad, 2026-09-29): write the
+      complaints, then fix the language or explain in the README why it's
+      right; keep it simple and fast. research/critique.md (38 complaints),
+      research/critique-response.md (the answer to each), DESIGN.md "After
+      the critic's review", README "Choices that surprise people".
+  - [x] new errors: optional in text; `m[k] op=`; lambda + later-assigned
         var; unused let/import
-  - [x] generic bounds: not added (Vlad, after a second look)
-  - [x] private fields: not added (Vlad, after a second look)
-  - [ ] `is` through `cause`
-  - [x] SQL pieces / list parameters: not now (Vlad, after a second look)
-  - [x] argument names: left as they are (Vlad, after a second look)
-  - [x] ranges: left as they are (Vlad, after a second look)
-  - [ ] fixes: changed-a-copy error, pattern names, flow typing through
+  - [x] generic bounds, private fields, SQL pieces, argument names,
+        ranges: all left as they are (Vlad, after a second look)
+  - [x] no nested functions (Vlad); the error shows a typed lambda
+  - [x] `is` through `cause`
+  - [x] fixes: changed-a-copy error, pattern names, flow typing through
         `or`, `with` captured by an escaping lambda, Shared-in-Shared,
         Duration ordered, newtypes ordered, `is` crash, `plumb test` for
         the project, hints, docs (div, Decimal, deadlocks, background jobs)
@@ -33,10 +33,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         number parsing, duplicate JSON keys, regex groups[0] + literal
         check, `chunks(0)`, in-place `s = "${s}..."`
   - [x] README: "Choices that surprise people"
-  - [ ] later: stack traces, mutating through interface elements,
-        Decimal 38 digits: write the complaints, then
-      fix the language or explain in the README why it's right; keep it
-      simple and fast (Vlad, 2026-09-29)
+  - [ ] later: call stacks on panic and locations on errors; changing
+        through interface-typed list elements; Decimal with 38 digits;
+        `var ys = xs; ys.append(2)` never read (a method call counts as a
+        read); a lock wait-for graph for deadlocks in servers
 - [x] **A String is always valid UTF-8** (Vlad chose A, 2026-09-29):
       invalid bytes become U+FFFD on the way in; `Bytes.text()` strict,
       `Bytes.text_lossy()`; HTTP `text()` can't fail
