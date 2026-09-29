@@ -43,7 +43,7 @@ LT_INLINE void lt_handle_drop(lt_handle *h) {
 
 // ---------------------------------------------------------------- files
 
-static lt_err lt_files_read(lt_text *path, lt_text **out) {
+static lt_err lt_files_read_now(lt_text *path, lt_text **out) {
     FILE *f = fopen(path->data, "rb");
     if (!f) return lt_os_error("can't read", path);
     struct stat st;
@@ -78,8 +78,15 @@ static lt_err lt_files_read(lt_text *path, lt_text **out) {
     free(buf);
     return (lt_err){ 0 };
 }
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_read(lt_text *path, lt_text **out) {
+    lt_block_enter();
+    lt_err e = lt_files_read_now(path, out);
+    lt_block_exit();
+    return e;
+}
 
-static lt_err lt_files_write_mode(lt_text *path, lt_text *text, const char *mode) {
+static lt_err lt_files_write_mode_now(lt_text *path, lt_text *text, const char *mode) {
     FILE *f = fopen(path->data, mode);
     if (!f) return lt_os_error("can't write", path);
     if (fwrite(text->data, 1, (size_t)text->len, f) != (size_t)text->len) {
@@ -89,6 +96,13 @@ static lt_err lt_files_write_mode(lt_text *path, lt_text *text, const char *mode
     }
     if (fclose(f) != 0) return lt_os_error("can't write", path);
     return (lt_err){ 0 };
+}
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_write_mode(lt_text *path, lt_text *text, const char *mode) {
+    lt_block_enter();
+    lt_err e = lt_files_write_mode_now(path, text, mode);
+    lt_block_exit();
+    return e;
 }
 
 static bool lt_files_exists(lt_text *path) {
@@ -169,7 +183,7 @@ static bool lt_walk_into(char *buf, size_t len, size_t cap, lt_texts **out, lt_t
     return true;
 }
 
-static lt_err lt_files_walk(lt_text *dir, lt_texts **out) {
+static lt_err lt_files_walk_now(lt_text *dir, lt_texts **out) {
     char buf[4096];
     if (dir->len >= 4000) {
         errno = ENAMETOOLONG;
@@ -186,6 +200,13 @@ static lt_err lt_files_walk(lt_text *dir, lt_texts **out) {
     qsort(l->items, (size_t)l->len, sizeof(lt_text *), lt_cmp_texts);
     *out = l;
     return (lt_err){ 0 };
+}
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_walk(lt_text *dir, lt_texts **out) {
+    lt_block_enter();
+    lt_err e = lt_files_walk_now(dir, out);
+    lt_block_exit();
+    return e;
 }
 
 static bool lt_rm_tree(char *buf, size_t len, size_t cap) {
@@ -214,7 +235,7 @@ static bool lt_rm_tree(char *buf, size_t len, size_t cap) {
 }
 
 // A file, or a directory with everything in it; nothing there is fine.
-static lt_err lt_files_delete_all(lt_text *path) {
+static lt_err lt_files_delete_all_now(lt_text *path) {
     char buf[4096];
     if (path->len >= 4000 || path->len == 0) {
         errno = path->len ? ENAMETOOLONG : EINVAL;
@@ -225,6 +246,13 @@ static lt_err lt_files_delete_all(lt_text *path) {
     while (len > 1 && buf[len - 1] == '/') buf[--len] = 0;
     if (!lt_rm_tree(buf, len, sizeof buf)) return lt_os_error("can't delete", path);
     return (lt_err){ 0 };
+}
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_delete_all(lt_text *path) {
+    lt_block_enter();
+    lt_err e = lt_files_delete_all_now(path);
+    lt_block_exit();
+    return e;
 }
 
 // Glob matching: `*` (within a path part), `?`, `**` (any number of
@@ -347,12 +375,19 @@ static lt_err lt_files_make_dir(lt_text *path) {
     return (lt_err){ 0 };
 }
 
-static lt_err lt_files_copy(lt_text *from, lt_text *to) {
+static lt_err lt_files_copy_now(lt_text *from, lt_text *to) {
     lt_text *data = NULL;
     lt_err e = lt_files_read(from, &data);
     if (e.obj) return e;
     e = lt_files_write_mode(to, data, "wb");
     lt_text_drop(data);
+    return e;
+}
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_copy(lt_text *from, lt_text *to) {
+    lt_block_enter();
+    lt_err e = lt_files_copy_now(from, to);
+    lt_block_exit();
     return e;
 }
 
@@ -1105,12 +1140,19 @@ static lt_err lt_files_read_bytes(lt_text *path, lt_bytes **out) {
     lt_text_drop(t);
     return (lt_err){ 0 };
 }
-static lt_err lt_files_write_bytes(lt_text *path, lt_bytes *b) {
+static lt_err lt_files_write_bytes_now(lt_text *path, lt_bytes *b) {
     FILE *f = fopen(path->data, "wb");
     if (!f) return lt_os_error("can't write", path);
     size_t n = fwrite(b->data, 1, (size_t)b->len, f);
     if (fclose(f) != 0 || n != (size_t)b->len) return lt_os_error("can't write", path);
     return (lt_err){ 0 };
+}
+// (the disk can be slow: other workers may take over while it waits)
+static lt_err lt_files_write_bytes(lt_text *path, lt_bytes *b) {
+    lt_block_enter();
+    lt_err e = lt_files_write_bytes_now(path, b);
+    lt_block_exit();
+    return e;
 }
 
 // ---------------------------------------------------------------- regular expressions
