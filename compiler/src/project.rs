@@ -8,6 +8,12 @@
 //
 //     [dependencies]
 //     router = { git = "https://github.com/someone/router", version = "v1.2.0" }
+//     redis = { git = "https://github.com/someone/tools", version = "v2.0.0", path = "packages/redis" }
+//     mylib = { path = "../mylib" }
+//
+// `path` with `git` is a package in a subdirectory of the repository (one
+// repository can hold several); `path` alone is a package on this disk
+// (for developing packages side by side), relative to the project.
 //
 // `lang add` records a dependency and pins the exact commit in `lang.lock`.
 // Packages are fetched with git into ~/.lang/packages/<name>/<commit>/.
@@ -29,6 +35,7 @@ pub struct Manifest {
 pub struct Dep {
     pub git: String,
     pub version: String,
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,9 +113,14 @@ pub fn read_manifest(root: &Path) -> Result<Option<Manifest>, String> {
         for (name, v) in d {
             match v {
                 TomlValue::Table(tbl) => {
-                    let git = tbl.get("git").cloned().ok_or(format!("{}: dependency `{}` needs `git = \"...\"`", path.display(), name))?;
+                    let sub = tbl.get("path").cloned().unwrap_or_default();
+                    let git = match tbl.get("git").cloned() {
+                        Some(g) => g,
+                        None if !sub.is_empty() => String::new(),
+                        None => return Err(format!("{}: dependency `{}` needs `git = \"...\"` (or `path = \"...\"` for a package on this disk)", path.display(), name)),
+                    };
                     let version = tbl.get("version").cloned().unwrap_or_default();
-                    m.deps.insert(name.clone(), Dep { git, version });
+                    m.deps.insert(name.clone(), Dep { git, version, path: sub });
                 }
                 TomlValue::Str(_) => return Err(format!("{}: write `{} = {{ git = \"...\", version = \"...\" }}`", path.display(), name)),
             }
@@ -122,11 +134,17 @@ pub fn write_manifest(root: &Path, m: &Manifest) -> Result<(), String> {
     if !m.deps.is_empty() {
         s += "\n[dependencies]\n";
         for (n, d) in &m.deps {
-            if d.version.is_empty() {
-                s += &format!("{} = {{ git = \"{}\" }}\n", n, d.git);
-            } else {
-                s += &format!("{} = {{ git = \"{}\", version = \"{}\" }}\n", n, d.git, d.version);
+            let mut parts = vec![];
+            if !d.git.is_empty() {
+                parts.push(format!("git = \"{}\"", d.git));
             }
+            if !d.version.is_empty() {
+                parts.push(format!("version = \"{}\"", d.version));
+            }
+            if !d.path.is_empty() {
+                parts.push(format!("path = \"{}\"", d.path));
+            }
+            s += &format!("{} = {{ {} }}\n", n, parts.join(", "));
         }
     }
     std::fs::write(root.join("lang.toml"), s).map_err(|e| e.to_string())
@@ -236,6 +254,24 @@ pub fn resolve(root: &Path, update: bool) -> Result<BTreeMap<String, PathBuf>, S
     let mut pending: Vec<(String, Dep, String)> = manifest.deps.iter().map(|(n, d)| (n.clone(), d.clone(), manifest.name.clone())).collect();
     let mut changed = false;
     while let Some((name, dep, wanted_by)) = pending.pop() {
+        if dep.git.is_empty() {
+            // on this disk: nothing to download or pin
+            if dirs.contains_key(&name) {
+                continue;
+            }
+            let dir = root.join(&dep.path);
+            if !dir.join(format!("{}.lang", name)).exists() {
+                return Err(format!("package `{}`: there is no {}.lang in {}", name, name, dir.display()));
+            }
+            if let Some(sub) = read_manifest(&dir)? {
+                for (n, d) in sub.deps {
+                    let d = if d.git.is_empty() { Dep { path: dir.join(&d.path).to_string_lossy().to_string(), ..d } } else { d };
+                    pending.push((n, d, name.clone()));
+                }
+            }
+            dirs.insert(name, dir);
+            continue;
+        }
         if dirs.contains_key(&name) {
             if let Some(l) = lock.get(&name) {
                 if l.git != dep.git {
@@ -259,7 +295,10 @@ pub fn resolve(root: &Path, update: bool) -> Result<BTreeMap<String, PathBuf>, S
                 fetch(&name, &dep)?
             }
         };
-        let dir = package_path(&name, &locked.commit);
+        let dir = package_path(&name, &locked.commit).join(&dep.path);
+        if !dir.join(format!("{}.lang", name)).exists() {
+            return Err(format!("package `{}`: there is no {}.lang in {}{}", name, name, dep.git, if dep.path.is_empty() { String::new() } else { format!(" / {}", dep.path) }));
+        }
         if let Some(sub) = read_manifest(&dir)? {
             for (n, d) in sub.deps {
                 pending.push((n, d, name.clone()));

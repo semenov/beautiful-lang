@@ -7,6 +7,9 @@ pub type Url {
   path: Text
   query: Map<Text, Text>
   fragment: Text?
+  // "postgres://ada:secret@db:5432/app": "ada" and "secret" (decoded)
+  user: Text? = none
+  password: Text? = none
 }
 
 // "https://example.com:8080/a/b?x=1#top"
@@ -36,7 +39,18 @@ pub fn parse(text: Text) throws -> Url {
     rest = q_parts[0]
   }
   let slash = rest.split("/")
-  let authority = slash[0]
+  var authority = slash[0]
+  var user: Text? = none
+  var password: Text? = none
+  let at = authority.split("@")
+  if at.length > 1 {
+    let info = at.take(at.length - 1).join("@").split(":")
+    user = try decode(info[0])
+    if info.length > 1 {
+      password = try decode(info.drop(1).join(":"))
+    }
+    authority = at[at.length - 1]
+  }
   let full_path = if slash.length > 1 { "/${slash.drop(1).join("/")}" } else { "/" }
   var host = authority
   var port: Int? = none
@@ -47,7 +61,7 @@ pub fn parse(text: Text) throws -> Url {
       throw Failure(message: "url: bad port in \"${text}\"")
     }
   }
-  return Url(scheme: scheme, host: host.lower(), port: port, path: full_path, query: query, fragment: fragment)
+  return Url(scheme: scheme, host: host.lower(), port: port, path: full_path, query: query, fragment: fragment, user: user, password: password)
 }
 
 // Percent-encodes text for a URL part: "a b&c" -> "a%20b%26c"

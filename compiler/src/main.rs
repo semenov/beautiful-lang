@@ -16,7 +16,8 @@ use std::process::{Command, ExitCode};
 
 const USAGE: &str = "usage:
   lang new <name>                   create a project
-  lang add <name> <git-url> [--version <tag>]   add a package
+  lang add <name> <git-url> [--version <tag>] [--path <dir>]   add a package
+  lang add <name> --path <dir>      add a package on this disk
   lang fetch                        download the packages in lang.lock
   lang update                       move packages to their newest matching versions
   lang run <file.lang> [args]       compile and run
@@ -275,18 +276,21 @@ fn project_command(args: &[String]) -> Option<ExitCode> {
             Some(ExitCode::SUCCESS)
         }
         "add" => {
+            let opt = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
+            let version = opt("--version");
+            let path = opt("--path");
             let (name, git) = match (args.get(1), args.get(2)) {
-                (Some(n), Some(g)) => (n.clone(), g.clone()),
-                _ => return fail("usage: lang add <name> <git-url> [--version <tag>]".into()),
+                (Some(n), Some(g)) if !g.starts_with("--") => (n.clone(), g.clone()),
+                (Some(n), _) if !path.is_empty() => (n.clone(), String::new()),
+                _ => return fail("usage: lang add <name> <git-url> [--version <tag>] [--path <dir in the repository>], or lang add <name> --path <dir>".into()),
             };
-            let version = args.iter().position(|a| a == "--version").and_then(|i| args.get(i + 1)).cloned().unwrap_or_default();
             let root = project::find_root(&cwd.join("x.lang"));
             let mut m = match project::read_manifest(&root) {
                 Ok(Some(m)) => m,
                 Ok(None) => return fail("there is no lang.toml here; create a project with `lang new <name>`".into()),
                 Err(e) => return fail(e),
             };
-            m.deps.insert(name.clone(), project::Dep { git, version });
+            m.deps.insert(name.clone(), project::Dep { git, version, path });
             if let Err(e) = project::write_manifest(&root, &m) {
                 return fail(e);
             }

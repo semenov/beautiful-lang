@@ -403,7 +403,13 @@ impl<'a> Lowerer<'a> {
             }
             o => o,
         };
+        // `with r = ... { return r }`: the resource goes to the caller unclosed
+        let saved = self.fbr().cleanups.clone();
+        if let Op::Local(l) = v {
+            self.fb().cleanups.retain(|c| !matches!(c, Cleanup::Close { res, .. } if *res == l));
+        }
         self.run_cleanups(0, false);
+        self.fb().cleanups = saved;
         self.term(Term::Return(v));
     }
 

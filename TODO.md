@@ -8,12 +8,12 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Postgres package** (a separate package, not stdlib): wire protocol v3
       over `net`, SCRAM-SHA-256 auth, parameters, typed rows, transactions,
       TLS. Installable with `lang add`.
-- [ ] **Redis package** (separate package): RESP over `net`, commands,
+- [x] **Redis package** (`packages/redis`): RESP over `net`, commands,
       pipelining, pub/sub.
-  - [ ] `lang add` of a package in a subdirectory of a repository (so both
-        can live in this repo under `packages/`)
-  - [ ] a way for packages to take query parameters without `db`'s
-        compiler magic
+  - [x] `lang add` of a package in a subdirectory of a repository (so both
+        can live in this repo under `packages/`), and local packages
+  - [x] a way for packages to take query parameters without `db`'s
+        compiler magic (the `sql` module)
 - [ ] **zlib on streams**: gzip/gunzip a `Stream` piece by piece (big files,
       `content-encoding: gzip` responses)
 - [ ] **Docs**: README for the new language, AGENTS.md (cheat sheet for
@@ -22,6 +22,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 - [ ] **Port a small open-source project** to the language; note what's
       missing in the language and libraries and add it as I go
+
+- [ ] **Learn from fasthttp**: why Go's fasthttp beats net/http (buffer and
+      object reuse, no per-request allocations, lazy header parsing, worker
+      pool...) and apply what fits to our HTTP server; measure before/after
 
 ## Then: my own review of what's missing or weak
 

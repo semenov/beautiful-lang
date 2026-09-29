@@ -1,0 +1,41 @@
+import redis
+import time
+
+fn listen() throws -> List<Text> {
+  var got: List<Text> = []
+  with sub = try redis.subscribe("localhost:6379", channels: ["news"]) {
+    for _ in 0..<3 {
+      let m = try sub.receive()
+      got.append("${m.channel}: ${m.text}")
+    }
+  }
+  return got
+}
+
+fn main() throws {
+  let listener = spawn listen()
+  try time.sleep(time.millis(200))
+  with db = try redis.connect("localhost:6379") {
+    for i in 0..<3 {
+      let _ = try db.publish("news", message: "story ${i}")
+    }
+  }
+  for line in try listener.wait() {
+    print(line)
+  }
+  with db = try redis.connect("localhost:6379") {
+    let start = time.now()
+    for i in 0..<20000 {
+      try db.set("k${i}", value: "v")
+    }
+    let ms = start.elapsed().millis()
+    print("20000 sets one by one: ${(20000 * 1000).div(ms + 1)} per second")
+    var batch: List<List<Text>> = []
+    for i in 0..<20000 {
+      batch.append(["SET", "k${i}", "v"])
+    }
+    let s2 = time.now()
+    let _ = try db.pipeline(batch)
+    print("20000 sets pipelined: ${(20000 * 1000).div(s2.elapsed().millis() + 1)} per second")
+  }
+}

@@ -678,6 +678,15 @@ impl Checker {
                 let def = &self.prog.defs[*d];
                 if matches!(def.kind, TypeKind::Builtin) && def.module != 0 && self.modules[def.module].privileged {
                     def.methods.get("close").copied()
+                } else if matches!(def.kind, TypeKind::Record { .. }) {
+                    // a record with `close(self)` owns something to close: a resource too
+                    let id = def.methods.get("close").copied()?;
+                    let f = &self.prog.fns[id];
+                    if f.self_mode != SelfMode::None && f.params.is_empty() {
+                        Some(id)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 }
@@ -2806,7 +2815,14 @@ impl Checker {
                                 self.err(a.span, format!("field `{}` is given twice", name));
                             }
                             let fty = fields[i].ty.subst(&targs);
+                            // a resource's fields may take new resources: it owns and closes them
+                            let owner_closes = self.resource_close(&Ty::Adt(d, targs.clone())).is_some();
+                            let rf = self.resolve(&fty);
+                            if owner_closes && self.resource_close(&rf).is_some() {
+                                self.fcx().with_value = true;
+                            }
                             out[i] = Some(self.expr_coerce(&a.value, &fty));
+                            self.fcx().with_value = false;
                         }
                         None => {
                             let cands: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
