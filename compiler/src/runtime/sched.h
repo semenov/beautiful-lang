@@ -1444,10 +1444,7 @@ static void lt_task_panic_hook(const char *msg, int line) {
 
 // ---------------------------------------------------------------- start
 
-static int lt_ncpu(void) {
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
-    return n < 1 ? 1 : (int)n;
-}
+
 
 // Ctrl-C with tasks: cancel main's task (and so all of them) from a
 // thread, since a signal handler can't take locks.

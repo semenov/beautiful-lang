@@ -8,7 +8,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `plumb init` instead of `plumb new` (the current directory becomes the
       project) (Vlad, 2026-09-29)
 - [ ] **Compile time vs Go**: benchmark, fix what's slow (Vlad, 2026-09-29)
-- [ ] **A typical backend on one core in Docker**, Plumb vs Go
+- [x] **A typical backend on one core in Docker**, Plumb vs Go
       (benchmarks/backend) (Vlad, 2026-09-29)
 - [ ] **Vlad's decisions of 2026-09-29** (details in HANDOFF.md):
   - [x] `fn to_string(self)` used by `"${x}"`; readable stdlib types

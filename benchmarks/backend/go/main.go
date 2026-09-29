@@ -228,6 +228,10 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+	// MAX_CONNS: the pool's size (database/sql's default has no limit)
+	if n, err := strconv.Atoi(os.Getenv("MAX_CONNS")); err == nil && n > 0 {
+		db.SetMaxOpenConns(n)
+	}
 	for _, q := range []string{
 		"create table if not exists users (id integer primary key, name text not null, email text not null unique)",
 		"create table if not exists notes (id integer primary key, user_id integer not null, title text not null, body text not null, created_at integer not null)",

@@ -55,6 +55,40 @@ static const char *lt_file = "?";
 #define LT_UNIQUE(p) ((p)->rc == 1)
 #endif
 
+// ---------------------------------------------------------------- CPUs
+
+// The CPUs this program may use: PLUMB_WORKERS if set; else the online
+// CPUs, fewer if the process is pinned to some (taskset, docker
+// --cpuset-cpus) or its cgroup has a CPU quota (docker --cpus, a
+// Kubernetes limit), rounded up.
+static int lt_ncpu(void) {
+    static int cached;
+    if (cached) return cached;
+    const char *env = getenv("PLUMB_WORKERS");
+    long n = env ? atol(env) : 0;
+    if (n < 1) {
+        n = sysconf(_SC_NPROCESSORS_ONLN);
+#ifdef __linux__
+        cpu_set_t set;
+        if (sched_getaffinity(0, sizeof set, &set) == 0 && CPU_COUNT(&set) > 0 && CPU_COUNT(&set) < n) n = CPU_COUNT(&set);
+        FILE *f = fopen("/sys/fs/cgroup/cpu.max", "r");
+        if (f) {
+            char quota[32];
+            long period;
+            if (fscanf(f, "%31s %ld", quota, &period) == 2 && strcmp(quota, "max") != 0 && period > 0) {
+                long q = (atol(quota) + period - 1) / period;
+                if (q >= 1 && q < n) n = q;
+            }
+            fclose(f);
+        }
+#endif
+    }
+    if (n < 1) n = 1;
+    if (n > 256) n = 256;
+    cached = (int)n;
+    return cached;
+}
+
 // ---------------------------------------------------------------- spin locks
 
 typedef struct { int v; } lt_spin;

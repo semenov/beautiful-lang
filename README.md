@@ -229,6 +229,10 @@ another one; there is no `async`/`await`, and code reads top to bottom.
   (16 KB for a small task). A task that goes deeper faults once, and the
   fault handler opens the rest; past 8 MB it's a clear "stack overflow"
   panic. Stacks are reused.
+- **Workers:** one thread per CPU the program may use: the online CPUs, or
+  fewer when the process is pinned (taskset, `docker --cpuset-cpus`) or its
+  cgroup has a CPU quota (`docker --cpus`, a Kubernetes limit), rounded up.
+  `PLUMB_WORKERS=n` sets it.
 - **Run queues:** each worker thread has its own queue. A task made ready on
   a worker goes into that worker's queue; a worker with nothing to do takes
   from a global queue (used by the timer and I/O threads), then steals half

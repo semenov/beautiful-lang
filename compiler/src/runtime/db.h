@@ -166,7 +166,7 @@ static lt_err lt_db_open(lt_text *path, lt_handle **out) {
     d->file = p;
     // each handle to ":memory:" would be a database of its own
     bool memory = strcmp(p, ":memory:") == 0 || strstr(p, "mode=memory") != NULL;
-    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    int n = lt_ncpu();
     d->max = memory ? 1 : (n < 4 ? 4 : n > 32 ? 32 : n);
     d->idle = (sqlite3 **)calloc((size_t)d->max, sizeof(sqlite3 *));
 #ifdef LT_THREADS

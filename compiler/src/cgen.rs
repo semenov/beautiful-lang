@@ -3930,6 +3930,8 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.wants_interrupt {
             out += "#define LT_WANTS_INTERRUPT 1\n";
         }
+        // before any system header: sched_getaffinity and CPU_COUNT on Linux
+        out += "#ifdef __linux__\n#define _GNU_SOURCE 1\n#include <sched.h>\n#endif\n";
         out += "#include <stdint.h>\n";
         out += include_str!("runtime/unicode.h");
         out += include_str!("runtime/rt.h");

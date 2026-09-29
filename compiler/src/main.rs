@@ -698,16 +698,16 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         libs = static_libs(&libs);
         cmd.arg("-static");
     }
-    cmd.args(["-std=gnu11", "-w", "-fwrapv"]).arg("-lm").args(&libs);
+    cmd.args(["-std=gnu11", "-w", "-fwrapv"]);
     // the same C with the same compiler and flags gives the same program:
     // take it from the cache instead of compiling again
     let key = {
         let mut h = Fnv(0xcbf29ce484222325);
         h.add(c.as_bytes());
         h.add(cc.as_bytes());
-        for a in cmd.get_args() {
+        for a in cmd.get_args().map(|a| a.as_encoded_bytes()).chain(libs.iter().map(|l| l.as_bytes())) {
             h.add(b"\0");
-            h.add(a.as_encoded_bytes());
+            h.add(a);
         }
         format!("{:016x}", h.0)
     };
@@ -721,7 +721,8 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         let _ = std::fs::remove_file(&c_path);
         return true;
     }
-    let status = cmd.arg("-o").arg(exe).arg(&c_path).status();
+    // libraries after the source: GNU ld only takes what's needed so far
+    let status = cmd.arg("-o").arg(exe).arg(&c_path).arg("-lm").args(&libs).status();
     // kept when the C compiler fails: the message points at it
     if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
         let _ = std::fs::remove_file(&c_path);
