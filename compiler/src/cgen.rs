@@ -2787,6 +2787,13 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "int_inc" => format!("({} + 1)", a[0]),
             "Int.to_float" => format!("((double){})", a[0]),
             "Int.to_string" => format!("lt_int_to_text({})", a[0]),
+            "Int.character" => format!("lt_code_point_text({})", a[0]),
+            "String.code_points" => {
+                let l = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::Int]));
+                self.need(H::Ops, l);
+                let lc = self.tys[l].c.clone();
+                format!("({{ lt_text *t_ = {}; {lc} l_ = {lc}_new(t_->len); const unsigned char *s_ = (const unsigned char *)t_->data, *e_ = s_ + t_->len; while (s_ < e_) l_->items[l_->len++] = lt_utf8_next(&s_, e_); l_; }})", a[0], lc = lc)
+            }
             "Int.div" => format!("lt_div({}, {}, {})", a[0], a[1], line),
             "Int.abs" => format!("lt_abs({}, {})", a[0], line),
             "Int.pow" => format!("lt_ipow({}, {}, {})", a[0], a[1], line),
@@ -3693,6 +3700,8 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.wants_interrupt {
             out += "#define LT_WANTS_INTERRUPT 1\n";
         }
+        out += "#include <stdint.h>\n";
+        out += include_str!("runtime/unicode.h");
         out += include_str!("runtime/rt.h");
         if self.threads {
             out += include_str!("runtime/sched.h");

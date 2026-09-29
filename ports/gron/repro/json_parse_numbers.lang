@@ -1,4 +1,4 @@
-// json.parse turns -0 into 0 and 1e400 into Infinity without an error, and
+// FIXED. Was: json.parse turns -0 into 0 and 1e400 into Infinity without an error, and
 // json.encode then writes Infinity as null: data silently changes.
 import json
 fn main() throws {

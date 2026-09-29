@@ -48,11 +48,14 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       - [ ] the rest: atomic refcounts, and a call to find the thread's heap
     - [x] top-level `let` list rebuilt on every use (230 ns per read of a
           2000-element table): make them static, built once
-    - [ ] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
+    - [x] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
+          (-0 stays -0; too large is an error, as in Go)
     - [ ] JSON numbers as written (`json.Value.Number` is a Float; gron wrote
           a 700-line JSON of its own) -- waits for Vlad
-    - [ ] Unicode: `is_letter` is not the letter category (digits of other
+    - [x] Unicode: `is_letter` is not the letter category (digits of other
           scripts, marks, Ⅻ); code point <-> character conversion
+          (generated tables: L/Lu/Ll and case mappings, so lower/upper work
+          past ASCII too; `String.code_points()`, `Int.character()`)
     - [ ] `http.ResponseStream` isn't an `io.Stream`
     - [ ] file errors have no kinds (NotFound, ...); `files.read` of a
           directory gives empty text instead of an error

@@ -721,23 +721,6 @@ static bool lt_text_contains(lt_text *t, lt_text *part) { return lt_find(t->data
 static bool lt_text_starts_with(lt_text *t, lt_text *p) { return p->len <= t->len && memcmp(t->data, p->data, (size_t)p->len) == 0; }
 static bool lt_text_ends_with(lt_text *t, lt_text *p) { return p->len <= t->len && memcmp(t->data + t->len - p->len, p->data, (size_t)p->len) == 0; }
 
-static lt_text *lt_text_lower(lt_text *t) {
-    lt_text *r = lt_text_new(t->len);
-    for (int64_t i = 0; i < t->len; i++) {
-        char c = t->data[i];
-        r->data[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
-    }
-    return r;
-}
-static lt_text *lt_text_upper(lt_text *t) {
-    lt_text *r = lt_text_new(t->len);
-    for (int64_t i = 0; i < t->len; i++) {
-        char c = t->data[i];
-        r->data[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
-    }
-    return r;
-}
-
 LT_INLINE bool lt_is_space(char c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == '\f' || c == '\v'; }
 
 static lt_text *lt_text_trim(lt_text *t) {
@@ -1622,13 +1605,93 @@ static uint32_t lt_utf8_next(const unsigned char **s, const unsigned char *e) {
     return c;
 }
 
-// letters of any script: ASCII letters, and code points past Latin-1's
-// symbols that aren't punctuation, symbols or spaces
-static bool lt_cp_letter(uint32_t c) {
-    if (c < 0x80) return isalpha((int)c);
-    if (c < 0xC0 || c == 0xD7 || c == 0xF7) return false;
-    if ((c >= 0x2000 && c <= 0x2BFF) || (c >= 0x3000 && c <= 0x303F) || (c >= 0xFE30 && c <= 0xFE6F) || (c >= 0xFF00 && c <= 0xFF20) || (c >= 0x1F000 && c <= 0x1FAFF) || (c >= 0x2E00 && c <= 0x2E7F)) return false;
-    return true;
+static bool lt_uc_in(const uint32_t (*t)[2], size_t n, uint32_t c) {
+    size_t lo = 0, hi = n;
+    while (lo < hi) {
+        size_t m = (lo + hi) / 2;
+        if (c < t[m][0]) hi = m;
+        else if (c > t[m][1]) lo = m + 1;
+        else return true;
+    }
+    return false;
+}
+#define LT_UC_IN(t, c) lt_uc_in(t, sizeof(t) / sizeof(t[0]), c)
+// the Unicode letter categories (L, Lu, Ll)
+static bool lt_cp_letter(uint32_t c) { return c < 0x80 ? isalpha((int)c) : LT_UC_IN(lt_uc_letter, c); }
+static bool lt_cp_upper(uint32_t c) { return c < 0x80 ? (c >= 'A' && c <= 'Z') : LT_UC_IN(lt_uc_upper, c); }
+static bool lt_cp_lower(uint32_t c) { return c < 0x80 ? (c >= 'a' && c <= 'z') : LT_UC_IN(lt_uc_lower, c); }
+
+static uint32_t lt_uc_map(const uint32_t (*t)[2], size_t n, uint32_t c) {
+    size_t lo = 0, hi = n;
+    while (lo < hi) {
+        size_t m = (lo + hi) / 2;
+        if (c < t[m][0]) hi = m;
+        else if (c > t[m][0]) lo = m + 1;
+        else return t[m][1];
+    }
+    return c;
+}
+static int lt_utf8_len(uint32_t c) { return c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4; }
+static char *lt_utf8_write(char *w, uint32_t c) {
+    if (c < 0x80) *w++ = (char)c;
+    else if (c < 0x800) *w++ = (char)(0xC0 | (c >> 6)), *w++ = (char)(0x80 | (c & 0x3F));
+    else if (c < 0x10000) *w++ = (char)(0xE0 | (c >> 12)), *w++ = (char)(0x80 | ((c >> 6) & 0x3F)), *w++ = (char)(0x80 | (c & 0x3F));
+    else *w++ = (char)(0xF0 | (c >> 18)), *w++ = (char)(0x80 | ((c >> 12) & 0x3F)), *w++ = (char)(0x80 | ((c >> 6) & 0x3F)), *w++ = (char)(0x80 | (c & 0x3F));
+    return w;
+}
+
+// lower / upper: ASCII directly; other characters through the Unicode
+// one-to-one case mappings (the length in bytes may change)
+static lt_text *lt_text_case(lt_text *t, bool up) {
+    bool ascii = true;
+    for (int64_t i = 0; i < t->len; i++)
+        if ((unsigned char)t->data[i] >= 0x80) ascii = false;
+    if (ascii) {
+        lt_text *r = lt_text_new(t->len);
+        for (int64_t i = 0; i < t->len; i++) {
+            char c = t->data[i];
+            if (up) r->data[i] = (c >= 'a' && c <= 'z') ? (char)(c - 32) : c;
+            else r->data[i] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+        }
+        return r;
+    }
+    const uint32_t (*tab)[2] = up ? lt_uc_to_upper : lt_uc_to_lower;
+    size_t n = up ? sizeof(lt_uc_to_upper) / sizeof(lt_uc_to_upper[0]) : sizeof(lt_uc_to_lower) / sizeof(lt_uc_to_lower[0]);
+    const unsigned char *e = (const unsigned char *)t->data + t->len;
+    int64_t len = 0;
+    for (const unsigned char *s = (const unsigned char *)t->data; s < e;) {
+        const unsigned char *s0 = s;
+        uint32_t c = lt_utf8_next(&s, e);
+        if (c < 0x80) len += 1;
+        else if (s > e) len += e - s0; // cut short: kept as it is
+        else len += lt_utf8_len(lt_uc_map(tab, n, c));
+    }
+    lt_text *r = lt_text_new(len);
+    char *w = r->data;
+    for (const unsigned char *s = (const unsigned char *)t->data; s < e;) {
+        const unsigned char *s0 = s;
+        uint32_t c = lt_utf8_next(&s, e);
+        if (c < 0x80) *w++ = up ? ((c >= 'a' && c <= 'z') ? (char)(c - 32) : (char)c) : ((c >= 'A' && c <= 'Z') ? (char)(c + 32) : (char)c);
+        else if (s > e) {
+            memcpy(w, s0, (size_t)(e - s0));
+            w += e - s0;
+        } else w = lt_utf8_write(w, lt_uc_map(tab, n, c));
+    }
+    return r;
+}
+static lt_text *lt_text_lower(lt_text *t) { return lt_text_case(t, false); }
+static lt_text *lt_text_upper(lt_text *t) { return lt_text_case(t, true); }
+
+// Int.character: the UTF-8 of a code point; U+FFFD if it isn't one
+static lt_text *lt_code_point_text(int64_t c) {
+    if (c < 0 || c > 0x10FFFF || (c >= 0xD800 && c <= 0xDFFF)) c = 0xFFFD;
+    char b[4];
+    int n;
+    if (c < 0x80) b[0] = (char)c, n = 1;
+    else if (c < 0x800) b[0] = (char)(0xC0 | (c >> 6)), b[1] = (char)(0x80 | (c & 0x3F)), n = 2;
+    else if (c < 0x10000) b[0] = (char)(0xE0 | (c >> 12)), b[1] = (char)(0x80 | ((c >> 6) & 0x3F)), b[2] = (char)(0x80 | (c & 0x3F)), n = 3;
+    else b[0] = (char)(0xF0 | (c >> 18)), b[1] = (char)(0x80 | ((c >> 12) & 0x3F)), b[2] = (char)(0x80 | ((c >> 6) & 0x3F)), b[3] = (char)(0x80 | (c & 0x3F)), n = 4;
+    return lt_text_from(b, n);
 }
 
 // every character passes (and there is at least one): 0 digit, 1 letter,
@@ -1643,8 +1706,8 @@ static bool lt_text_all(lt_text *t, int what) {
         case 0: ok = c >= '0' && c <= '9'; break;
         case 1: ok = lt_cp_letter(c); break;
         case 2: ok = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0xA0 || c == 0x3000 || (c >= 0x2000 && c <= 0x200A); break;
-        case 3: ok = c < 0x80 ? (c >= 'A' && c <= 'Z') : (lt_cp_letter(c) && ((c >= 0x410 && c <= 0x42F) || c == 0x401 || (c >= 0xC0 && c <= 0xDE) || (c >= 0x391 && c <= 0x3A9))); break;
-        default: ok = c < 0x80 ? (c >= 'a' && c <= 'z') : (lt_cp_letter(c) && ((c >= 0x430 && c <= 0x44F) || c == 0x451 || (c >= 0xDF && c <= 0xFF) || (c >= 0x3B1 && c <= 0x3C9))); break;
+        case 3: ok = lt_cp_upper(c); break;
+        default: ok = lt_cp_lower(c); break;
         }
         if (!ok) return false;
     }

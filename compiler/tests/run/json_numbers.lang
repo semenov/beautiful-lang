@@ -1,0 +1,21 @@
+// JSON numbers keep what they say: -0 stays negative zero, and a number
+// too large for a Float is an error, not Infinity.
+import json
+
+type P {
+  n: Int
+  f: Float
+}
+
+fn main() throws {
+  print(json.encode(try json.parse("[-0, -0.0, 1e-400, 12, -3, 0.5]")))
+  let p = try json.decode<P>("{\"n\": -0, \"f\": -0}")
+  print("${p.n} ${p.f}")
+  for text in ["[1, 1e400]", "-1e999"] {
+    let v = try json.parse(text) catch e {
+      print(e.message())
+      continue
+    }
+    print(json.encode(v))
+  }
+}

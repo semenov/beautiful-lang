@@ -1,0 +1,10 @@
+// Unicode: letter categories of any script, case mappings, code points.
+fn main() {
+  // a digit, two marks, two letter numbers, a title-case letter, letters
+  for c in ["\u{661}", "\u{301}", "\u{903}", "\u{216b}", "\u{3007}", "\u{1c5}", "é", "Ж", "ж", "日", "A", "1"] {
+    print("${c.code_points()} letter=${c.is_letter()} upper=${c.is_upper()} lower=${c.is_lower()}")
+  }
+  print("${0x41.character()}${233.character()}${0x1F600.character()} ${(-1).character()}${0xD800.character()}")
+  print("${"Aé日😀".code_points()}")
+  print("${"ЖÉΣ straße, İ".lower()} ${"жéσ ɐ".upper()} ${"Hello".upper()}")
+}

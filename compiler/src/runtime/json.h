@@ -462,10 +462,15 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
             p->s = st;
             return lt_jp_fail(p, "a bad number");
         }
+        if (isinf(d->num)) {
+            p->s = st;
+            return lt_jp_fail(p, "the number is too large for a Float");
+        }
         if (!frac) {
             errno = 0;
             long long v = strtoll(tmp, &e, 10);
-            if (!*e && errno == 0) {
+            // (-0 stays a Float: an Int has no negative zero)
+            if (!*e && errno == 0 && !(v == 0 && tmp[0] == '-')) {
                 d->is_int = true;
                 d->i = v;
             }

@@ -1553,6 +1553,9 @@ builtin type Int {
   fn wrapping_add(self, other: Int) -> Int
   fn wrapping_sub(self, other: Int) -> Int
   fn wrapping_mul(self, other: Int) -> Int
+  // The character with this Unicode code point: 0x41.character() is "A".
+  // Not a code point (negative, a surrogate, past 0x10FFFF): "\u{FFFD}".
+  fn character(self) -> String
 }
 
 builtin type Float {
@@ -1606,6 +1609,9 @@ builtin type String {
   fn lines(self) -> List<String>
   fn words(self) -> List<String>
   fn chars(self) -> List<String>
+  // The Unicode code point of each character: "Aé".code_points() is
+  // [65, 233].
+  fn code_points(self) -> List<Int>
   fn contains(self, part: String) -> Bool
   // The position of the first `part` (in characters, as `slice` counts);
   // none if it isn't there. From a position: s.slice(from: i, to: s.length).index_of(x)
@@ -1618,11 +1624,14 @@ builtin type String {
   fn trim_end(self) -> String
   // Every character is 0-9 (and there is at least one).
   fn is_digit(self) -> Bool
-  // Every character is a letter, of any script (and there is at least one).
+  // Every character is a letter, of any script: the Unicode letter
+  // categories (and there is at least one).
   fn is_letter(self) -> Bool
   // Every character is a space, tab or line break.
   fn is_space(self) -> Bool
+  // Every character is an uppercase letter (Unicode Lu), of any script.
   fn is_upper(self) -> Bool
+  // Every character is a lowercase letter (Unicode Ll), of any script.
   fn is_lower(self) -> Bool
   fn starts_with(self, prefix: String) -> Bool
   fn ends_with(self, suffix: String) -> Bool
