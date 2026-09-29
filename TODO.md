@@ -47,7 +47,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       responses, logging), written idiomatically in both; load it and
       compare req/s, latency, CPU per request and memory. Wherever we're
       slower or use more memory: find out why and fix it
-- [ ] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
+- [x] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
       pool of OS threads, stacks, parking, I/O and timers; its strengths and
       its possible weak spots
 

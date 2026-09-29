@@ -195,13 +195,82 @@ reference counting that the compiler inserts, with no garbage collector.
 
 | benchmark | lang | Go |
 |---|---|---|
-| records (allocation-heavy) | 0.38 s, 156 MB | 0.46 s, 396 MB |
-| binary trees | 2.17 s | 2.63 s |
-| sort | 1.07 s | 1.62 s |
-| word count | 1.37 s | 0.95 s |
+| records (allocation-heavy) | 0.43 s, 156 MB | 0.55 s, 396 MB |
+| binary trees | 2.76 s, 130 MB | 4.70 s, 137 MB |
+| sort (3M records by key) | 1.17 s, 151 MB | 1.79 s, 97 MB |
+| word count | 1.42 s, 226 MB | 1.01 s, 211 MB |
+| JSON encode + decode | 1.61 s, 332 MB | 2.35 s, 247 MB |
+| map of Ints | 1.34 s, 59 MB | 1.49 s, 43 MB |
+| CSV-like text processing | 0.61 s, 138 MB | 0.99 s, 164 MB |
+| n-body (floating point) | 0.23 s, 2 MB | 0.21 s, 4 MB |
+| writing and reading a file by lines | 0.96 s, 2 MB | 0.96 s, 11 MB |
+| channel, producer and consumer | 0.09 s, 2 MB | 0.13 s, 4 MB |
+| spawning 200k small tasks | 0.18 s, 4 MB | 0.06 s, 14 MB |
 | HTTP file server, 2 KB files | 75-93k req/s, 7 MB | 55k req/s, 27 MB |
 
-(`benchmarks/`, an Apple M-series laptop.)
+(`benchmarks/`: `ONLY=Go,Lang python3 run.py`; median of 3 runs on an
+Apple M-series laptop, 2026-09-29. Where we lose, `TODO.md` says why.)
+
+## How tasks run
+
+`spawn f(x)` starts a task: a function running on its own stack, in
+parallel with the others. Tasks run on a pool of OS threads, one per core
+(an M:N scheduler, like Go's). Everything that waits (a task's result, a
+channel, a lock, a timer, a socket) parks the task and lets its thread run
+another one; there is no `async`/`await`, and code reads top to bottom.
+
+- **Switching** between tasks saves and restores only the callee-saved
+  registers (a few dozen instructions of assembly).
+- **Stacks:** each task reserves 8 MB, like a program's main thread, but
+  only the top 256 KB is open at first and only touched pages cost memory
+  (16 KB for a small task). A task that goes deeper faults once, and the
+  fault handler opens the rest; past 8 MB it's a clear "stack overflow"
+  panic. Stacks are reused.
+- **Run queues:** each worker thread has its own queue. A task made ready on
+  a worker goes into that worker's queue; a worker with nothing to do takes
+  from a global queue (used by the timer and I/O threads), then steals half
+  of another worker's queue, spins briefly, and sleeps. A task woken by a
+  channel runs next on the worker that woke it, so a producer and a
+  consumer stay on one core.
+- **I/O:** sockets and pipes are non-blocking. A task that would block
+  registers the descriptor with kqueue (macOS) or epoll (Linux) and parks;
+  a poller thread wakes it when the descriptor is ready.
+- **Timers:** `sleep`, `time.timeout` and tickers are served by a timer
+  thread (on macOS through a kqueue timer, which isn't delayed for
+  background processes the way a condition variable's timeout is).
+- **Structured:** a function waits for the tasks it started before it
+  returns, so no task outlives its caller. An error from a task that
+  nobody waited for comes out of the function. Cancelling a task (Ctrl-C,
+  `time.timeout`, a failed sibling) cancels its tasks too: their waits
+  throw `Cancelled`, and `with` blocks close their resources.
+- **Deadlocks:** if every task waits for another and nothing else (no
+  timer, no socket) can wake one, the program stops with "deadlock"
+  instead of hanging.
+- **Memory:** each thread has its own free lists for small objects; with
+  tasks, reference counts change atomically.
+
+What it's good at: sequential-looking code for servers and pipelines,
+cheap tasks (a small one costs about 16 KB and a microsecond), channels as
+fast as Go's, no leaked tasks, and cancellation that always reaches the
+bottom of the call.
+
+Weak spots, known:
+
+- **No preemption.** A task that computes for a long time without waiting
+  keeps its thread; the other threads keep running tasks, but if every
+  thread is busy computing, a task whose socket became ready waits.
+- **Blocking calls block a thread:** reading a file, SQLite, DNS. There is
+  one thread per core and no extra threads while one is blocked.
+- **The I/O path** re-registers a descriptor on every wait (one system call
+  each time) and hands ready tasks over from a separate poller thread.
+  Go polls from the idle workers themselves.
+- **`time.timeout` deadlines** are a list behind a mutex: fine for a few,
+  not for arming one per request (server timeouts need a timer wheel).
+- **Spawning** costs about three times what it costs in Go (see the table).
+- **Atomic reference counts** in any program that uses tasks cost about 10%
+  on allocation-heavy code, even for values that never leave one task.
+- Each task reserves 8 MB of address space. That's nothing on 64-bit
+  systems, unless the kernel is set up to refuse overcommitting memory.
 
 ## Status
 
