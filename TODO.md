@@ -213,8 +213,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] jwt errors: `jwt.Expired`, `jwt.Invalid`
     - [x] `plumb add --path` says "pinned in plumb.lock" but writes none
     - [x] `plumb fmt --check` exits 0 on a file that doesn't parse
-    - [ ] docs: cli `T?` without `= none`; `plumb doc String` shows
-          `__find`; db sharing; route order; sql `none`
+    - [x] docs: cli `T?` without `= none`; `plumb doc String` shows
+          `__find`; db sharing; route order; sql `none`; hash time
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
         on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).

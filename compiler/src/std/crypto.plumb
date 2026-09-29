@@ -21,7 +21,8 @@ pub fn random_bytes(count: Int) -> Bytes
 pub fn equal(a: Bytes, b: Bytes) -> Bool
 
 // A salted, slow hash of a password, safe to store:
-// "pbkdf2-sha256$210000$<salt>$<hash>".
+// "pbkdf2-sha256$210000$<salt>$<hash>". Slow on purpose (OWASP's round
+// count): about 80 ms of one CPU per call, and `verify_password` the same.
 pub fn hash_password(password: String) -> String {
   let salt = random_bytes(16)
   let hash = pbkdf2_sha256(password.bytes(), salt: salt, iterations: 210000, length: 32)

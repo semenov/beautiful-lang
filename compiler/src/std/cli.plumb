@@ -4,7 +4,7 @@
 //     input: String              // --input notes.txt (required)
 //     top: Int = 10            // --top 5 (optional: it has a default)
 //     verbose: Bool = false    // --verbose (a flag without a value)
-//     output_dir: String?        // --output-dir out (optional)
+//     output_dir: String? = none // --output-dir out (optional)
 //     args: List<String> = []    // everything that isn't an option
 //   }
 //   let opts = try cli.decode<Options>()

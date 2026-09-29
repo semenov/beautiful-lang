@@ -307,7 +307,7 @@ type Options {
   input: String              // --input notes.txt (required)
   top: Int = 10            // --top 5 (optional: it has a default)
   verbose: Bool = false    // --verbose (a flag without a value)
-  output_dir: String?        // --output-dir out (optional)
+  output_dir: String? = none // --output-dir out (optional)
   args: List<String> = []    // everything that isn't an option
 }
 let opts = try cli.decode<Options>()
@@ -1283,7 +1283,8 @@ pub fn random_bytes(count: Int) -> Bytes
 pub fn equal(a: Bytes, b: Bytes) -> Bool
 
 // A salted, slow hash of a password, safe to store:
-// "pbkdf2-sha256$210000$<salt>$<hash>".
+// "pbkdf2-sha256$210000$<salt>$<hash>". Slow on purpose (OWASP's round
+// count): about 80 ms of one CPU per call, and `verify_password` the same.
 pub fn hash_password(password: String) -> String
 
 // Checks a password against the result of `hash_password`.
