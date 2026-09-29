@@ -5,7 +5,7 @@ declarations with their comments, bodies left out. `import <module>`,
 then use `module.name`. Functions without a body are built into the
 compiler and runtime.
 
-Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`term`](#term), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`template`](#template), [`url`](#url), [`zlib`](#zlib), [`math`](#math), and the [prelude](#prelude)
+Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`term`](#term), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`template`](#template), [`url`](#url), [`zlib`](#zlib), [`archive`](#archive), [`math`](#math), and the [prelude](#prelude)
 (available everywhere without `import`).
 
 ## files
@@ -1263,6 +1263,52 @@ pub fn open_gzip(path: String) throws -> io.Stream
 // Creates a .gz file: what you write is compressed. Closing it (the end of
 // `with`) writes the end of the file.
 pub fn create_gzip(path: String) throws -> io.Stream
+```
+
+## archive
+
+archive: tar and zip files, read and written in memory.
+
+```
+let entries = try archive.read_tar(try zlib.gunzip(try files.read_bytes("app.tar.gz")))
+try archive.extract(entries, to: "out")
+```
+
+```
+let zip = archive.write_zip(try archive.from_dir("site"))
+try files.write_bytes("site.zip", zip)
+```
+
+`extract` refuses entries whose path would leave the target directory
+(".." or absolute paths): archives from elsewhere can't overwrite files.
+
+```
+// A file or a directory in an archive.
+pub type Entry {
+  // "docs/readme.md"; directories end without a slash
+  name: String
+  data: Bytes = Bytes()
+  is_dir: Bool = false
+  // Unix permissions: 420 is rw-r--r-- (0644), 493 is rwxr-xr-x (0755)
+  mode: Int = 420
+  // seconds since 1970
+  modified: Int = 0
+}
+
+pub fn read_tar(data: Bytes) throws -> List<Entry>
+
+pub fn write_tar(entries: List<Entry>) -> Bytes
+
+pub fn read_zip(data: Bytes) throws -> List<Entry>
+
+pub fn write_zip(entries: List<Entry>) -> Bytes
+
+// Every file and directory under `dir`, named relative to it.
+pub fn from_dir(dir: String) throws -> List<Entry>
+
+// Writes the entries under `to`. An entry whose path is absolute or goes
+// up with ".." is an error: nothing outside `to` is written.
+pub fn extract(entries: List<Entry>, to: String) throws
 ```
 
 ## math

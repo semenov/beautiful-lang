@@ -1,0 +1,3 @@
+tar: ["a.txt", "longlong...c.txt", "sub/b.txt"] content of b.txt
+zip: ["a.txt", "longlong...c.txt", "sub/b.txt"] content of b.txt
+archive: "a/../../x" would be written outside "ROOT/out"

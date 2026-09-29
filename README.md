@@ -127,7 +127,7 @@ A compact guide for agents (and humans) writing the language is in
 `process`, `env`, `cli`, `log`, `time`, `json`, `http` (server and client:
 routing, files with sendfile, streaming, HTTPS), `net` (TCP, UDP, TLS),
 `sql` + `db` (SQLite), `crypto`, `encoding`, `random`, `regex`, `csv`,
-`xml`, `url`, `zlib`, `math`.
+`xml`, `template`, `url`, `zlib`, `archive` (tar, zip), `term`, `math`.
 
 All external data comes in through `decode<T>`: the compiler generates the
 conversion into your record (`json.decode<User>(body)`,

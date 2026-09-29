@@ -158,3 +158,43 @@ static lt_err lt_gzip_open(lt_text *path, bool writing, lt_handle **out) {
     c->finish = lt_gz_finish;
     return (lt_err){ 0 };
 }
+
+// ---- for zip files: raw deflate (no zlib or gzip wrapper) and CRC-32
+
+static lt_bytes *lt_deflate_raw(lt_bytes *in) {
+    z_stream s;
+    memset(&s, 0, sizeof s);
+    deflateInit2(&s, Z_DEFAULT_COMPRESSION, Z_DEFLATED, -15, 8, Z_DEFAULT_STRATEGY);
+    uLong bound = deflateBound(&s, (uLong)in->len) + 32;
+    lt_bytes *out = lt_bytes_new((int64_t)bound);
+    s.next_in = in->data;
+    s.avail_in = (uInt)in->len;
+    s.next_out = out->data;
+    s.avail_out = (uInt)bound;
+    deflate(&s, Z_FINISH);
+    out->len = (int64_t)s.total_out;
+    deflateEnd(&s);
+    return out;
+}
+
+static lt_err lt_inflate_raw(lt_bytes *in, int64_t size, lt_bytes **outp) {
+    z_stream s;
+    memset(&s, 0, sizeof s);
+    inflateInit2(&s, -15);
+    lt_bytes *out = lt_bytes_new(size > 0 ? size : 64);
+    s.next_in = in->data;
+    s.avail_in = (uInt)in->len;
+    s.next_out = out->data;
+    s.avail_out = (uInt)out->cap;
+    int r = inflate(&s, Z_FINISH);
+    out->len = (int64_t)s.total_out;
+    inflateEnd(&s);
+    if (r != Z_STREAM_END || out->len != size) {
+        lt_bytes_drop(out);
+        return lt_make_failure(lt_text_cstr("archive: a zip entry's data is damaged"));
+    }
+    *outp = out;
+    return (lt_err){ 0 };
+}
+
+static int64_t lt_crc32(lt_bytes *d) { return (int64_t)crc32(0L, d->data, (uInt)d->len); }

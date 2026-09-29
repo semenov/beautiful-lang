@@ -18,7 +18,7 @@ SRC = ROOT / "compiler" / "src"
 ORDER = [
     "files", "path", "io", "process", "env", "cli", "term", "log", "time", "json",
     "http", "net", "sql", "db", "crypto", "encoding", "random", "regex",
-    "csv", "xml", "template", "url", "zlib", "math",
+    "csv", "xml", "template", "url", "zlib", "archive", "math",
 ]
 
 

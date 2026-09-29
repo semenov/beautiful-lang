@@ -1,0 +1,372 @@
+// archive: tar and zip files, read and written in memory.
+//
+//   let entries = try archive.read_tar(try zlib.gunzip(try files.read_bytes("app.tar.gz")))
+//   try archive.extract(entries, to: "out")
+//
+//   let zip = archive.write_zip(try archive.from_dir("site"))
+//   try files.write_bytes("site.zip", zip)
+//
+// `extract` refuses entries whose path would leave the target directory
+// (".." or absolute paths): archives from elsewhere can't overwrite files.
+
+import files
+import path
+import time
+
+// A file or a directory in an archive.
+pub type Entry {
+  // "docs/readme.md"; directories end without a slash
+  name: String
+  data: Bytes = Bytes()
+  is_dir: Bool = false
+  // Unix permissions: 420 is rw-r--r-- (0644), 493 is rwxr-xr-x (0755)
+  mode: Int = 420
+  // seconds since 1970
+  modified: Int = 0
+}
+
+// ---- tar (ustar, with long names; GNU and pax long names when reading)
+
+pub fn read_tar(data: Bytes) throws -> List<Entry> {
+  var out: List<Entry> = []
+  var at = 0
+  var long_name = ""
+  while at + 512 <= data.length {
+    let head = data.slice(from: at, to: at + 512)
+    if head.to_list().all(b => b == 0) {
+      break
+    }
+    let size = octal(head.slice(from: 124, to: 136))
+    let kind = head.slice(from: 156, to: 157)
+    var name = cstr(head.slice(from: 0, to: 100))
+    let prefix = cstr(head.slice(from: 345, to: 500))
+    if not prefix.is_empty() and cstr(head.slice(from: 257, to: 262)) == "ustar" {
+      name = "${prefix}/${name}"
+    }
+    let body_at = at + 512
+    let body = data.slice(from: body_at, to: min(body_at + size, data.length))
+    at = body_at + (size + 511).div(512) * 512
+    let k = cstr(kind)
+    if k == "L" {
+      long_name = cstr(body)
+      continue
+    }
+    if k == "x" {
+      // pax records; others (like binary extended attributes) are skipped
+      if body.index_of(" path=".bytes()) is some(p) {
+        let rest = body.slice(from: p + 6, to: body.length)
+        let end = rest.index_of("\n".bytes()) ?? rest.length
+        long_name = try rest.slice(from: 0, to: end).text()
+      }
+      continue
+    }
+    if k == "g" {
+      continue
+    }
+    if not long_name.is_empty() {
+      name = long_name
+      long_name = ""
+    }
+    while name.ends_with("/") {
+      name = name.slice(from: 0, to: name.length - 1)
+    }
+    if name.starts_with("./") {
+      name = name.slice(from: 2, to: name.length)
+    }
+    if name.is_empty() or name == "." {
+      continue
+    }
+    let is_dir = k == "5"
+    if k != "0" and k != "" and not is_dir {
+      // links and devices aren't carried
+      continue
+    }
+    out.append(Entry(name: name, data: if is_dir { Bytes() } else { body }, is_dir: is_dir, mode: octal(head.slice(from: 100, to: 108)), modified: octal(head.slice(from: 136, to: 148))))
+  }
+  return out
+}
+
+pub fn write_tar(entries: List<Entry>) -> Bytes {
+  var out = Bytes()
+  for e in entries {
+    var name = if e.is_dir { "${e.name}/" } else { e.name }
+    if name.byte_length() > 100 {
+      // a pax header carries the long name
+      let record = pax_record("path", value: name)
+      out.append_all(tar_header("././@PaxHeader", size: record.length, mode: 420, modified: e.modified, kind: "x"))
+      out.append_all(padded(record))
+      name = name.slice(from: 0, to: 99)
+    }
+    out.append_all(tar_header(name, size: if e.is_dir { 0 } else { e.data.length }, mode: e.mode, modified: e.modified, kind: if e.is_dir { "5" } else { "0" }))
+    if not e.is_dir {
+      out.append_all(padded(e.data))
+    }
+  }
+  var end = Bytes()
+  for _ in 0..<1024 {
+    end.append(0)
+  }
+  out.append_all(end)
+  return out
+}
+
+fn pax_record(key: String, value: String) -> Bytes {
+  // "<length> path=<value>\n", where the length counts itself
+  let body = " ${key}=${value}\n"
+  var n = body.byte_length() + 1
+  while "${n}${body}".byte_length() != n {
+    n += 1
+  }
+  return "${n}${body}".bytes()
+}
+
+fn tar_header(name: String, size: Int, mode: Int, modified: Int, kind: String) -> Bytes {
+  var h = Bytes()
+  h.append_all(field(name.bytes(), width: 100))
+  h.append_all(field(octal_text(mode, width: 7).bytes(), width: 8))
+  h.append_all(field(octal_text(0, width: 7).bytes(), width: 8))
+  h.append_all(field(octal_text(0, width: 7).bytes(), width: 8))
+  h.append_all(field(octal_text(size, width: 11).bytes(), width: 12))
+  h.append_all(field(octal_text(modified, width: 11).bytes(), width: 12))
+  h.append_all("        ".bytes())
+  h.append_all(kind.bytes())
+  h.append_all(field(Bytes(), width: 100))
+  h.append_all("ustar\000".bytes())
+  h.append_all(field(Bytes(), width: 32 + 32 + 8 + 8 + 155 + 12))
+  // the checksum: the sum of the header's bytes with the checksum as spaces
+  let sum = h.to_list().sum()
+  var fixed = h.slice(from: 0, to: 148)
+  fixed.append_all(field("${octal_text(sum, width: 6)}\0 ".bytes(), width: 8))
+  fixed.append_all(h.slice(from: 156, to: 512))
+  return fixed
+}
+
+fn field(data: Bytes, width: Int) -> Bytes {
+  var out = data.slice(from: 0, to: min(data.length, width))
+  while out.length < width {
+    out.append(0)
+  }
+  return out
+}
+
+fn padded(data: Bytes) -> Bytes {
+  var out = data
+  while out.length % 512 != 0 {
+    out.append(0)
+  }
+  return out
+}
+
+fn octal_text(n: Int, width: Int) -> String {
+  var digits = ""
+  var v = n
+  while v > 0 {
+    digits = "${v % 8}${digits}"
+    v = v.div(8)
+  }
+  return digits.pad_start(width: width, fill: "0")
+}
+
+fn octal(field: Bytes) -> Int {
+  var n = 0
+  for b in field.to_list() {
+    if b >= 48 and b <= 55 {
+      n = n * 8 + (b - 48)
+    }
+  }
+  return n
+}
+
+fn cstr(field: Bytes) -> String {
+  let end = field.index_of(Bytes([0])) ?? field.length
+  return try field.slice(from: 0, to: end).text() catch err {
+    return ""
+  }
+}
+
+// ---- zip (deflate or stored; no zip64, no encryption)
+
+pub fn read_zip(data: Bytes) throws -> List<Entry> {
+  // the end-of-central-directory record, near the end
+  var eocd = -1
+  var i = data.length - 22
+  while i >= 0 and i >= data.length - 65557 {
+    if le(data, at: i, size: 4) == 101010256 {
+      eocd = i
+      break
+    }
+    i -= 1
+  }
+  if eocd < 0 {
+    throw Failure(message: "archive: not a zip file")
+  }
+  let count = le(data, at: eocd + 10, size: 2)
+  var at = le(data, at: eocd + 16, size: 4)
+  var out: List<Entry> = []
+  for _ in 0..<count {
+    if le(data, at: at, size: 4) != 33639248 {
+      throw Failure(message: "archive: the zip's directory is damaged")
+    }
+    let method = le(data, at: at + 10, size: 2)
+    let dos_time = le(data, at: at + 12, size: 2)
+    let dos_date = le(data, at: at + 14, size: 2)
+    let packed = le(data, at: at + 20, size: 4)
+    let size = le(data, at: at + 24, size: 4)
+    let name_len = le(data, at: at + 28, size: 2)
+    let extra_len = le(data, at: at + 30, size: 2)
+    let comment_len = le(data, at: at + 32, size: 2)
+    let attrs = le(data, at: at + 38, size: 4)
+    let local = le(data, at: at + 42, size: 4)
+    let name = try data.slice(from: at + 46, to: at + 46 + name_len).text()
+    at += 46 + name_len + extra_len + comment_len
+    let body_at = local + 30 + le(data, at: local + 26, size: 2) + le(data, at: local + 28, size: 2)
+    let raw = data.slice(from: body_at, to: body_at + packed)
+    let is_dir = name.ends_with("/")
+    let content = if method == 0 { raw } else if method == 8 { try __inflate_raw(raw, size: size) } else {
+      throw Failure(message: "archive: ${name} uses an unsupported compression (${method})")
+    }
+    let mode = attrs.shift_right(16).bit_and(4095)
+    out.append(Entry(name: if is_dir { name.slice(from: 0, to: name.length - 1) } else { name }, data: content, is_dir: is_dir, mode: if mode == 0 { if is_dir { 493 } else { 420 } } else { mode }, modified: dos_to_unix(dos_date, clock: dos_time)))
+  }
+  return out
+}
+
+pub fn write_zip(entries: List<Entry>) -> Bytes {
+  var out = Bytes()
+  var central = Bytes()
+  for e in entries {
+    let name = if e.is_dir { "${e.name}/".bytes() } else { e.name.bytes() }
+    let packed = if e.is_dir { Bytes() } else { __deflate_raw(e.data) }
+    let stored = packed.length >= e.data.length
+    let body = if stored { e.data } else { packed }
+    let method = if stored { 0 } else { 8 }
+    let crc = __crc32(e.data)
+    let dos = unix_to_dos(e.modified)
+    let offset = out.length
+    // local header
+    var local = Bytes()
+    local = put(local, value: 67324752, size: 4)
+    local = put(local, value: 20, size: 2)
+    local = put(local, value: 2048, size: 2)
+    local = put(local, value: method, size: 2)
+    local = put(local, value: dos.bit_and(65535), size: 2)
+    local = put(local, value: dos.shift_right(16), size: 2)
+    local = put(local, value: crc, size: 4)
+    local = put(local, value: body.length, size: 4)
+    local = put(local, value: e.data.length, size: 4)
+    local = put(local, value: name.length, size: 2)
+    local = put(local, value: 0, size: 2)
+    local.append_all(name)
+    out.append_all(local)
+    out.append_all(body)
+    // its central directory record
+    let attrs = (if e.is_dir { 16384 } else { 32768 } + e.mode).shift_left(16) + (if e.is_dir { 16 } else { 0 })
+    central = put(central, value: 33639248, size: 4)
+    central = put(central, value: 788, size: 2)
+    central = put(central, value: 20, size: 2)
+    central = put(central, value: 2048, size: 2)
+    central = put(central, value: method, size: 2)
+    central = put(central, value: dos.bit_and(65535), size: 2)
+    central = put(central, value: dos.shift_right(16), size: 2)
+    central = put(central, value: crc, size: 4)
+    central = put(central, value: body.length, size: 4)
+    central = put(central, value: e.data.length, size: 4)
+    central = put(central, value: name.length, size: 2)
+    central = put(central, value: 0, size: 2)
+    central = put(central, value: 0, size: 2)
+    central = put(central, value: 0, size: 2)
+    central = put(central, value: 0, size: 2)
+    central = put(central, value: attrs, size: 4)
+    central = put(central, value: offset, size: 4)
+    central.append_all(name)
+  }
+  let dir_at = out.length
+  out.append_all(central)
+  out = put(out, value: 101010256, size: 4)
+  out = put(out, value: 0, size: 2)
+  out = put(out, value: 0, size: 2)
+  out = put(out, value: entries.length, size: 2)
+  out = put(out, value: entries.length, size: 2)
+  out = put(out, value: central.length, size: 4)
+  out = put(out, value: dir_at, size: 4)
+  out = put(out, value: 0, size: 2)
+  return out
+}
+
+// little-endian numbers, as zip writes them
+fn le(data: Bytes, at: Int, size: Int) -> Int {
+  var n = 0
+  for k in 0..<size {
+    n = n + data.int_at(at + k, size: 1).shift_left(8 * k)
+  }
+  return n
+}
+
+fn put(data: Bytes, value: Int, size: Int) -> Bytes {
+  var out = data
+  for k in 0..<size {
+    out.append(value.shift_right(8 * k).bit_and(255))
+  }
+  return out
+}
+
+fn dos_to_unix(date: Int, clock: Int) -> Int {
+  let year = 1980 + date.shift_right(9)
+  let month = max(date.shift_right(5).bit_and(15), 1)
+  let day = max(date.bit_and(31), 1)
+  return time.DateTime(year: year, month: month, day: day, hour: clock.shift_right(11), minute: clock.shift_right(5).bit_and(63), second: clock.bit_and(31) * 2).to_unix()
+}
+
+fn unix_to_dos(seconds: Int) -> Int {
+  let d = time.from_unix(max(seconds, 315532800))
+  let date = (d.year - 1980).shift_left(9) + d.month.shift_left(5) + d.day
+  let t = d.hour.shift_left(11) + d.minute.shift_left(5) + d.second.div(2)
+  return date.shift_left(16) + t
+}
+
+fn __deflate_raw(data: Bytes) -> Bytes
+fn __inflate_raw(data: Bytes, size: Int) throws -> Bytes
+fn __crc32(data: Bytes) -> Int
+
+// ---- directories
+
+// Every file and directory under `dir`, named relative to it.
+pub fn from_dir(dir: String) throws -> List<Entry> {
+  var out: List<Entry> = []
+  var dirs: Set<String> = Set<String>()
+  for f in try files.walk(dir) {
+    let rel = f.slice(from: dir.length, to: f.length)
+    let name = if rel.starts_with("/") { rel.slice(from: 1, to: rel.length) } else { rel }
+    // the directories on the way
+    var parent = path.parent(name)
+    var chain: List<String> = []
+    while not parent.is_empty() and parent != "." and not dirs.contains(parent) {
+      dirs.add(parent)
+      chain.append(parent)
+      parent = path.parent(parent)
+    }
+    for d in chain.reversed() {
+      out.append(Entry(name: d, is_dir: true, mode: 493, modified: time.unix_now()))
+    }
+    out.append(Entry(name: name, data: try files.read_bytes(f), modified: time.unix_now()))
+  }
+  return out
+}
+
+// Writes the entries under `to`. An entry whose path is absolute or goes
+// up with ".." is an error: nothing outside `to` is written.
+pub fn extract(entries: List<Entry>, to: String) throws {
+  for e in entries {
+    let parts = e.name.split("/")
+    if e.name.starts_with("/") or parts.contains("..") or e.name.contains("\\\\") {
+      throw Failure(message: "archive: \"${e.name}\" would be written outside \"${to}\"")
+    }
+    let target = path.join(to, e.name)
+    if e.is_dir {
+      try files.make_dir(target)
+    } else {
+      try files.make_dir(path.parent(target))
+      try files.write_bytes(target, e.data)
+    }
+  }
+}

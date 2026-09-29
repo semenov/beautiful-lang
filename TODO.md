@@ -75,7 +75,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] **templates** (Vlad asked too; `template` module, Handlebars syntax): user-friendly; look at what's popular
       (Handlebars/Mustache, Jinja/Nunjucks, EJS, Go templates) and pick the
       shape agents know best; HTML-escaping by default
-- [ ] `tar` and `zip`
+- [x] `tar` and `zip` (`archive` module)
 - [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
       (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
       chunks, partition, index_of, find_index), log levels and JSON logs

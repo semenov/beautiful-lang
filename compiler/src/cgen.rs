@@ -3012,6 +3012,14 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
             "xml.__scan" => format!("lt_xml_scan({}, {})", a[0], a[1]),
             "xml.escape" => format!("lt_xml_escape({})", a[0]),
+            "archive.__deflate_raw" | "archive.__inflate_raw" | "archive.__crc32" => {
+                self.zlib = true;
+                match name {
+                    "archive.__deflate_raw" => format!("lt_deflate_raw({})", a[0]),
+                    "archive.__inflate_raw" => format!("lt_inflate_raw({}, {}, {})", a[0], a[1], a[2]),
+                    _ => format!("lt_crc32({})", a[0]),
+                }
+            }
             n if n.starts_with("zlib.") => {
                 self.zlib = true;
                 match n {
