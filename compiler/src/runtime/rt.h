@@ -507,27 +507,65 @@ static lt_text *lt_int_to_text(int64_t v) {
     return lt_text_from(p, (int64_t)(buf + sizeof buf - p));
 }
 
-static lt_text *lt_float_to_text(double v) {
+// The shortest decimal digits that read back as `v` (finite), as JavaScript
+// writes numbers: plain from 1e-6 up to 1e21 (12345678901234567000),
+// otherwise with an exponent (1.5e+21, 1e-7). Returns the length.
+static int lt_float_js(double v, char *out) {
     char buf[40];
+    int p = 1;
+    for (; p <= 17; p++) {
+        snprintf(buf, sizeof buf, "%.*e", p - 1, v);
+        if (strtod(buf, NULL) == v) break;
+    }
+    // "-d.ddde+XX" -> sign, digits, exponent
+    const char *q = buf;
+    bool neg = *q == '-';
+    if (neg) q++;
+    char digits[24];
+    int k = 0;
+    for (; *q && *q != 'e'; q++)
+        if (*q != '.') digits[k++] = *q;
+    int e = atoi(q + 1);
+    while (k > 1 && digits[k - 1] == '0') k--;
+    int n = e + 1; // where the decimal point goes
+    int w = 0;
+    if (neg) out[w++] = '-';
+    if (k == 1 && digits[0] == '0') {
+        out[w++] = '0';
+    } else if (k <= n && n <= 21) {
+        for (int i = 0; i < k; i++) out[w++] = digits[i];
+        for (int i = k; i < n; i++) out[w++] = '0';
+    } else if (0 < n && n <= 21) {
+        for (int i = 0; i < n; i++) out[w++] = digits[i];
+        out[w++] = '.';
+        for (int i = n; i < k; i++) out[w++] = digits[i];
+    } else if (-6 < n && n <= 0) {
+        out[w++] = '0';
+        out[w++] = '.';
+        for (int i = 0; i < -n; i++) out[w++] = '0';
+        for (int i = 0; i < k; i++) out[w++] = digits[i];
+    } else {
+        out[w++] = digits[0];
+        if (k > 1) {
+            out[w++] = '.';
+            for (int i = 1; i < k; i++) out[w++] = digits[i];
+        }
+        w += snprintf(out + w, 8, "e%c%d", n - 1 < 0 ? '-' : '+', abs(n - 1));
+    }
+    out[w] = 0;
+    return w;
+}
+
+// A Float as text: like JavaScript, but a whole number keeps ".0" so it
+// reads as a Float (1.0, 12345678901234567000.0).
+static lt_text *lt_float_to_text(double v) {
+    char buf[48];
     if (isnan(v)) return lt_text_cstr("NaN");
     if (isinf(v)) return lt_text_cstr(v > 0 ? "Infinity" : "-Infinity");
-    int n = 0;
-    double a = fabs(v);
-    if (a == 0 || (a >= 1e-5 && a < 1e16)) {
-        // plain notation with the fewest digits that read back exactly
-        for (int d = 0; d <= 20; d++) {
-            n = snprintf(buf, sizeof buf, "%.*f", d, v);
-            if (strtod(buf, NULL) == v) break;
-        }
-    } else {
-        for (int prec = 1; prec <= 17; prec++) {
-            n = snprintf(buf, sizeof buf, "%.*g", prec, v);
-            if (strtod(buf, NULL) == v) break;
-        }
-    }
+    int n = lt_float_js(v, buf);
     bool has_dot = false;
     for (int i = 0; i < n; i++) {
-        if (buf[i] == '.' || buf[i] == 'e' || buf[i] == 'n' || buf[i] == 'i') has_dot = true;
+        if (buf[i] == '.' || buf[i] == 'e') has_dot = true;
     }
     if (!has_dot) {
         buf[n++] = '.';

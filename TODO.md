@@ -35,7 +35,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] `io.stdout().write_text` was 10x slower than `print`: now shares its buffer
     - [ ] reading `m[k]` then writing `m[k]` copies the value (quadratic); `take` avoids it: document or optimize
     - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
-    - [ ] Float text like JS/Go (`12345678901234567000`, not `1.2345678901234567e+19`)
+    - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
     - [ ] sorting by a list key (lexicographic) or with a comparator
     - [ ] or-patterns in `match`: `"a" | "b" => ...`
     - [ ] `Duration` in interpolation shows its fields

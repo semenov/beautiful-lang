@@ -1,0 +1,8 @@
+// Floats as text, like JavaScript (checked against Node); whole Floats keep ".0".
+import json
+fn main() throws {
+  for x in [0.0, -0.0, 1.0, 0.1, 1.5, 100.0, 123456.789, 1e16, 1.2345678901234567e19, 1e21, 1.5e21, 1e-6, 1.5e-7, 0.000123, -2.5, 3.14159, 1e300, 5e-324] {
+    print("${x}")
+  }
+  print(json.encode(try json.parse("[1.0, 1e5, 12345678901234567890, 0.1, -0.5, 1e21, 1e-7]")))
+}

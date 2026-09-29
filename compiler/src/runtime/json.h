@@ -564,10 +564,15 @@ static void lt_json_float(lt_buf *b, double v) {
     lt_buf_put(b, t->data, t->len);
     lt_text_drop(t);
 }
-// a number of unknown kind: whole numbers without a fraction
+// a number of unknown kind (json.Value): as JavaScript writes it
 static void lt_json_num(lt_buf *b, double v) {
-    if (isfinite(v) && v == floor(v) && fabs(v) < 9e15) lt_json_int(b, (int64_t)v);
-    else lt_json_float(b, v);
+    if (!isfinite(v)) {
+        lt_buf_put(b, "null", 4);
+        return;
+    }
+    char t[48];
+    int n = lt_float_js(v, t);
+    lt_buf_put(b, t, n);
 }
 static void lt_json_key(lt_buf *b, const char *k, bool first) {
     if (!first) lt_buf_c(b, ',');
