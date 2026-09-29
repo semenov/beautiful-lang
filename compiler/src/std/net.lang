@@ -20,6 +20,11 @@ pub fn connect(host: Text, port: Int) throws -> io.Stream
 // terminates TLS, such as nginx or a cloud load balancer.)
 pub fn connect_tls(host: Text, port: Int) throws -> io.Stream
 
+// Switches an open connection to TLS, for protocols that start plain and
+// then upgrade (Postgres, SMTP's STARTTLS). `host` is the name the
+// certificate must be for.
+pub fn start_tls(conn: io.Stream, host: Text) throws
+
 // Accepts connections on `port` until the program is stopped (Ctrl-C),
 // running `handler` for each in its own task. An error from a handler is
 // logged; the connection is closed when the handler returns.

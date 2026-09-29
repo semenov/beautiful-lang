@@ -462,6 +462,19 @@ static bool lt_tls_send(lt_conn *c, const void *d, size_t n, lt_err *err) {
 #endif
 
 #if defined(LT_TLS_ON)
+static lt_err lt_net_start_tls(lt_handle *h, lt_text *host) {
+    lt_conn *c = (lt_conn *)h;
+    if (c->fd < 0) return lt_net_error("TLS", "the connection is closed");
+    if (c->tls) return lt_net_error("TLS", "the connection already uses TLS");
+    if (c->blen) return lt_net_error("TLS", "unread data before the switch to TLS");
+    c->tls_recv = lt_tls_recv;
+    c->tls_send = lt_tls_send;
+    c->tls_free = lt_tls_free;
+    char what[300];
+    snprintf(what, sizeof what, "TLS with %s", host->data);
+    return lt_tls_start(c, host->data, what);
+}
+
 static lt_err lt_net_connect_tls(lt_text *host, int64_t port, lt_handle **out) {
     lt_handle *h = NULL;
     lt_err e = lt_net_connect(host, port, &h);

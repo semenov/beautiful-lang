@@ -8,6 +8,7 @@ typedef struct lt_dyn {
     int kind;
     bool b;
     bool is_int; // a number written without a fraction or exponent
+    bool raw;    // strings: raw bytes (database blobs), not base64
     int64_t i;
     double num;
     const char *s; // strings: not zero-terminated

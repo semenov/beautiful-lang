@@ -126,6 +126,12 @@ static lt_err lt_db_query(lt_handle *h, lt_text *sql, const lt_dbval *vals, int6
             case SQLITE_NULL:
                 v->kind = LT_D_NULL;
                 break;
+            case SQLITE_BLOB:
+                v->kind = LT_D_STR;
+                v->raw = true;
+                v->s = (const char *)sqlite3_column_blob(st, c);
+                v->slen = sqlite3_column_bytes(st, c);
+                break;
             default:
                 v->kind = LT_D_STR;
                 v->s = (const char *)sqlite3_column_text(st, c);

@@ -5,7 +5,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 ## Now
 
-- [ ] **Postgres package** (a separate package, not stdlib): wire protocol v3
+- [x] **Postgres package** (`packages/postgres`, not stdlib): wire protocol v3
       over `net`, SCRAM-SHA-256 auth, parameters, typed rows, transactions,
       TLS. Installable with `lang add`.
 - [x] **Redis package** (`packages/redis`): RESP over `net`, commands,
@@ -33,7 +33,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 ## Then: my own review of what's missing or weak
 
 - [ ] Review the stdlib against Go and Node for backend/CLI gaps
-- [ ] Review the language for rough edges found while writing the packages
+- [ ] Review the language for rough edges found while writing the packages:
+  - `?.` : I reached for it 3 times while writing packages (agents expect it)
+  - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
+  - `catch` without `try` in front is a parse error with a vague message
 - [ ] Performance: `words` benchmark is slower than Go (Text is not a view)
 
 ## Done

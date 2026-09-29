@@ -1203,7 +1203,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             Kind::Float => "return lt_dec_float(src, d, p, lenient, out);".into(),
             Kind::Bool => "return lt_dec_bool(src, d, p, lenient, out);".into(),
             Kind::Text => "return lt_dec_text(src, d, p, lenient, out);".into(),
-            Kind::Bytes => "if (d->kind != LT_D_STR) return lt_dec_error(src, p, \"base64 text\", d); lt_text *t = lt_text_from(d->s, d->slen); lt_err e = lt_base64_decode(t, out); lt_text_drop(t); if (e.obj) { lt_iface_drop(e); return lt_dec_error(src, p, \"base64 text\", d); } return (lt_err){0};".into(),
+            Kind::Bytes => "if (d->kind == LT_D_STR && d->raw) { *out = lt_bytes_from(d->s, d->slen); return (lt_err){0}; } if (d->kind != LT_D_STR) return lt_dec_error(src, p, \"base64 text\", d); lt_text *t = lt_text_from(d->s, d->slen); lt_err e = lt_base64_decode(t, out); lt_text_drop(t); if (e.obj) { lt_iface_drop(e); return lt_dec_error(src, p, \"base64 text\", d); } return (lt_err){0};".into(),
             Kind::Opt { inner, .. } => {
                 let inner = *inner;
                 self.need(H::Dec, inner);
@@ -1607,7 +1607,7 @@ for (int64_t j_ = 0; j_ < m_; j_++) {{ __typeof__(row_->items[0]) x_ = row_->ite
 case 1: v_->kind = LT_D_NUM; v_->is_int = true; v_->i = x_{a}u.v1.f0; v_->num = (double)v_->i; break; \
 case 2: v_->kind = LT_D_NUM; v_->num = x_{a}u.v2.f0; break; \
 case 3: v_->kind = LT_D_STR; v_->s = x_{a}u.v3.f0->data; v_->slen = x_{a}u.v3.f0->len; break; \
-case 4: v_->kind = LT_D_STR; v_->s = (const char *)x_{a}u.v4.f0->data; v_->slen = x_{a}u.v4.f0->len; break; \
+case 4: v_->kind = LT_D_STR; v_->raw = true; v_->s = (const char *)x_{a}u.v4.f0->data; v_->slen = x_{a}u.v4.f0->len; break; \
 case 5: v_->kind = LT_D_BOOL; v_->b = x_{a}u.v5.f0; break; \
 default: v_->kind = LT_D_NULL; }} }} \
 lt_path q_ = {{ NULL, NULL, 0, i_ + 1 }}; {tc} x_; e_ = dec_{id}(\"sql\", &d_, &q_, 1, &x_); if (!e_.obj) {lc}_push(&o_, x_); }} \
@@ -2894,6 +2894,10 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.net = true;
                 match n {
                     "net.connect" => format!("lt_net_connect({}, {}, {})", a[0], a[1], a[2]),
+                    "net.start_tls" => {
+                        self.tls = true;
+                        format!("lt_net_start_tls({}, {})", a[0], a[1])
+                    }
                     "net.connect_tls" => {
                         self.tls = true;
                         format!("lt_net_connect_tls({}, {}, {})", a[0], a[1], a[2])
