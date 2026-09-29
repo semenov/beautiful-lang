@@ -17,7 +17,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] **LLM package** (`packages/llm`; OpenAI-compatible API, works with OpenRouter and
       co.): chat completions, streaming (SSE), tool calls, JSON output,
       embeddings; look at popular npm packages (openai, ai-sdk) for the API
-- [ ] **zlib on streams**: gzip/gunzip a `Stream` piece by piece (big files,
+- [x] **zlib on streams** (`zlib.open_gzip` / `create_gzip`): gzip/gunzip a `Stream` piece by piece (big files,
       `content-encoding: gzip` responses)
 - [ ] **Docs**: README for the new language, AGENTS.md (cheat sheet for
       agents), STDLIB.md (reference), DESIGN.md (stdlib decisions: why

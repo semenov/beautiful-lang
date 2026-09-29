@@ -2871,6 +2871,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                     "zlib.gzip" => format!("lt_zlib_compress({}, true)", a[0]),
                     "zlib.deflate" => format!("lt_zlib_compress({}, false)", a[0]),
                     "zlib.gunzip" => format!("lt_zlib_decompress({}, true, {})", a[0], a[1]),
+                    "zlib.open_gzip" => format!("lt_gzip_open({}, false, {})", a[0], a[1]),
+                    "zlib.create_gzip" => format!("lt_gzip_open({}, true, {})", a[0], a[1]),
                     _ => format!("lt_zlib_decompress({}, false, {})", a[0], a[1]),
                 }
             }

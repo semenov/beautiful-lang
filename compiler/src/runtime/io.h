@@ -68,11 +68,14 @@ typedef struct lt_conn {
     char peer[64];
     lt_text *path; // files and programs: for messages
     const char *label; // standard streams: for messages
-    // TLS (net.connect_tls)
+    // a transport between the program and the descriptor: TLS
+    // (net.connect_tls) or compression (zlib.open_gzip); `tls` is its state
     void *tls;
     ssize_t (*tls_recv)(struct lt_conn *, void *, size_t, lt_err *);
     bool (*tls_send)(struct lt_conn *, const void *, size_t, lt_err *);
     void (*tls_free)(struct lt_conn *);
+    // writes what the transport still holds (the end of a gzip file)
+    lt_err (*finish)(struct lt_conn *);
 } lt_conn;
 
 #define LT_WBUF (64 * 1024)
@@ -109,6 +112,10 @@ static void lt_conn_release(lt_conn *c) {
 static void lt_conn_free(lt_handle *h) {
     lt_conn *c = (lt_conn *)h;
     if (c->fd >= 0) lt_conn_flush(c);
+    if (c->fd >= 0 && c->finish) {
+        lt_err f = c->finish(c);
+        if (f.obj) lt_iface_drop(f);
+    }
     lt_conn_release(c);
     free(c->buf);
     free(c->wbuf);
@@ -312,6 +319,12 @@ static lt_err lt_conn_close(lt_handle *h) {
     lt_conn *c = (lt_conn *)h;
     if (c->fd < 0) return (lt_err){ 0 };
     lt_err e = lt_conn_flush(c);
+    if (c->finish) {
+        lt_err f = c->finish(c);
+        c->finish = NULL;
+        if (!e.obj) e = f;
+        else if (f.obj) lt_iface_drop(f);
+    }
     lt_conn_release(c);
     return e;
 }

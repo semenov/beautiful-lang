@@ -1,5 +1,7 @@
 // zlib: compressing bytes.
 
+import io
+
 // gzip format (.gz files, `content-encoding: gzip`).
 pub fn gzip(data: Bytes) -> Bytes
 pub fn gunzip(data: Bytes) throws -> Bytes
@@ -7,3 +9,10 @@ pub fn gunzip(data: Bytes) throws -> Bytes
 pub fn deflate(data: Bytes) -> Bytes
 // Reads zlib or gzip data.
 pub fn inflate(data: Bytes) throws -> Bytes
+
+// A .gz file as a stream (see `io`): reading gives the uncompressed data,
+// so `read_line` reads a compressed log line by line.
+pub fn open_gzip(path: Text) throws -> io.Stream
+// Creates a .gz file: what you write is compressed. Closing it (the end of
+// `with`) writes the end of the file.
+pub fn create_gzip(path: Text) throws -> io.Stream
