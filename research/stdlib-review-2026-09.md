@@ -27,7 +27,8 @@ weakest places:
 3. **The program's surroundings**: no current directory, home / config
    directories, pid, hostname or OS name; child programs can't use the
    terminal (no `$EDITOR`, `git commit`, pagers), can't be signalled, and
-   binary output has no `Bytes` form.
+   binary output has no `Bytes` form. And a bug: `time.timeout` doesn't
+   stop `process.run`: the wait for a child isn't cancellable **(tried)**.
 4. **`time.DateTime`** keeps whole seconds only: `parse_iso` drops
    `.123` **(tried)**, and there is no `Duration` between two moments.
 5. **HTTP server structure**: no route groups / sub-routers with their own
