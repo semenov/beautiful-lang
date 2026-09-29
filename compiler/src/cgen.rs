@@ -1047,11 +1047,11 @@ static void {l}_sort({l} *p) {{ {l}_unique(p); {l} l = *p; if (l->len < 2) retur
             r#"
 static {m} {m}_new(int64_t cap) {{
   {m} m = ({m})lt_alloc(sizeof(struct {m}_s)); m->rc = 1; m->len = 0; m->n = 0;
-  if (cap < 4) cap = 4; m->cap = cap; m->e = ({m}_e *)malloc(sizeof({m}_e) * (size_t)cap);
-  int64_t ic = 8; while (ic < cap * 2) ic *= 2; m->icap = ic; m->idx = (int32_t *)malloc(sizeof(int32_t) * (size_t)ic); memset(m->idx, 0xff, sizeof(int32_t) * (size_t)ic);
+  if (cap < 4) cap = 4; m->cap = cap; m->e = ({m}_e *)lt_rmalloc(sizeof({m}_e) * (size_t)cap);
+  int64_t ic = 8; while (ic < cap * 2) ic *= 2; m->icap = ic; m->idx = (int32_t *)lt_rmalloc(sizeof(int32_t) * (size_t)ic); memset(m->idx, 0xff, sizeof(int32_t) * (size_t)ic);
   return m;
 }}
-static void {m}_free({m} m) {{ for (int64_t i = 0; i < m->n; i++) {{ if (!m->e[i].h) continue; {dropk} {dropv} }} free(m->e); free(m->idx); lt_free(m, sizeof(struct {m}_s)); }}
+static void {m}_free({m} m) {{ for (int64_t i = 0; i < m->n; i++) {{ if (!m->e[i].h) continue; {dropk} {dropv} }} lt_rfree(m->e); lt_rfree(m->idx); lt_free(m, sizeof(struct {m}_s)); }}
 static int64_t {m}_find({m} m, {kc} key, uint64_t h) {{
   if (m->icap == 0) return -1; uint64_t mask = (uint64_t)m->icap - 1; uint64_t i = h & mask;
   for (;;) {{ int32_t s = m->idx[i]; if (s < 0) return -1; {m}_e *e = &m->e[s]; if (e->h == h && {eqk}) return s; i = (i + 1) & mask; }}
@@ -1066,7 +1066,7 @@ static {m} {m}_rebuild({m} m, int64_t cap, bool owned) {{
     uint64_t mask = (uint64_t)n->icap - 1; uint64_t j = n->e[n->n].h & mask; while (n->idx[j] >= 0) j = (j + 1) & mask; n->idx[j] = (int32_t)n->n; n->n++;
   }}
   n->len = n->n;
-  if (owned) {{ free(m->e); free(m->idx); lt_free(m, sizeof(struct {m}_s)); }} else drop_{id}(m);
+  if (owned) {{ lt_rfree(m->e); lt_rfree(m->idx); lt_free(m, sizeof(struct {m}_s)); }} else drop_{id}(m);
   return n;
 }}
 static inline void {m}_unique({m} *p) {{ {m} m = *p; if (!LT_UNIQUE(m)) *p = {m}_rebuild(m, m->len, false); }}

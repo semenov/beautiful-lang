@@ -38,8 +38,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         wake-ups: every spawn woke a worker. Now one waker claims "someone
         is looking" (like Go's nmspinning), and idle workers spin 8 short
         rounds, not 64 tight scans
-  - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), maps 59 vs
-        43 MB; json 332 -> 264 MB vs 247 (a JSON node is 40 bytes now)
+  - [x] memory: maps 59 -> 42 MB (Go 43: the map's arrays through the
+        size-tracking allocator); json 332 -> 264 MB vs 247 (40-byte nodes)
+  - [ ] sort 151 vs 97 MB: sort_by keeps (key, item) pairs plus a merge
+        buffer so each key is computed once; calling the key function in
+        every comparison would save memory but cost time -- left as is
   - [x] other runtime buffers that grow with realloc and are freed to malloc
         (lt_grow for HTTP bodies, readers): lt_rmalloc/lt_rrealloc/lt_rfree
         (size in a header, big ones mapped) for request buffers, chunked
