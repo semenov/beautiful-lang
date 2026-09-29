@@ -1,0 +1,21 @@
+// A `String?` can't be an SQL parameter, though `lang doc sql` says
+// parameters are "Int, Float, String, Bool, Bytes, new types over them,
+// and `none`". Writing a nullable column (a user's bio) needs a helper:
+//
+//   fn nullable(text: String?) -> sql.Value {
+//     if text is some(t) { return sql.Value.String(value: t) }
+//     return sql.Value.Null
+//   }
+//
+// Expected: compiles; none is NULL. Got:
+//   error: expected `Value`, found `String?`
+
+import db
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table users (name text, bio text)", [])
+    let bio: String? = none
+    try conn.execute("insert into users (name, bio) values (?, ?)", ["ada", bio])
+  }
+}
