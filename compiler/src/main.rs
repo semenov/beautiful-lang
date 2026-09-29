@@ -77,6 +77,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "url" => include_str!("std/url.lang"),
         "math" => include_str!("std/math.lang"),
         "path" => include_str!("std/path.lang"),
+        "zlib" => include_str!("std/zlib.lang"),
         _ => return None,
     })
 }
@@ -344,7 +345,9 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
     let file_name = Path::new(&opts.path).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
     let generator = cgen::CGen::new(&prog, &module, file_name);
     let c = generator.generate(tests);
-    let c_path = exe.with_extension("c");
+    // in the build directory, so it never overwrites the user's files
+    let exe_name = exe.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let c_path = build_dir().join(format!("{}-{}.c", exe_name, std::process::id()));
     if let Err(e) = std::fs::write(&c_path, &c) {
         eprintln!("error: can't write {}: {}", c_path.display(), e);
         return false;
@@ -360,7 +363,7 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         cmd.arg(if optimize { "-O2" } else { "-O1" });
     }
     // libraries the program needs, from `// link:` lines
-    let libs: Vec<String> = c.lines().take(8).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
+    let libs: Vec<String> = c.lines().take(16).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
     let status = cmd
         .args(["-std=gnu11", "-w", "-fwrapv", "-o"])
         .arg(exe)
@@ -368,6 +371,10 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         .arg("-lm")
         .args(&libs)
         .status();
+    // kept when the C compiler fails: the message points at it
+    if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
+        let _ = std::fs::remove_file(&c_path);
+    }
     match status {
         Ok(s) if s.success() => true,
         Ok(_) => {
@@ -419,9 +426,6 @@ fn main() -> ExitCode {
             }
             let status = Command::new(&exe).args(&opts.args).status();
             let _ = std::fs::remove_file(&exe);
-            if std::env::var("LANG_KEEP_C").is_err() {
-                let _ = std::fs::remove_file(exe.with_extension("c"));
-            }
             match status {
                 Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
                 Err(e) => {
@@ -433,7 +437,6 @@ fn main() -> ExitCode {
         "build" => {
             let exe = PathBuf::from(opts.out.clone().unwrap_or(stem));
             if compile(&opts, false, true, &exe) {
-                let _ = std::fs::remove_file(exe.with_extension("c"));
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(1)

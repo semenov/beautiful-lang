@@ -93,6 +93,8 @@ pub struct CGen<'a> {
     curl: bool,
     net: bool,
     sqlite: bool,
+    zlib: bool,
+    tls: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -165,6 +167,8 @@ impl<'a> CGen<'a> {
             curl: false,
             net: false,
             sqlite: false,
+            zlib: false,
+            tls: false,
         }
     }
 
@@ -2744,6 +2748,15 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
             "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
+            n if n.starts_with("zlib.") => {
+                self.zlib = true;
+                match n {
+                    "zlib.gzip" => format!("lt_zlib_compress({}, true)", a[0]),
+                    "zlib.deflate" => format!("lt_zlib_compress({}, false)", a[0]),
+                    "zlib.gunzip" => format!("lt_zlib_decompress({}, true, {})", a[0], a[1]),
+                    _ => format!("lt_zlib_decompress({}, false, {})", a[0], a[1]),
+                }
+            }
             n if n.starts_with("regex.") => {
                 match n {
                     "regex.compile" => format!("lt_regex_compile({}, {})", a[0], a[1]),
@@ -2814,6 +2827,10 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.net = true;
                 match n {
                     "net.connect" => format!("lt_net_connect({}, {}, {})", a[0], a[1], a[2]),
+                    "net.connect_tls" => {
+                        self.tls = true;
+                        format!("lt_net_connect_tls({}, {}, {})", a[0], a[1], a[2])
+                    }
                     "net.serve" => format!("lt_net_serve({}, {})", a[0], a[1]),
                     "net.udp" => format!("lt_net_udp({}, {})", a[0], a[1]),
                     "net.Connection.read" => format!("lt_conn_read({}, {}, {})", a[0], a[1], a[2]),
@@ -3257,6 +3274,14 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.sqlite {
             out = format!("// link: -lsqlite3\n{}", out);
             out += include_str!("runtime/db.h");
+        }
+        if self.zlib {
+            out = format!("// link: -lz\n{}", out);
+            out += include_str!("runtime/zlib.h");
+        }
+        if self.tls {
+            let link = if cfg!(target_os = "macos") { "-framework Security -framework CoreFoundation" } else { "-lssl -lcrypto" };
+            out = format!("#define LT_TLS_ON 1\n// link: {}\n{}", link, out);
         }
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";

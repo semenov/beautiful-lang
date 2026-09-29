@@ -1,0 +1,17 @@
+import zlib
+
+fn main() throws {
+  let data = "hello hello hello hello hello hello".bytes()
+  let g = zlib.gzip(data)
+  let d = zlib.deflate(data)
+  print("${data.length} -> gzip ${g.length}, deflate ${d.length}")
+  print(try zlib.gunzip(g).text())
+  print(try zlib.inflate(d).text())
+  print(try zlib.inflate(g).text())
+  let big = "abc".repeat(100000).bytes()
+  print("${try zlib.gunzip(zlib.gzip(big)).length} bytes back")
+  let bad = try zlib.gunzip(data) catch err {
+    print(err.message())
+    return
+  }
+}

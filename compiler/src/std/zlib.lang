@@ -1,0 +1,9 @@
+// zlib: compressing bytes.
+
+// gzip format (.gz files, `content-encoding: gzip`).
+pub fn gzip(data: Bytes) -> Bytes
+pub fn gunzip(data: Bytes) throws -> Bytes
+// zlib format.
+pub fn deflate(data: Bytes) -> Bytes
+// Reads zlib or gzip data.
+pub fn inflate(data: Bytes) throws -> Bytes

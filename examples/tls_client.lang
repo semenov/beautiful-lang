@@ -1,0 +1,14 @@
+import net
+
+fn main() throws {
+  with conn = try net.connect_tls("example.com", 443) {
+    try conn.write("GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n".bytes())
+    print(try conn.read_line() ?? "none")
+  }
+  with conn = try net.connect_tls("expired.badssl.com", 443) catch err {
+    print(err.message())
+    return
+  } {
+    print("connected?!")
+  }
+}
