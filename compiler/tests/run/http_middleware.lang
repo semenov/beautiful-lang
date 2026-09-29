@@ -1,0 +1,78 @@
+import http
+import json
+
+fn upload(req: http.Request) throws -> http.Response {
+  var lines: List<Text> = []
+  for p in try req.parts() {
+    lines.append("${p.name} ${p.filename ?? "-"} ${p.content_type} ${p.data.length}")
+  }
+  return http.text(200, lines.join("\n"))
+}
+
+fn login(req: http.Request) throws -> http.Response {
+  let form = try req.form()
+  return http.text(200, "hello ${form["user"] ?? "?"}")
+    .with_cookie(http.Cookie(name: "session", value: "abc123", max_age: 3600))
+    .with_cookie(http.Cookie(name: "theme", value: "dark", http_only: false))
+}
+
+fn me(req: http.Request) throws -> http.Response {
+  return http.text(200, "session=${req.cookie("session") ?? "none"} theme=${req.cookie("theme") ?? "none"}")
+}
+
+fn make_router() -> http.Router {
+  var router = http.Router()
+  router.use(http.log_requests())
+  router.use(http.cors(["https://app.example"]))
+  router.use((req, next) => {
+    if req.path.starts_with("/admin") and req.header("authorization") is none {
+      http.text(401, "log in first")
+    } else {
+      try next(req)
+    }
+  })
+  router.post("/login", login)
+  router.get("/me", me)
+  router.post("/upload", upload)
+  router.get("/admin", req => http.text(200, "secret"))
+  return router
+}
+
+
+
+test "middleware runs in order and can stop a request" {
+  let router = make_router()
+  expect (try router.handle(http.request("GET", "/admin"))).status == 401
+  var req = http.request("GET", "/admin")
+  req.headers["authorization"] = "Bearer x"
+  expect (try router.handle(req)).status == 200
+}
+
+test "forms, cookies and multipart parts" {
+  let router = make_router()
+  var req = http.request("POST", "/login")
+  req.body = "user=ada+lovelace&x=1".bytes()
+  let res = try router.handle(req)
+  expect try res.text() == "hello ada lovelace"
+  expect res.cookies()["session"] == "abc123"
+  expect res.cookies()["theme"] == "dark"
+  var me = http.request("GET", "/me")
+  me.headers["cookie"] = "session=abc123; theme=dark"
+  expect try (try router.handle(me)).text() == "session=abc123 theme=dark"
+  var up = http.request("POST", "/upload")
+  up.headers["content-type"] = "multipart/form-data; boundary=XX"
+  up.body = "--XX\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n--XX\r\nContent-Disposition: form-data; name=\"f\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nfile body\r\n--XX--\r\n".bytes()
+  expect try (try router.handle(up)).text() == "title - text/plain 5\nf a.txt text/plain 9"
+}
+
+test "cors" {
+  let router = make_router()
+  var pre = http.request("OPTIONS", "/login")
+  pre.headers["origin"] = "https://app.example"
+  let res = try router.handle(pre)
+  expect res.status == 204
+  expect res.headers["access-control-allow-origin"] == "https://app.example"
+  var other = http.request("GET", "/me")
+  other.headers["origin"] = "https://evil.example"
+  expect (try router.handle(other)).headers["access-control-allow-origin"] is none
+}

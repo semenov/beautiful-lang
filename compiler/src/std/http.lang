@@ -15,6 +15,7 @@
 
 import io
 import json
+import log
 import time
 
 pub type Request {
@@ -48,6 +49,108 @@ pub type Request {
   pub fn text(self) throws -> Text {
     return try self.body.text()
   }
+
+  // A cookie the client sent.
+  pub fn cookie(self, name: Text) -> Text? {
+    for part in (self.header("cookie") ?? "").split(";") {
+      let kv = part.trim().split("=")
+      if kv.length >= 2 and kv[0] == name {
+        return kv.drop(1).join("=")
+      }
+    }
+    return none
+  }
+
+  // The fields of an HTML form (application/x-www-form-urlencoded).
+  // For forms with files, see `parts`.
+  pub fn form(self) throws -> Map<Text, Text> {
+    var out: Map<Text, Text> = {}
+    for pair in (try self.text()).split("&") {
+      if pair.is_empty() {
+        continue
+      }
+      let kv = pair.split("=")
+      out[try __url_decode(kv[0].replace("+", " "))] = try __url_decode(kv.drop(1).join("=").replace("+", " "))
+    }
+    return out
+  }
+
+  // The parts of a multipart/form-data body: form fields and uploaded
+  // files. A field has `filename` none; `text()` reads its value.
+  pub fn parts(self) throws -> List<Part> {
+    let kind = self.header("content-type") ?? ""
+    let marker = kind.split("boundary=")
+    if not kind.starts_with("multipart/") or marker.length < 2 {
+      throw Failure(message: "http: the body isn't multipart/form-data")
+    }
+    let boundary = "--${marker[1].split(";")[0].trim().replace("\"", "")}".bytes()
+    var rest = self.body
+    var out: List<Part> = []
+    let start = rest.index_of(boundary) ?? throw Failure(message: "http: the multipart body has no boundary")
+    rest = rest.slice(from: start + boundary.length, to: rest.length)
+    while true {
+      // after a boundary: "--" ends the body, "\r\n" starts a part
+      if rest.length >= 2 and rest.slice(from: 0, to: 2) == "--".bytes() {
+        break
+      }
+      let head_end = rest.index_of("\r\n\r\n".bytes()) ?? throw Failure(message: "http: a multipart part has no end of headers")
+      let head = try rest.slice(from: 2, to: head_end).text()
+      let body_start = head_end + 4
+      let next = rest.slice(from: body_start, to: rest.length).index_of(boundary) ?? throw Failure(message: "http: a multipart part has no end")
+      // the data ends before "\r\n" + boundary
+      let data = rest.slice(from: body_start, to: body_start + next - 2)
+      var part = Part(name: "", data: data)
+      for line in head.split("\r\n") {
+        let lower = line.lower()
+        if lower.starts_with("content-disposition:") {
+          for item in line.split(";").drop(1) {
+            let kv = item.trim().split("=")
+            if kv.length >= 2 {
+              let value = kv.drop(1).join("=").replace("\"", "")
+              if kv[0] == "name" {
+                part.name = value
+              } else if kv[0] == "filename" {
+                part.filename = value
+              }
+            }
+          }
+        } else if lower.starts_with("content-type:") {
+          part.content_type = line.slice(from: 13, to: line.length).trim()
+        }
+      }
+      out.append(part)
+      rest = rest.slice(from: body_start + next + boundary.length, to: rest.length)
+    }
+    return out
+  }
+}
+
+// A part of a multipart form: a field or an uploaded file.
+pub type Part {
+  name: Text
+  // the file's name, for uploads
+  filename: Text? = none
+  content_type: Text = "text/plain"
+  data: Bytes
+
+  pub fn text(self) throws -> Text {
+    return try self.data.text()
+  }
+}
+
+// A cookie to set with `Response.with_cookie`.
+pub type Cookie {
+  name: Text
+  value: Text
+  // seconds until it expires; none: when the browser closes; 0: delete it now
+  max_age: Int? = none
+  path: Text = "/"
+  // not readable from JavaScript
+  http_only: Bool = true
+  // only over HTTPS
+  secure: Bool = false
+  // "Lax", "Strict" or "None"
+  same_site: Text = "Lax"
 }
 
 // How long a client request took, each from its start. Connections are
@@ -84,6 +187,36 @@ pub type Response {
     var r = self
     r.headers[name] = value
     return r
+  }
+
+  // A copy that sets a cookie (several can be set).
+  pub fn with_cookie(self, cookie: Cookie) -> Response {
+    var line = "${cookie.name}=${cookie.value}; Path=${cookie.path}; SameSite=${cookie.same_site}"
+    if cookie.max_age is some(age) {
+      line = "${line}; Max-Age=${age}"
+    }
+    if cookie.http_only {
+      line = "${line}; HttpOnly"
+    }
+    if cookie.secure {
+      line = "${line}; Secure"
+    }
+    var r = self
+    // several Set-Cookie headers travel as lines of one value
+    r.headers["set-cookie"] = if r.headers["set-cookie"] is some(old) { "${old}\n${line}" } else { line }
+    return r
+  }
+
+  // The cookies a client response sets, as name -> value.
+  pub fn cookies(self) -> Map<Text, Text> {
+    var out: Map<Text, Text> = {}
+    for line in (self.headers["set-cookie"] ?? "").split("\n") {
+      let kv = line.split(";")[0].split("=")
+      if kv.length >= 2 {
+        out[kv[0].trim()] = kv.drop(1).join("=")
+      }
+    }
+    return out
   }
 }
 
@@ -145,8 +278,21 @@ type Route {
   handler: fn(Request) throws -> Response
 }
 
+// Runs around every request: gets the request and `next` (the rest of the
+// chain: other middleware, then the route) and returns a response.
+//   router.use((req, next) => {
+//     if req.header("authorization") is none { http.text(401, "log in") } else { try next(req) }
+//   })
+pub type Middleware = fn(Request, fn(Request) throws -> Response) throws -> Response
+
 pub type Router {
   routes: List<Route> = []
+  middleware: List<Middleware> = []
+
+  // Adds middleware: the first added runs first (outermost).
+  pub mutating fn use(m: Middleware) {
+    self.middleware.append(m)
+  }
 
   pub mutating fn get(pattern: Text, handler: fn(Request) throws -> Response) {
     self.routes.append(Route(method: "GET", parts: split_path(pattern), handler: handler))
@@ -175,6 +321,19 @@ pub type Router {
   // has this path, 405 when one has it for another method. A pattern part
   // `*name` matches the rest of the path. HEAD is answered by GET routes.
   pub fn handle(self, request: Request) throws -> Response {
+    if self.middleware.is_empty() {
+      return try self.route(request)
+    }
+    let router = self
+    var next: fn(Request) throws -> Response = r => try router.route(r)
+    for m in self.middleware.reversed() {
+      let inner = next
+      next = r => try m(r, inner)
+    }
+    return try next(request)
+  }
+
+  fn route(self, request: Request) throws -> Response {
     let parts = split_path(request.path)
     var path_found = false
     for route in self.routes {
@@ -231,6 +390,53 @@ fn file_in(dir: Text, name: Text) -> Response {
   }
   return file("${dir}/${parts.filter(p => not p.is_empty()).join("/")}")
 }
+
+// Middleware that logs each request: "GET /notes/7 200 1.2ms".
+pub fn log_requests() -> Middleware {
+  return Middleware((req, next) => try logged(req, next: next))
+}
+
+fn logged(req: Request, next: fn(Request) throws -> Response) throws -> Response {
+  let start = time.now()
+  let res = try next(req) catch err {
+    log.info("${req.method} ${req.path} error ${start.elapsed().text()}")
+    throw err
+  }
+  log.info("${req.method} ${req.path} ${res.status} ${start.elapsed().text()}")
+  return res
+}
+
+// Middleware for calls from web pages on other sites (CORS): answers the
+// browser's OPTIONS question and marks responses as allowed for `origins`
+// (["*"] for any site).
+pub fn cors(origins: List<Text>) -> Middleware {
+  return Middleware((req, next) => try with_cors(req, next: next, origins: origins))
+}
+
+fn with_cors(req: Request, next: fn(Request) throws -> Response, origins: List<Text>) throws -> Response {
+  let origin = req.header("origin") ?? ""
+  let allowed = if origins.contains("*") { "*" } else if origins.contains(origin) { origin } else { "" }
+  if req.method == "OPTIONS" {
+    var res = Response(status: 204, body: Bytes())
+    if not allowed.is_empty() {
+      res = res.with_header("access-control-allow-origin", value: allowed)
+        .with_header("access-control-allow-methods", value: "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+        .with_header("access-control-allow-headers", value: req.header("access-control-request-headers") ?? "content-type, authorization")
+        .with_header("access-control-max-age", value: "86400")
+    }
+    return res
+  }
+  let res = try next(req)
+  if allowed.is_empty() {
+    return res
+  }
+  return res.with_header("access-control-allow-origin", value: allowed).with_header("vary", value: "Origin")
+}
+
+// The content type for a file name: "a.png" -> "image/png".
+pub fn mime_type(path: Text) -> Text
+
+fn __url_decode(text: Text) throws -> Text
 
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 // With a body: `var req = http.request("POST", "/notes")`, then

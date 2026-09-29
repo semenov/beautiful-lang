@@ -1757,9 +1757,20 @@ free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else dr
 static {tmc} lt_http_timing_value(const int64_t *t, bool reused) {{
   return ({tmc}){{ {{ t[0] * 1000 }}, {{ t[1] * 1000 }}, {{ t[2] * 1000 }}, {{ t[3] * 1000 }}, {{ t[4] * 1000 }}, reused }};
 }}
+// a header seen again joins the first: ", " (HTTP's rule), "; " for
+// Cookie, a line break for Set-Cookie (split again when sent)
+static void lt_hdr_add({mc} *m, lt_text *k, lt_text *v) {{
+  lt_text **slot = {mc}_slot_insert(m, k);
+  if (*slot) {{
+    const char *sep = strcmp(k->data, "set-cookie") == 0 ? "\n" : strcmp(k->data, "cookie") == 0 ? "; " : ", ";
+    lt_text *s = lt_text_cstr(sep); lt_text *parts[3] = {{ *slot, s, v }}; lt_text *j = lt_text_concat_n(3, parts);
+    lt_text_drop(s); lt_text_drop(*slot); lt_text_drop(v); *slot = j;
+  }} else *slot = v;
+  lt_text_drop(k);
+}}
 static {rsc} lt_http_response_from(lt_http_out *o) {{
   {mc} h = {mc}_new(8);
-  for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) {mc}_put(&h, o->headers->items[i], o->headers->items[i + 1]);
+  for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) lt_hdr_add(&h, o->headers->items[i], o->headers->items[i + 1]);
   if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
   return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0), (lt_fn){{0}}, lt_http_timing_value(o->timing, o->reused) }};
 }}
@@ -1774,7 +1785,7 @@ static lt_text *lt_url_decode(const char *s, int64_t n) {{
 #ifdef LT_THREADS
 static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *out) {{
   {mc} headers = {mc}_new(r->nheaders);
-  for (int64_t i = 0; i < r->nheaders; i++) {mc}_put(&headers, lt_text_from(r->hname[i], r->hname_len[i]), lt_text_from(r->hvalue[i], r->hvalue_len[i]));
+  for (int64_t i = 0; i < r->nheaders; i++) lt_hdr_add(&headers, lt_text_from(r->hname[i], r->hname_len[i]), lt_text_from(r->hvalue[i], r->hvalue_len[i]));
   {mc} query = {mc}_new(4);
   for (int64_t i = 0; i < r->query_len;) {{
     int64_t j = i; while (j < r->query_len && r->query[j] != '&') j++;
@@ -2701,7 +2712,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "math.is_nan" => format!("isnan({})", a[0]),
             "math.infinity" => "INFINITY".to_string(),
             "url.encode" => format!("lt_url_encode({})", a[0]),
-            "url.decode" => format!("lt_url_decode_text({}, {})", a[0], a[1]),
+            "url.decode" | "http.__url_decode" => format!("lt_url_decode_text({}, {})", a[0], a[1]),
             "csv.parse" | "csv.encode" | "csv.decode" => self.csv_intrinsic(name, tys, a),
             "sql.decode" => self.sql_decode(tys, a),
             "Float.pow" => format!("pow({}, {})", a[0], a[1]),
@@ -3041,6 +3052,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 }
             }
             "http.ResponseStream.status" => format!("(((lt_hstream *){})->status)", a[0]),
+            "http.mime_type" => format!("lt_text_cstr(lt_mime_type({}->data))", a[0]),
             "http.ResponseStream.timing" => {
                 self.gen_http_glue();
                 format!("({{ lt_hstream *s_ = (lt_hstream *){}; lt_http_timing_value(s_->timing, s_->reused); }})", a[0])

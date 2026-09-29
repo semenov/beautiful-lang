@@ -273,6 +273,19 @@ let api = try http.send(http.ClientRequest(url: u, method: "POST",
   headers: {"authorization": "Bearer ${key}"}, body: json.encode(x).bytes()))
 ```
 
+Middleware runs around every request (the first added runs first):
+
+```
+router.use(http.log_requests())
+router.use(http.cors(["https://app.example"]))
+router.use((req, next) => {
+  if req.header("authorization") is none { http.text(401, "log in") } else { try next(req) }
+})
+```
+
+Forms: `try req.form()` (a Map), `try req.parts()` (multipart, with files);
+cookies: `req.cookie("session")`, `res.with_cookie(http.Cookie(name: "session", value: v))`.
+
 Bodies are `Bytes`: `try req.text()`, `try res.text()`. A handler's error
 becomes a 500 and a log line. `http.serve` logs "listening on ..." itself.
 

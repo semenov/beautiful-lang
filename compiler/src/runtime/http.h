@@ -47,6 +47,30 @@ static bool lt_ieq(const char *a, int64_t al, const char *b) {
     return true;
 }
 
+static const char *lt_mime_type(const char *path) {
+    const char *dot = strrchr(path, '.');
+    const char *slash = strrchr(path, '/');
+    if (!dot || (slash && dot < slash)) return "application/octet-stream";
+    static const char *types[][2] = {
+        { "html", "text/html; charset=utf-8" }, { "htm", "text/html; charset=utf-8" },
+        { "css", "text/css; charset=utf-8" }, { "js", "text/javascript; charset=utf-8" },
+        { "mjs", "text/javascript; charset=utf-8" }, { "json", "application/json" },
+        { "txt", "text/plain; charset=utf-8" }, { "md", "text/markdown; charset=utf-8" },
+        { "csv", "text/csv; charset=utf-8" }, { "xml", "application/xml" },
+        { "svg", "image/svg+xml" }, { "png", "image/png" }, { "jpg", "image/jpeg" },
+        { "jpeg", "image/jpeg" }, { "gif", "image/gif" }, { "webp", "image/webp" },
+        { "avif", "image/avif" }, { "ico", "image/x-icon" }, { "pdf", "application/pdf" },
+        { "wasm", "application/wasm" }, { "zip", "application/zip" }, { "gz", "application/gzip" },
+        { "tar", "application/x-tar" }, { "mp4", "video/mp4" }, { "webm", "video/webm" },
+        { "mp3", "audio/mpeg" }, { "ogg", "audio/ogg" }, { "wav", "audio/wav" },
+        { "woff", "font/woff" }, { "woff2", "font/woff2" }, { "ttf", "font/ttf" },
+        { "otf", "font/otf" },
+    };
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
+        if (strcasecmp(dot + 1, types[i][0]) == 0) return types[i][1];
+    return "application/octet-stream";
+}
+
 #ifdef LT_THREADS
 
 static void lt_http_dispatch(lt_fn handler, const lt_http_raw *req, lt_http_out *out);
@@ -139,10 +163,18 @@ static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t le
         lt_text *hn = out->headers->items[i], *hv = out->headers->items[i + 1];
         if (lt_ieq(hn->data, hn->len, "content-type")) has_type = true;
         if (lt_ieq(hn->data, hn->len, "content-length") || lt_ieq(hn->data, hn->len, "connection")) continue;
-        lt_buf_put(&b, hn->data, hn->len);
-        lt_buf_put(&b, ": ", 2);
-        lt_buf_put(&b, hv->data, hv->len);
-        lt_buf_put(&b, "\r\n", 2);
+        // a value with line breaks is several headers (Set-Cookie)
+        const char *v = hv->data, *end = hv->data + hv->len;
+        while (v <= end) {
+            const char *nl = memchr(v, '\n', (size_t)(end - v));
+            const char *stop = nl ? nl : end;
+            lt_buf_put(&b, hn->data, hn->len);
+            lt_buf_put(&b, ": ", 2);
+            lt_buf_put(&b, v, stop - v);
+            lt_buf_put(&b, "\r\n", 2);
+            if (!nl) break;
+            v = nl + 1;
+        }
     }
     if (!has_type && !extra) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
     if (extra) lt_buf_put(&b, extra, (int64_t)strlen(extra));
@@ -170,29 +202,6 @@ static const char *lt_http_header(const lt_http_raw *r, const char *name) {
     return NULL;
 }
 
-static const char *lt_mime_type(const char *path) {
-    const char *dot = strrchr(path, '.');
-    const char *slash = strrchr(path, '/');
-    if (!dot || (slash && dot < slash)) return "application/octet-stream";
-    static const char *types[][2] = {
-        { "html", "text/html; charset=utf-8" }, { "htm", "text/html; charset=utf-8" },
-        { "css", "text/css; charset=utf-8" }, { "js", "text/javascript; charset=utf-8" },
-        { "mjs", "text/javascript; charset=utf-8" }, { "json", "application/json" },
-        { "txt", "text/plain; charset=utf-8" }, { "md", "text/markdown; charset=utf-8" },
-        { "csv", "text/csv; charset=utf-8" }, { "xml", "application/xml" },
-        { "svg", "image/svg+xml" }, { "png", "image/png" }, { "jpg", "image/jpeg" },
-        { "jpeg", "image/jpeg" }, { "gif", "image/gif" }, { "webp", "image/webp" },
-        { "avif", "image/avif" }, { "ico", "image/x-icon" }, { "pdf", "application/pdf" },
-        { "wasm", "application/wasm" }, { "zip", "application/zip" }, { "gz", "application/gzip" },
-        { "tar", "application/x-tar" }, { "mp4", "video/mp4" }, { "webm", "video/webm" },
-        { "mp3", "audio/mpeg" }, { "ogg", "audio/ogg" }, { "wav", "audio/wav" },
-        { "woff", "font/woff" }, { "woff2", "font/woff2" }, { "ttf", "font/ttf" },
-        { "otf", "font/otf" },
-    };
-    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
-        if (strcasecmp(dot + 1, types[i][0]) == 0) return types[i][1];
-    return "application/octet-stream";
-}
 
 // http.stream: the headers, then the writer's writes as chunks.
 static bool lt_http_send_stream(int fd, const lt_http_raw *r, lt_http_out *out, bool keep, bool head_only) {

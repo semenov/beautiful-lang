@@ -590,6 +590,39 @@ pub type Request {
   pub fn header(self, name: Text) -> Text?
   // The body as text; an error if it isn't valid UTF-8.
   pub fn text(self) throws -> Text
+  // A cookie the client sent.
+  pub fn cookie(self, name: Text) -> Text?
+  // The fields of an HTML form (application/x-www-form-urlencoded).
+  // For forms with files, see `parts`.
+  pub fn form(self) throws -> Map<Text, Text>
+  // The parts of a multipart/form-data body: form fields and uploaded
+  // files. A field has `filename` none; `text()` reads its value.
+  pub fn parts(self) throws -> List<Part>
+}
+
+// A part of a multipart form: a field or an uploaded file.
+pub type Part {
+  name: Text
+  // the file's name, for uploads
+  filename: Text? = none
+  content_type: Text = "text/plain"
+  data: Bytes
+  pub fn text(self) throws -> Text
+}
+
+// A cookie to set with `Response.with_cookie`.
+pub type Cookie {
+  name: Text
+  value: Text
+  // seconds until it expires; none: when the browser closes; 0: delete it now
+  max_age: Int? = none
+  path: Text = "/"
+  // not readable from JavaScript
+  http_only: Bool = true
+  // only over HTTPS
+  secure: Bool = false
+  // "Lax", "Strict" or "None"
+  same_site: Text = "Lax"
 }
 
 // How long a client request took, each from its start. Connections are
@@ -619,6 +652,10 @@ pub type Response {
   pub fn text(self) throws -> Text
   // A copy with one more header.
   pub fn with_header(self, name: Text, value: Text) -> Response
+  // A copy that sets a cookie (several can be set).
+  pub fn with_cookie(self, cookie: Cookie) -> Response
+  // The cookies a client response sets, as name -> value.
+  pub fn cookies(self) -> Map<Text, Text>
 }
 
 pub fn text(status: Int, body: Text) -> Response
@@ -659,8 +696,18 @@ pub fn redirect(to: Text) -> Response
 // for a directory, its index.html.
 pub fn file(path: Text) -> Response
 
+// Runs around every request: gets the request and `next` (the rest of the
+// chain: other middleware, then the route) and returns a response.
+//   router.use((req, next) => {
+//     if req.header("authorization") is none { http.text(401, "log in") } else { try next(req) }
+//   })
+pub type Middleware = fn(Request, fn(Request) throws -> Response) throws -> Response
+
 pub type Router {
   routes: List<Route> = []
+  middleware: List<Middleware> = []
+  // Adds middleware: the first added runs first (outermost).
+  pub mutating fn use(m: Middleware)
   pub mutating fn get(pattern: Text, handler: fn(Request) throws -> Response)
   pub mutating fn post(pattern: Text, handler: fn(Request) throws -> Response)
   pub mutating fn put(pattern: Text, handler: fn(Request) throws -> Response)
@@ -674,6 +721,17 @@ pub type Router {
   // `*name` matches the rest of the path. HEAD is answered by GET routes.
   pub fn handle(self, request: Request) throws -> Response
 }
+
+// Middleware that logs each request: "GET /notes/7 200 1.2ms".
+pub fn log_requests() -> Middleware
+
+// Middleware for calls from web pages on other sites (CORS): answers the
+// browser's OPTIONS question and marks responses as allowed for `origins`
+// (["*"] for any site).
+pub fn cors(origins: List<Text>) -> Middleware
+
+// The content type for a file name: "a.png" -> "image/png".
+pub fn mime_type(path: Text) -> Text
 
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 // With a body: `var req = http.request("POST", "/notes")`, then

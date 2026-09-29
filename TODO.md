@@ -66,8 +66,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `time`: format and parse with a pattern, time zones, `Date`,
       `parse_duration`, printing durations
 - [ ] `Decimal`
-- [ ] `http`: middleware (`router.use`), cookies, forms (urlencoded,
-      multipart), `http.mime_type`, CORS
+- [x] `http`: middleware (`router.use`), cookies, forms (urlencoded,
+      multipart), `http.mime_type`, CORS, request logging
 - [ ] WebSockets (server and client)
 - [ ] templates (logic-less, HTML-escaping)
 - [ ] `tar` and `zip`
