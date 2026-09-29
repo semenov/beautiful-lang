@@ -91,6 +91,7 @@ pub struct CGen<'a> {
     threads: bool,
     http_glue: bool,
     curl: bool,
+    net: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -161,6 +162,7 @@ impl<'a> CGen<'a> {
             threads: false,
             http_glue: false,
             curl: false,
+            net: false,
         }
     }
 
@@ -2641,6 +2643,27 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
             "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
+            n if n.starts_with("net.") || n.starts_with("Connection.") || n.starts_with("UdpSocket.") => {
+                self.threads = true;
+                self.net = true;
+                match n {
+                    "net.connect" => format!("lt_net_connect({}, {}, {})", a[0], a[1], a[2]),
+                    "net.serve" => format!("lt_net_serve({}, {})", a[0], a[1]),
+                    "net.udp" => format!("lt_net_udp({}, {})", a[0], a[1]),
+                    "Connection.read" => format!("lt_conn_read({}, {}, {})", a[0], a[1], a[2]),
+                    "Connection.read_exact" => format!("lt_conn_read_exact({}, {}, {})", a[0], a[1], a[2]),
+                    "Connection.read_line" => format!("lt_conn_read_line({}, {})", a[0], a[1]),
+                    "Connection.write" => format!("({{ lt_bytes *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], a[0]),
+                    "Connection.write_text" => format!("({{ lt_text *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], a[0]),
+                    "Connection.peer" => format!("lt_text_cstr(((lt_conn *){})->peer)", a[0]),
+                    "Connection.close" => format!("lt_conn_close({})", a[0]),
+                    "UdpSocket.send_to" => format!("lt_udp_send_to({}, {}, {})", a[0], a[1], a[2]),
+                    "UdpSocket.receive" => format!("({{ lt_bytes *d_; lt_text *f_; lt_err e_ = lt_udp_receive({}, &d_, &f_); if (!e_.obj) *{} = (__typeof__(*{})){{ d_, f_ }}; e_; }})", a[0], a[1], a[1]),
+                    "UdpSocket.port" => format!("(((lt_udp *){})->port)", a[0]),
+                    "UdpSocket.close" => format!("lt_udp_close({})", a[0]),
+                    _ => panic!("unknown intrinsic {}", n),
+                }
+            }
             "http.__serve" => {
                 self.threads = true;
                 self.gen_http_glue();
@@ -3056,11 +3079,14 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         }
         out += include_str!("runtime/std.h");
         out += include_str!("runtime/json.h");
-        if self.http_glue {
+        if self.http_glue || self.net {
             if self.curl {
                 out = format!("#define LT_CURL 1\n// link: -lcurl\n{}", out);
             }
             out += include_str!("runtime/http.h");
+        }
+        if self.net {
+            out += include_str!("runtime/net.h");
         }
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";

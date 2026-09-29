@@ -31,7 +31,7 @@ pub fn extension(path: Text) -> Text?
 
 // An open file, for reading or writing it piece by piece.
 // Get one with `with f = try files.open(path) { ... }`.
-builtin type File {
+pub builtin type File {
   // The next line without its line break; none at the end of the file.
   fn read_line(self) throws -> Text?
   fn write(self, text: Text) throws
@@ -44,7 +44,7 @@ pub fn open(path: Text) throws -> File
 pub fn create(path: Text) throws -> File
 
 // A new empty directory, deleted with everything in it at the end of `with`.
-builtin type TempDir {
+pub builtin type TempDir {
   path: Text
   fn close(self) throws
 }

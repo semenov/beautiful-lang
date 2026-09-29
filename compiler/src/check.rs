@@ -857,6 +857,7 @@ impl Checker {
             Some(Stmt::Return(..)) | Some(Stmt::Throw(..)) => true,
             Some(Stmt::Expr(e)) => self.expr_returns(e),
             Some(Stmt::While { cond, .. }) => matches!(cond.kind, ExprKind::Bool(true)),
+            Some(Stmt::With { body, .. }) => self.block_returns(body),
             _ => false,
         }
     }

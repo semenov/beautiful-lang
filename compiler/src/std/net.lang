@@ -1,0 +1,52 @@
+// net: TCP and UDP. Waiting on the network doesn't block other tasks.
+//
+//   with conn = try net.connect("example.com", 80) {
+//     try conn.write_text("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n")
+//     print(try conn.read(4096).text())
+//   }
+//
+//   try net.serve(7000, conn => try echo(conn))     // a task per connection
+
+// A TCP connection. Get one with `with conn = try net.connect(...)`, or in
+// the handler of `net.serve` (which closes it when the handler returns).
+pub builtin type Connection {
+  // Up to `max` bytes, as soon as some arrive; empty when the other side
+  // has closed the connection.
+  fn read(self, max: Int) throws -> Bytes
+  // Exactly `count` bytes; an error if the connection closes first.
+  fn read_exact(self, count: Int) throws -> Bytes
+  // The next line without "\n" (or "\r\n"); none when the connection closes.
+  fn read_line(self) throws -> Text?
+  fn write(self, data: Bytes) throws
+  fn write_text(self, text: Text) throws
+  // The other side's address: "93.184.215.14:80"
+  fn peer(self) -> Text
+  fn close(self) throws
+}
+
+pub fn connect(host: Text, port: Int) throws -> Connection
+
+// Accepts connections on `port` until the program is stopped (Ctrl-C),
+// running `handler` for each in its own task. An error from a handler is
+// logged; the connection is closed when the handler returns.
+pub fn serve(port: Int, handler: fn(Connection) throws) throws
+
+pub type Datagram {
+  data: Bytes
+  // "host:port" of the sender
+  from: Text
+}
+
+// A UDP socket. Get one with `with sock = try net.udp(port)`; port 0 picks
+// a free one.
+pub builtin type UdpSocket {
+  // Sends to "host:port".
+  fn send_to(self, data: Bytes, address: Text) throws
+  // Waits for the next datagram.
+  fn receive(self) throws -> Datagram
+  // The local port.
+  fn port(self) -> Int
+  fn close(self) throws
+}
+
+pub fn udp(port: Int) throws -> UdpSocket

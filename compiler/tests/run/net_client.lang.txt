@@ -1,0 +1,26 @@
+import net
+
+fn main() throws {
+  with conn = try net.connect("localhost", 17000) {
+    print(try conn.read_line() ?? "-")
+    try conn.write_text("abc\nxyz\n")
+    print(try conn.read_line() ?? "-")
+    print(try conn.read_line() ?? "-")
+    try conn.write_text("quit\n")
+    print("after quit: ${try conn.read_line()}")
+  }
+  with sock = try net.udp(0) {
+    try sock.send_to("ping".bytes(), address: "127.0.0.1:17001")
+    let reply = try sock.receive()
+    print(try reply.data.text())
+  }
+  print(try try_port_one() catch err {
+    err.message()
+  })
+}
+
+fn try_port_one() throws -> Text {
+  with conn = try net.connect("localhost", 1) {
+    return "connected?"
+  }
+}

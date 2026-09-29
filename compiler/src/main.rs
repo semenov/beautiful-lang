@@ -70,6 +70,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "http" => include_str!("std/http.lang"),
         "crypto" => include_str!("std/crypto.lang"),
         "encoding" => include_str!("std/encoding.lang"),
+        "net" => include_str!("std/net.lang"),
         _ => return None,
     })
 }

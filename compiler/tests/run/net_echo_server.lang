@@ -1,0 +1,25 @@
+import net
+
+fn echo(conn: net.Connection) throws {
+  try conn.write_text("hello ${conn.peer().starts_with("127.0.0.1") or conn.peer().starts_with("::1")}\n")
+  while try conn.read_line() is some(line) {
+    if line == "quit" {
+      return
+    }
+    try conn.write_text("${line.upper()}\n")
+  }
+}
+
+fn main() throws {
+  spawn udp_echo()
+  try net.serve(17000, conn => try echo(conn))
+}
+
+fn udp_echo() throws {
+  with sock = try net.udp(17001) {
+    while true {
+      let d = try sock.receive()
+      try sock.send_to("got ${try d.data.text()}".bytes(), address: d.from)
+    }
+  }
+}
