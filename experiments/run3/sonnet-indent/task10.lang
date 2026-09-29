@@ -1,0 +1,70 @@
+// Task 10: Composable pricing rules, plus two unrelated describable types.
+
+pub interface Describable
+  fn describe(self) -> Text
+
+// A pricing rule turns an order total into a new total.
+fn percent_off(percent: Decimal) -> fn(Decimal) -> Decimal
+  return total => total * (1.0 - percent / 100.0)
+
+fn cap_at(limit: Decimal) -> fn(Decimal) -> Decimal
+  return total => min(total, limit)
+
+// Runs every rule in order, feeding each result into the next.
+fn combine(rules: List<fn(Decimal) -> Decimal>) -> fn(Decimal) -> Decimal
+  return total =>
+    var result = total
+    for rule in rules
+      result = rule(result)
+    result
+
+pub type Invoice implements Describable
+  number: Text
+  amount: Decimal
+
+  fn describe(self) -> Text
+    return "invoice ${self.number} for ${self.amount}"
+
+pub type WeatherReading implements Describable
+  city: Text
+  celsius: Float
+
+  fn describe(self) -> Text
+    return "weather in ${self.city}: ${self.celsius}C"
+
+fn print_report(items: List<Describable>)
+  for item in items
+    print(item.describe())
+
+fn main() throws
+  let discounted_and_capped = combine([percent_off(10.0), cap_at(50.0)])
+  let total: Decimal = 80.0
+  print("final total: ${discounted_and_capped(total)}")
+
+  let items: List<Describable> = [
+    Invoice(number: "INV-1", amount: 120.0),
+    WeatherReading(city: "Berlin", celsius: 18.5)
+  ]
+  print_report(items)
+
+test "percent off alone reduces the total"
+  let rule = percent_off(20.0)
+  expect rule(100.0) == 80.0
+
+test "cap alone limits the total"
+  let rule = cap_at(30.0)
+  expect rule(100.0) == 30.0
+
+test "combining percent off and a cap applies both, in order"
+  let rule = combine([percent_off(10.0), cap_at(50.0)])
+  expect rule(80.0) == 50.0
+
+test "an empty list of rules leaves the total unchanged"
+  let rule = combine([])
+  expect rule(42.0) == 42.0
+
+test "unrelated types can each describe themselves"
+  let invoice = Invoice(number: "INV-42", amount: 9.99)
+  let weather = WeatherReading(city: "Lisbon", celsius: 21.5)
+  expect invoice.describe() == "invoice INV-42 for 9.99"
+  expect weather.describe() == "weather in Lisbon: 21.5C"

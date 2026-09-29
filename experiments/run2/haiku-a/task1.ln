@@ -1,0 +1,36 @@
+# Task 1: Inventory
+
+type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+fn restock(product: var Product, amount: Int)
+  require amount >= 0
+  product = product.with(stock: product.stock + amount)
+
+fn low_stock_products(products: List<Product>) -> List<Text>
+  return products
+    .filter(p => p.stock < 5)
+    .sort_by(p => p.stock)
+    .map(p => p.name)
+
+test "restock increases stock"
+  var product = Product(name: "Widget", price: 9.99, stock: 10)
+  restock(product, amount: 5)
+  expect product.stock == 15
+
+test "restock requires non-negative amount"
+  var product = Product(name: "Widget", price: 9.99, stock: 10)
+  let err = expect throws restock(product, amount: -1)
+  expect err.message.contains("amount")
+
+test "low_stock_products finds and sorts correctly"
+  let products = [
+    Product(name: "A", price: 1, stock: 2),
+    Product(name: "B", price: 2, stock: 8),
+    Product(name: "C", price: 3, stock: 4),
+    Product(name: "D", price: 4, stock: 1),
+  ]
+  let names = low_stock_products(products)
+  expect names == ["D", "A", "C"]

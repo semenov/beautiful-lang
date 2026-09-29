@@ -1,0 +1,69 @@
+# Storage: a key-value contract with in-memory and file-backed implementations.
+
+import files
+
+enum StorageError
+  NotFound(key: Text)
+  Unavailable(reason: Text)
+
+interface Storage
+  fn get(self, key: Text) throws StorageError -> Bytes?
+  fn put(self, key: Text, value: Bytes) throws StorageError
+  fn delete(self, key: Text) throws StorageError
+
+interface Listable
+  fn keys(self, prefix: Text) throws StorageError -> List<Text>
+
+resource MemoryStore
+  var data: Map<Text, Bytes> = {}
+
+fn get(store: MemoryStore, key: Text) throws StorageError -> Bytes?
+  return store.data[key]
+
+fn put(store: MemoryStore, key: Text, value: Bytes) throws StorageError
+  store.data[key] = value
+
+fn delete(store: MemoryStore, key: Text) throws StorageError
+  store.data.remove(key)
+
+fn keys(store: MemoryStore, prefix: Text) throws StorageError -> List<Text>
+  return store.data.keys().filter(k => k.starts_with(prefix))
+
+resource FileStore
+  dir: Text
+
+fn get(store: FileStore, key: Text) throws StorageError -> Bytes?
+  let path = "{store.dir}/{key}"
+  if not files.exists(path)
+    return none
+  return try files.read_bytes(path) catch err => throw Unavailable(reason: err.message)
+
+fn put(store: FileStore, key: Text, value: Bytes) throws StorageError
+  try files.write_bytes("{store.dir}/{key}", value) catch err => throw Unavailable(reason: err.message)
+
+fn delete(store: FileStore, key: Text) throws StorageError
+  try files.delete("{store.dir}/{key}") catch err => throw Unavailable(reason: err.message)
+
+fn keys(store: FileStore, prefix: Text) throws StorageError -> List<Text>
+  let names = try files.list(store.dir) catch err => throw Unavailable(reason: err.message)
+  return names.filter(n => n.starts_with(prefix))
+
+# Copies every key with the given prefix from a listable storage to any storage.
+fn copy_with_prefix<S: Storage + Listable, D: Storage>(source: S, dest: D, prefix: Text) throws StorageError
+  for key in try source.keys(prefix)
+    let value = try source.get(key)
+    if value is some(v)
+      try dest.put(key: key, value: v)
+
+test "copies matching keys between in-memory stores"
+  let source = MemoryStore()
+  try source.put(key: "orders/1", value: "first".bytes())
+  try source.put(key: "orders/2", value: "second".bytes())
+  try source.put(key: "users/1", value: "ada".bytes())
+
+  let dest = MemoryStore()
+  try copy_with_prefix(source, dest, "orders/")
+
+  expect (try dest.get("orders/1")) is some(_)
+  expect (try dest.get("orders/2")) is some(_)
+  expect (try dest.get("users/1")) is none

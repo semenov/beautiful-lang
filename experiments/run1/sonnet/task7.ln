@@ -1,0 +1,29 @@
+# Word stats: the 3 most common words longer than 3 letters, and the
+# average word length across the whole text.
+
+type WordCount
+  word: Text
+  count: Int
+
+type WordStats
+  top: List<WordCount>
+  average_length: Float
+
+fn word_stats(text: Text) -> WordStats
+  let all_words = text.split(" ")
+  let long_words = all_words.filter(w => w.length > 3)
+  let top = long_words
+    .group_by(w => w)
+    .map((word, occurrences) => WordCount(word: word, count: occurrences.length))
+    .sort_by(wc => -wc.count)
+    .take(3)
+  let average = all_words.map(w => w.length).sum() / all_words.length
+  return WordStats(top: top, average_length: average)
+
+test "finds the most common long words and the average length"
+  let text = "the cat sat on the mat while the dog barked at the cat"
+  let stats = word_stats(text)
+  expect stats.top.length == 3
+  expect stats.top[0].word == "the"
+  expect stats.top[0].count == 4
+  expect stats.average_length > 0

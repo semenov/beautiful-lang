@@ -1,0 +1,45 @@
+type Person
+  name: Text
+  age: Int
+
+fn parse_csv(text: Text) -> List<Person> throws
+  let lines = text.lines()
+
+  if lines.is_empty()
+    throw Error("Missing header line")
+
+  let header = lines[0].split(",")
+  if header != ["name", "age"]
+    throw Error("Wrong header format")
+
+  var people: List<Person> = []
+
+  for i in 1..<lines.length
+    let line = lines[i]
+    let fields = line.split(",")
+
+    if fields.length != 2
+      continue
+
+    let name = fields[0]
+    let age = parse_int(fields[1]) catch continue
+
+    people.append(Person(name: name, age: age))
+
+  return people
+
+test "parse_csv"
+  let text = "name,age\nAda,36\nAlan,41"
+  let people = try parse_csv(text)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+
+test "parse_csv_with_malformed"
+  let text = "name,age\nAda,36\nBob,bad\nCharlie,42"
+  let people = try parse_csv(text)
+  expect people.length == 2
+
+test "parse_csv_wrong_header"
+  let err = expect throws parse_csv("id,name\nAda,36")
+  expect err.message.contains("Wrong header")

@@ -1,0 +1,23 @@
+# Interop: format today's date with date-fns, pad a number with left-pad,
+# and export a report combining both to JavaScript.
+
+import js "date-fns"
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+fn today_iso() -> Text
+  let now = Date()
+  return date_fns.format(now, "yyyy-MM-dd")
+
+fn pad_number(n: Int) -> Text
+  return leftPad("{n}", 5, "0")
+
+pub fn report(n: Int) -> Text
+  return "{today_iso()}: {pad_number(n)}"
+
+test "pads short numbers with leading zeros"
+  expect pad_number(42) == "00042"
+
+test "does not pad numbers that already fill the width"
+  expect pad_number(12345) == "12345"

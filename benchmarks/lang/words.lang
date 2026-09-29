@@ -1,0 +1,47 @@
+type Rng {
+  state: Int
+
+  mutating fn next() -> Int {
+    var x = self.state
+    x = x.bit_xor(x.shift_left(13).bit_and(4294967295))
+    x = x.bit_xor(x.shift_right(17))
+    x = x.bit_xor(x.shift_left(5).bit_and(4294967295))
+    self.state = x
+    return x
+  }
+}
+
+fn make_vocab(size: Int) -> List<Text> {
+  let letters = "abcdefghijklmnopqrstuvwxyz".chars()
+  var vocab: List<Text> = []
+  for k in 0..<size {
+    var v = k
+    var word: List<Text> = []
+    word.append(letters[v % 26])
+    v = v.div(26)
+    while v != 0 {
+      word.append(letters[v % 26])
+      v = v.div(26)
+    }
+    vocab.append(word.join(""))
+  }
+  return vocab
+}
+
+fn main() {
+  let vocab = make_vocab(50_000)
+  var rng = Rng(state: 2463534242)
+  for round in 0..<5 {
+    var parts: List<Text> = []
+    for i in 0..<5_000_000 {
+      parts.append(vocab[rng.next() % vocab.length])
+    }
+    let text = parts.join(" ")
+    let counts = text.split(" ").count_each()
+    let top = counts.entries().sorted_by(e => e.key).sorted_by(e => -e.value).take(5)
+    print("${text.byte_length()}")
+    for e in top {
+      print("${e.key} ${e.value}")
+    }
+  }
+}

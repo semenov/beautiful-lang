@@ -1,0 +1,47 @@
+# Task 3: Shapes
+# Define circles, rectangles, triangles; compute area and describe size
+
+enum Shape
+  Circle(radius: Float)
+  Rectangle(width: Float, height: Float)
+  Triangle(base: Float, height: Float)
+
+fn area(shape: Shape) -> Float
+  return match shape
+    case Circle(r) => 3.14159 * r ^ 2
+    case Rectangle(w, h) => w * h
+    case Triangle(b, h) => b * h / 2
+
+fn total_area(shapes: List<Shape>) -> Float
+  return shapes.map(s => area(s)).sum()
+
+fn describe_size(shape: Shape) -> Text
+  let a = area(shape)
+  return if a < 10 then "small" else if a < 100 then "medium" else "large"
+
+test "circle area calculation"
+  let c = Circle(2)
+  let a = area(c)
+  expect a > 12 and a < 13
+
+test "rectangle area calculation"
+  let r = Rectangle(3, 4)
+  expect area(r) == 12
+
+test "triangle area calculation"
+  let t = Triangle(4, 3)
+  expect area(t) == 6
+
+test "total area of mixed shapes"
+  let shapes = [
+    Circle(2),
+    Rectangle(3, 4),
+    Triangle(4, 3),
+  ]
+  let total = total_area(shapes)
+  expect total > 25 and total < 26
+
+test "describe sizes correctly"
+  expect describe_size(Circle(1)) == "small"
+  expect describe_size(Rectangle(5, 5)) == "medium"
+  expect describe_size(Rectangle(15, 15)) == "large"

@@ -1,0 +1,73 @@
+// Task 5: A tiny notes HTTP service, handled concurrently.
+
+import http
+import json
+
+pub type Note
+  id: Int
+  title: Text
+  text: Text
+
+pub type NewNote
+  title: Text
+  text: Text
+
+// Bundles the two pieces of shared mutable state the handlers need, so each
+// handler function still only takes two arguments (the store and the
+// request) and can be called positionally.
+pub type NotesStore
+  notes: Shared<Map<Int, Note>>
+  next_id: Shared<Int>
+
+fn create_note(store: NotesStore, req: http.Request) throws -> http.Response
+  let body = try json.decode<NewNote>(req.body)
+  let id = store.next_id.get()
+  store.next_id.update(n => n + 1)
+  let note = Note(id: id, title: body.title, text: body.text)
+  store.notes.update(m =>
+    var updated = m
+    updated[id] = note
+    updated
+  )
+  return http.json(201, note)
+
+fn get_note(store: NotesStore, req: http.Request) throws -> http.Response
+  let id = try (req.param("id") ?? "").to_int()
+  match store.notes.get()[id]
+    some(note) => return http.json(200, note)
+    none => return http.text(404, "not found")
+
+fn make_router(store: NotesStore) -> http.Router
+  var router = http.Router()
+  router.post("/notes", req => create_note(store, req))
+  router.get("/notes/:id", req => get_note(store, req))
+  return router
+
+fn main() throws
+  let store = NotesStore(notes: Shared<Map<Int, Note>>({}), next_id: Shared<Int>(1))
+  let router = make_router(store)
+  try http.serve(router, port: 8080)
+
+test "creating a note returns it with a new id"
+  let store = NotesStore(notes: Shared<Map<Int, Note>>({}), next_id: Shared<Int>(1))
+  let router = make_router(store)
+  let create_res = try router.handle(http.Request(method: "POST", path: "/notes", body: """{"title": "Groceries", "text": "milk, eggs"}"""))
+  expect create_res.status == 201
+  let created = try json.decode<Note>(create_res.body)
+  expect created.id == 1
+  expect created.title == "Groceries"
+
+test "getting an existing note returns it"
+  let store = NotesStore(notes: Shared<Map<Int, Note>>({}), next_id: Shared<Int>(1))
+  let router = make_router(store)
+  let _ = try router.handle(http.Request(method: "POST", path: "/notes", body: """{"title": "Groceries", "text": "milk, eggs"}"""))
+  let get_res = try router.handle(http.Request(method: "GET", path: "/notes/1", body: ""))
+  expect get_res.status == 200
+  let found = try json.decode<Note>(get_res.body)
+  expect found.title == "Groceries"
+
+test "getting a missing note returns 404"
+  let store = NotesStore(notes: Shared<Map<Int, Note>>({}), next_id: Shared<Int>(1))
+  let router = make_router(store)
+  let res = try router.handle(http.Request(method: "GET", path: "/notes/99", body: ""))
+  expect res.status == 404

@@ -1,0 +1,98 @@
+// 5. Notes HTTP service
+
+import http
+import json
+
+type Note {
+  id: Int
+  title: Text
+  text: Text
+}
+
+type NewNote {
+  title: Text
+  text: Text
+}
+
+type NotesState {
+  notes: Map<Int, Note> = {}
+  next_id: Int = 1
+}
+
+// Reads the next id, then stores the note under it. Under very high
+// concurrency two requests could race between the read and the update
+// (see NOTES.md) since Shared<T>.update() does not hand back a value.
+fn handle_create_note(state: Shared<NotesState>, req: http.Request) throws -> http.Response {
+  let body = try json.decode<NewNote>(req.body)
+  let id = state.get().next_id
+  let note = Note(id: id, title: body.title, text: body.text)
+
+  state.update(current => {
+    var updated = current
+    updated.notes[id] = note
+    updated.next_id = id + 1
+    updated
+  })
+
+  return http.json(200, note)
+}
+
+fn handle_get_note(state: Shared<NotesState>, req: http.Request) throws -> http.Response {
+  let id = try (req.param("id") ?? "").to_int()
+  let found = state.get().notes[id]
+
+  return match found {
+    some(note) => http.json(200, note)
+    none => http.text(404, "not found")
+  }
+}
+
+test "creating a note assigns an id and returns it" {
+  let state = Shared<NotesState>(NotesState())
+  var router = http.Router()
+  router.post("/notes", req => try handle_create_note(state, req))
+  router.get("/notes/:id", req => try handle_get_note(state, req))
+
+  let body = json.encode(NewNote(title: "Groceries", text: "milk, eggs"))
+  let res = try router.handle(http.Request(method: "POST", path: "/notes", body: body))
+
+  expect res.status == 200
+  let created = try json.decode<Note>(res.body)
+  expect created.title == "Groceries"
+  expect created.id == 1
+}
+
+test "getting an existing note returns it" {
+  let state = Shared<NotesState>(NotesState())
+  var router = http.Router()
+  router.post("/notes", req => try handle_create_note(state, req))
+  router.get("/notes/:id", req => try handle_get_note(state, req))
+
+  let create_body = json.encode(NewNote(title: "Groceries", text: "milk, eggs"))
+  let created_res = try router.handle(http.Request(method: "POST", path: "/notes", body: create_body))
+  let created = try json.decode<Note>(created_res.body)
+
+  let res = try router.handle(http.Request(method: "GET", path: "/notes/${created.id}", body: ""))
+  expect res.status == 200
+  let fetched = try json.decode<Note>(res.body)
+  expect fetched.title == "Groceries"
+}
+
+test "getting a missing note returns 404" {
+  let state = Shared<NotesState>(NotesState())
+  var router = http.Router()
+  router.get("/notes/:id", req => try handle_get_note(state, req))
+
+  let res = try router.handle(http.Request(method: "GET", path: "/notes/99", body: ""))
+  expect res.status == 404
+}
+
+fn main() throws {
+  let state = Shared<NotesState>(NotesState())
+
+  var router = http.Router()
+  router.post("/notes", req => try handle_create_note(state, req))
+  router.get("/notes/:id", req => try handle_get_note(state, req))
+
+  try http.serve(router, port: 8080)
+}

@@ -1,0 +1,58 @@
+# Task 2: CSV parsing
+# Parse CSV with header validation, skip malformed lines
+
+type Person
+  name: Text
+  age: Int
+
+fn parse_csv(text: Text) throws -> List<Person>
+  let lines = text.split("\n")
+
+  if lines.is_empty()
+    throw Error("missing header line")
+
+  let header = lines[0].split(",")
+  if header.length != 2
+    throw Error("wrong header")
+
+  if header[0] != "name" or header[1] != "age"
+    throw Error("wrong header")
+
+  var result: List<Person> = []
+
+  for i in 1..lines.length
+    let line = lines[i]
+    if line.is_empty()
+      continue
+
+    let parts = line.split(",")
+    if parts.length != 2
+      continue
+
+    let age = try parse_int(parts[1]) catch
+      continue
+
+    result += [Person(name: parts[0], age: age)]
+
+  return result
+
+test "parse valid csv"
+  let csv = "name,age\nAda,36\nAlan,41"
+  let people = try parse_csv(csv)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+  expect people[1].name == "Alan"
+  expect people[1].age == 41
+
+test "skip malformed lines"
+  let csv = "name,age\nAda,36\nbad line\nAlan,41"
+  let people = try parse_csv(csv)
+  expect people.length == 2
+
+test "fail on wrong header"
+  let csv = "id,email\nAda,36"
+  try
+    try parse_csv(csv)
+  catch err
+    expect err.message == "wrong header"

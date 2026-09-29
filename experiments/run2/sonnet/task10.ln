@@ -1,0 +1,48 @@
+# Pricing rules: build rules, combine them, and apply them to a total.
+# Plus: two unrelated types that can describe themselves.
+
+fn percent_off(rate: Decimal) -> fn(Decimal) -> Decimal
+  return total => total - total * rate / 100
+
+fn never_more_than(cap: Decimal) -> fn(Decimal) -> Decimal
+  return total => min(total, cap)
+
+fn combine(rules: List<fn(Decimal) -> Decimal>) -> fn(Decimal) -> Decimal
+  return total => rules.fold(start: total, step: (acc, rule) => rule(acc))
+
+test "percent_off reduces the total"
+  let ten_percent_off = percent_off(10)
+  expect ten_percent_off(200) == 180
+
+test "never_more_than caps the total"
+  let capped = never_more_than(50)
+  expect capped(80) == 50
+  expect capped(20) == 20
+
+test "combine applies every rule in order"
+  let rule = combine([percent_off(10), never_more_than(150)])
+  expect rule(200) == 150
+  expect rule(100) == 90
+
+# --- Two unrelated types that can each describe themselves ---
+
+interface Describable
+  fn describe(self) -> Text
+
+type Point
+  x: Float
+  y: Float
+
+fn describe(point: Point) -> Text = "({point.x}, {point.y})"
+
+type Temperature
+  celsius: Float
+
+fn describe(temp: Temperature) -> Text = "{temp.celsius}°C"
+
+fn print_report(items: List<Describable>)
+  for item in items
+    print(item.describe())
+
+let items: List<Describable> = [Point(x: 1, y: 2), Temperature(celsius: 20)]
+print_report(items)

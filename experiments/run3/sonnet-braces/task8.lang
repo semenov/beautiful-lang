@@ -1,0 +1,84 @@
+// 8. Log processing pipeline
+
+import cli
+import files
+import tasks
+
+type Options {
+  args: List<Text> = []
+}
+
+fn count_line(line: Text, totals: Shared<Map<Text, Int>>) {
+  if not line.contains("ERROR") {
+    return
+  }
+  let words = line.words()
+  if words.length < 2 {
+    return
+  }
+  let service = words[1]
+  totals.update(current => {
+    var updated = current
+    updated[service] = (updated[service] ?? 0) + 1
+    updated
+  })
+}
+
+fn worker(jobs: Channel<Text>, totals: Shared<Map<Text, Int>>) {
+  for line in jobs {
+    count_line(line, totals)
+  }
+}
+
+fn process_log(path: Text) throws -> Map<Text, Int> {
+  let totals = Shared<Map<Text, Int>>({})
+  let jobs = Channel<Text>(capacity: 100)
+
+  with group = try tasks.group() {
+    for i in 0..<4 {
+      group.start(() => worker(jobs, totals))
+    }
+
+    with file = try files.open(path) {
+      for line in file.lines() {
+        try jobs.send(line)
+      }
+    }
+    jobs.close()
+  }
+
+  return totals.get()
+}
+
+test "counts ERROR lines per service, highest first when sorted" {
+  with dir = try files.temp_dir() {
+    let path = "${dir.path}/test.log"
+    let content = """
+2024-01-01 auth INFO started
+2024-01-01 auth ERROR failed login
+2024-01-01 billing ERROR charge failed
+2024-01-01 auth ERROR failed login again
+2024-01-01 billing INFO ok
+"""
+    try files.write(path, content)
+
+    let totals = try process_log(path)
+    expect totals["auth"] == 2
+    expect totals["billing"] == 1
+  }
+}
+
+fn main() throws {
+  let options = try cli.decode<Options>()
+  if options.args.is_empty() {
+    throw Failure(message: "usage: logcount <file>")
+  }
+
+  let totals = try process_log(options.args[0])
+
+  let ascending = totals.entries().sorted_by(e => e.value)
+  let descending = ascending.reversed()
+  for entry in descending {
+    print("${entry.key}: ${entry.value}")
+  }
+}

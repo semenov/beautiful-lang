@@ -1,0 +1,127 @@
+import files
+
+interface Storage {
+  fn get(self, key: Text) -> Text?
+  fn put(var self, key: Text, value: Text) throws
+  fn delete(var self, key: Text) throws
+}
+
+interface Listable {
+  fn keys(self) -> List<Text>
+}
+
+type MemoryStorage implements Storage {
+  data: Map<Text, Text>
+
+  fn get(self, key: Text) -> Text? {
+    return self.data[key]
+  }
+
+  fn put(var self, key: Text, value: Text) throws {
+    self.data[key] = value
+  }
+
+  fn delete(var self, key: Text) throws {
+    self.data.remove(key)
+  }
+}
+
+type ListableMemory implements Storage, Listable {
+  data: Map<Text, Text>
+
+  fn get(self, key: Text) -> Text? {
+    return self.data[key]
+  }
+
+  fn put(var self, key: Text, value: Text) throws {
+    self.data[key] = value
+  }
+
+  fn delete(var self, key: Text) throws {
+    self.data.remove(key)
+  }
+
+  fn keys(self) -> List<Text> {
+    return self.data.keys()
+  }
+}
+
+type FileStorage implements Storage, Listable {
+  dir: Text
+
+  fn get(self, key: Text) -> Text? {
+    let path = "${self.dir}/${key}"
+    if files.exists(path) {
+      let content = try files.read(path) catch err {
+        return none
+      }
+      return content
+    } else {
+      return none
+    }
+  }
+
+  fn put(var self, key: Text, value: Text) throws {
+    let path = "${self.dir}/${key}"
+    try files.write(path, value)
+  }
+
+  fn delete(var self, key: Text) throws {
+    let path = "${self.dir}/${key}"
+    try files.delete(path)
+  }
+
+  fn keys(self) -> List<Text> {
+    let files_list = try files.list(self.dir) catch err {
+      return []
+    }
+    return files_list
+  }
+}
+
+fn copy_with_prefix(source: Storage + Listable, var dest: Storage, prefix: Text) throws {
+  let all_keys = source.keys()
+  for key in all_keys {
+    if key.starts_with(prefix) {
+      let value = source.get(key) ?? ""
+      try dest.put(key, value)
+    }
+  }
+}
+
+test "memory storage get and put" {
+  var storage = ListableMemory(data: {})
+  try storage.put("key1", "value1")
+  expect storage.get("key1") == "value1"
+}
+
+test "copy_with_prefix copies matching keys" {
+  var source = ListableMemory(data: {})
+  var dest = ListableMemory(data: {})
+
+  try source.put("prefix_a", "val1")
+  try source.put("prefix_b", "val2")
+  try source.put("other_c", "val3")
+
+  try copy_with_prefix(source, &dest, "prefix_")
+
+  expect dest.get("prefix_a") == "val1"
+  expect dest.get("prefix_b") == "val2"
+  expect dest.get("other_c") == none
+}
+
+fn main() throws {
+  var memory = ListableMemory(data: {})
+  try memory.put("user:1", "Alice")
+  try memory.put("user:2", "Bob")
+  try memory.put("other:key", "data")
+
+  var file_storage = FileStorage(dir: "/tmp/storage")
+
+  try copy_with_prefix(memory, &file_storage, "user:")
+
+  print("Copied keys:")
+  for key in file_storage.keys() {
+    print("  ${key}")
+  }
+}

@@ -1,0 +1,42 @@
+type WordCount
+  word: Text
+  count: Int
+
+fn word_stats(text: Text) -> (List<WordCount>, Float)
+  let words = text.split_words()
+  let long_words = words.filter(w => w.length > 3)
+  let counts = long_words.count_each()
+
+  let word_count_list = counts.entries()
+    .map((w, c) => WordCount(word: w, count: c))
+    .sort_by(wc => wc.count)
+    .reverse()
+    .take(3)
+
+  let avg_length = if long_words.is_empty()
+    0.0
+  else
+    long_words
+      .map(w => w.length.to_float())
+      .sum() / long_words.length.to_float()
+
+  return (word_count_list, avg_length)
+
+test "word_stats"
+  let text = "hello world hello foo bar world world"
+  let (top_words, avg) = word_stats(text)
+
+  expect top_words.length == 3
+  expect top_words[0].word == "world"
+  expect top_words[0].count == 3
+  expect top_words[1].word == "hello"
+  expect top_words[1].count == 2
+  expect avg > 4.0
+
+test "word_stats_short_text"
+  let text = "a bb ccc dddd"
+  let (words, avg) = word_stats(text)
+
+  expect words.length == 1
+  expect words[0].word == "dddd"
+  expect avg == 4.0

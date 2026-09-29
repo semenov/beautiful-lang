@@ -1,0 +1,29 @@
+# JavaScript target only (linen build --target js): render Markdown with npm packages.
+
+import js "marked"                   # typed through its bundled .d.ts
+import js "node:fs/promises" as fs
+import js "./legacy/config.js" as legacy
+
+extern js "slugify"                  # no types shipped, so we declare them
+  fn slugify(text: Text) -> Text nothrow
+
+type Page
+  slug: Text
+  html: Text
+
+
+# Callable from JavaScript as: await render_page("post.md")
+pub fn render_page(path: Text) throws -> Page
+  let source = try fs.readFile(path, "utf8")   # Promise<string> is awaited for us
+  let title = source.lines().first() ?? "untitled"
+  return Page(slug: slugify(title), html: marked.parse(source))
+
+
+# Legacy code hands us untyped data. Decode it once at the edge.
+type Config
+  base_url: Text
+  drafts: Bool
+
+fn load_config() throws -> Config
+  let raw = try legacy.getConfig()             # Dynamic
+  return try decode<Config>(raw)

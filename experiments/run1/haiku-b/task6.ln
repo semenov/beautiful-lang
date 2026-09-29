@@ -1,0 +1,30 @@
+# Task 6: Interop with npm packages
+
+import js "date-fns" as date_fns
+import js "left-pad" as leftpad
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+pub fn format_today() -> Text
+  let today = date_fns.format(date_fns.new Date(), "yyyy-MM-dd")
+  return today
+
+pub fn pad_number(n: Int) -> Text
+  let str = "{n}"
+  return leftPad(str, 5, some("0"))
+
+pub fn generate_report() -> Text
+  let date = format_today()
+  let padded = pad_number(42)
+  return "Date: {date}, Padded: {padded}"
+
+test "format_today returns iso-like format"
+  let today = format_today()
+  expect today.length == 10
+  expect today[4] == "-"
+  expect today[7] == "-"
+
+test "pad_number pads to 5 digits"
+  expect pad_number(42) == "00042"
+  expect pad_number(12345) == "12345"

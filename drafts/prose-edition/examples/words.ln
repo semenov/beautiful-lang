@@ -1,0 +1,16 @@
+-- The ten most common words in a file.
+
+use files
+
+to top-words in path Text gives List of Text may fail
+  let text be try read-file path
+  let words be split lowercase text by " "
+  let counts be tally words
+  let ranked be reverse sort counts by (given c give c's times)
+  let top be take 10 from ranked
+  give each entry in top give "{entry's word}  {entry's times}"
+
+check top-words in "fixtures/tiny.txt" is ["the  3" "cat  1"]
+
+for line in try top-words in "book.txt"
+  say line

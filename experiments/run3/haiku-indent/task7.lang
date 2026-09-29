@@ -1,0 +1,66 @@
+import db
+import env
+import cli
+
+type User
+  id: Int
+  name: Text
+  age: Int
+
+type Options
+  args: List<Text>
+
+fn main() throws
+  let opts = try cli.decode<Options>()
+
+  if opts.args.is_empty()
+    throw Failure(message: "Usage: task7 <min_age>")
+
+  let min_age = try opts.args[0].to_int()
+
+  let database_url = env.get("DATABASE_URL") ?? "sqlite::memory:"
+
+  with conn = try db.open(database_url)
+    try conn.execute("""
+      create table if not exists users (
+        id integer primary key,
+        name text not null,
+        age integer not null
+      )
+    """, [])
+
+    try conn.execute("""
+      insert into users (name, age) values (?, ?)
+    """, ["Alice", 30])
+
+    try conn.execute("""
+      insert into users (name, age) values (?, ?)
+    """, ["Bob", 25])
+
+    try conn.execute("""
+      insert into users (name, age) values (?, ?)
+    """, ["Charlie", 35])
+
+    let users = try conn.query<User>("""
+      select id, name, age from users where age > ? order by age
+    """, [min_age])
+
+    for user in users
+      print("${user.name}: ${user.age}")
+
+test "database operations"
+  with conn = try db.open("sqlite::memory:")
+    try conn.execute("""
+      create table users (id integer primary key, name text, age integer)
+    """, [])
+
+    try conn.execute("""
+      insert into users (name, age) values (?, ?)
+    """, ["Ada", 36])
+
+    let users = try conn.query<User>("""
+      select id, name, age from users where age > ?
+    """, [30])
+
+    expect users.length == 1
+    expect users[0].name == "Ada"

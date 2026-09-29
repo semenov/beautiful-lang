@@ -1,0 +1,49 @@
+enum Shape {
+  Circle(radius: Float)
+  Rectangle(width: Float, height: Float)
+  Empty
+}
+
+fn area(shape: Shape) -> Float {
+  return match shape {
+    Circle(r) => 3.14159 * r * r
+    Rectangle(w, h) => w * h
+    Empty => 0.0
+  }
+}
+
+fn label(shape: Shape) -> Text {
+  let a = area(shape)
+  if a < 10.0 {
+    return "small"
+  } else if a < 100.0 {
+    return "medium"
+  }
+  return "large"
+}
+
+type Counter {
+  count: Int = 0
+
+  mutating fn increment() {
+    self.count += 1
+  }
+}
+
+fn main() {
+  let shapes = [Circle(radius: 1.0), Rectangle(width: 20.0, height: 30.0), Empty, Rectangle(width: 5.0, height: 5.0)]
+  var c = Counter()
+  for s in shapes {
+    print("${label(s)}: ${area(s)}")
+    c.increment()
+  }
+  print("counted ${c.count}")
+  let total = shapes.map(area).sum()
+  print("total ${total}")
+  var words = "the cat and the hat and the bat".words().count_each()
+  words["dog"] = 7
+  let top = words.entries().sorted_by(e => e.value).reversed().take(2)
+  for e in top {
+    print("${e.key}=${e.value}")
+  }
+}

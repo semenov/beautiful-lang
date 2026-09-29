@@ -1,0 +1,64 @@
+type AccountId = Int
+
+type Account {
+  id: AccountId
+  balance: Int
+}
+
+type AccountNotFound implements Error {
+  id: AccountId
+
+  fn message(self) -> Text {
+    return "account ${self.id.value} does not exist"
+  }
+}
+
+type InsufficientFunds implements Error {
+  id: AccountId
+  balance: Int
+  amount: Int
+
+  fn message(self) -> Text {
+    return "account ${self.id.value} has ${self.balance} but the transfer needs ${self.amount}"
+  }
+}
+
+fn transfer(accounts: Map<AccountId, Account>, from: AccountId, to: AccountId, amount: Int) throws -> Map<AccountId, Account> {
+  if amount <= 0 {
+    throw Failure(message: "the amount must be positive")
+  }
+  let sender = accounts[from] ?? throw AccountNotFound(id: from)
+  if accounts[to] is none {
+    throw AccountNotFound(id: to)
+  }
+  if sender.balance < amount {
+    throw InsufficientFunds(id: from, balance: sender.balance, amount: amount)
+  }
+  var result = accounts
+  result[from].balance -= amount
+  result[to].balance += amount
+  return result
+}
+
+fn main() {
+  var accounts: Map<AccountId, Account> = {}
+  accounts[AccountId(1)] = Account(id: AccountId(1), balance: 100)
+  accounts[AccountId(2)] = Account(id: AccountId(2), balance: 20)
+  accounts = try transfer(accounts, from: AccountId(1), to: AccountId(2), amount: 50) catch err {
+    if err is InsufficientFunds {
+      print("not enough money: ${err.balance} < ${err.amount}")
+    } else if err is AccountNotFound {
+      print("no such account: ${err.id.value}")
+    } else {
+      print("transfer failed: ${err.message()}")
+    }
+    accounts
+  }
+  let again = try transfer(accounts, from: AccountId(2), to: AccountId(1), amount: 500) catch err {
+    print(err.message())
+    accounts
+  }
+  for entry in again {
+    print("${entry.key.value}: ${entry.value.balance}")
+  }
+}

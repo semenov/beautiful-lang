@@ -1,0 +1,74 @@
+fn percent_off(percent: Float) -> fn(Float) -> Float
+  return amount => amount * (1.0 - percent / 100.0)
+
+fn cap_at(max: Float) -> fn(Float) -> Float
+  return amount => if amount > max then max else amount
+
+fn apply_rules(rules: List<fn(Float) -> Float>, total: Float) -> Float
+  var result = total
+  for rule in rules
+    result = rule(result)
+  return result
+
+type Book
+  title: Text
+  author: Text
+
+fn describe(book: Book) -> Text
+  return "Book: {book.title} by {book.author}"
+
+type Movie
+  title: Text
+  year: Int
+
+fn describe(movie: Movie) -> Text
+  return "Movie: {movie.title} ({movie.year})"
+
+enum Item
+  BookItem(book: Book)
+  MovieItem(movie: Movie)
+
+fn describe_item(item: Item) -> Text
+  return match item
+    case BookItem(b) => b.describe()
+    case MovieItem(m) => m.describe()
+
+fn print_report(items: List<Item>)
+  for item in items
+    print(describe_item(item))
+
+test "percent_off_rule"
+  let ten_off = percent_off(10.0)
+  expect ten_off(200.0) == 180.0
+
+test "cap_at_rule"
+  let capped = cap_at(100.0)
+  expect capped(150.0) == 100.0
+  expect capped(50.0) == 50.0
+
+test "apply_rules_combined"
+  let ten_off = percent_off(10.0)
+  let capped = cap_at(100.0)
+  let rules = [ten_off, capped]
+
+  let final = apply_rules(rules: rules, total: 200.0)
+  expect final == 100.0
+
+test "book_describe"
+  let book = Book(title: "1984", author: "Orwell")
+  expect book.describe() == "Book: 1984 by Orwell"
+
+test "movie_describe"
+  let movie = Movie(title: "Blade Runner", year: 1982)
+  expect movie.describe() == "Movie: Blade Runner (1982)"
+
+test "print_report_mixed"
+  let book = Book(title: "Dune", author: "Herbert")
+  let movie = Movie(title: "Inception", year: 2010)
+
+  let items = [
+    BookItem(book),
+    MovieItem(movie),
+  ]
+
+  print_report(items)

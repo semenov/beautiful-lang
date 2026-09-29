@@ -1,0 +1,44 @@
+# Task 5: GitHub users
+
+import web
+import json
+
+type GitHubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_user(name: Text) throws -> GitHubUser
+  let url = "https://api.github.com/users/{name}"
+  let response = try web.get(url)
+  return try json.decode<GitHubUser>(response)
+
+fn print_user(user: GitHubUser)
+  let name_str = user.name ?? "unknown"
+  let bio_str = user.bio ?? "no bio"
+  print("{user.login}: {name_str} ({bio_str})")
+
+fn fetch_and_print_users(usernames: List<Text>)
+  parallel
+    let user1 = try fetch_user(usernames[0]) catch
+      print("{usernames[0]}: failed to fetch")
+      return none
+    let user2 = try fetch_user(usernames[1]) catch
+      print("{usernames[1]}: failed to fetch")
+      return none
+    let user3 = try fetch_user(usernames[2]) catch
+      print("{usernames[2]}: failed to fetch")
+      return none
+
+  if user1 is some(u1)
+    print_user(u1)
+  if user2 is some(u2)
+    print_user(u2)
+  if user3 is some(u3)
+    print_user(u3)
+
+test "can decode github user"
+  let json_str = """{"login":"octocat","name":"The Octocat","bio":"There once was..."}"""
+  let user = try json.decode<GitHubUser>(json_str)
+  expect user.login == "octocat"
+  expect user.name == some("The Octocat")

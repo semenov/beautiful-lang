@@ -1,0 +1,30 @@
+type WordStats
+  top_words: List<(Text, Int)>
+  avg_length: Float
+
+fn word_stats(text: Text) -> WordStats
+  let words = text.split_words()
+  let filtered = words.filter(w => w.length > 3)
+  let counts = filtered.count_each()
+  let sorted = counts.entries().sort_by((word, count) => 0 - count).take(3)
+  let avg = filtered.map(w => w.length).average() ?? 0
+  return WordStats(top_words: sorted, avg_length: avg)
+
+test "word_stats returns top words"
+  let text = "hello world this is a test of the word stats function"
+  let result = word_stats(text)
+  expect result.top_words.length <= 3
+  expect result.avg_length > 0
+
+test "word_stats filters short words"
+  let text = "the cat and dog"
+  let result = word_stats(text)
+  # "the" has length 3, "cat" has length 3, "and" has length 3, "dog" has length 3
+  # All are length 3, none > 3
+  expect result.top_words.length == 0
+
+test "word_stats with longer words"
+  let text = "hello world testing production deployment"
+  let result = word_stats(text)
+  expect result.top_words.length <= 3
+  expect result.avg_length > 4

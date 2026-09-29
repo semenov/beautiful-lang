@@ -1,0 +1,62 @@
+// Task 4: wordcount <file> [--top N] [--min-length L]
+
+import cli
+import files
+
+pub type Options
+  args: List<Text> = []
+  top: Int = 10
+  min_length: Int = 1
+
+pub type WordCountEntry
+  word: Text
+  count: Int
+
+pub type WordReport
+  counts: List<WordCountEntry>
+  average_length: Float
+
+// The `top` most common words with at least `min_length` letters, plus the
+// average length of the qualifying words.
+fn word_report(text: Text, top: Int, min_length: Int) -> WordReport
+  let words = text.words().filter(w => w.length >= min_length)
+  let counts_map = words.count_each()
+  let by_count = counts_map.entries().map(e => WordCountEntry(word: e.key, count: e.value)).sorted_by(e => e.count)
+  let top_entries = by_count.reversed().take(top)
+  let total_length = words.map(w => w.length).sum()
+  let average = if words.is_empty()
+    0.0
+  else
+    total_length.to_float() / words.length.to_float()
+  return WordReport(counts: top_entries, average_length: average)
+
+fn main() throws
+  let options = try cli.decode<Options>()
+  match options.args.first()
+    none => throw Failure(message: "usage: wordcount <file> [--top N] [--min-length L]")
+    some(path) =>
+      if not files.exists(path)
+        throw Failure(message: "file not found: ${path}")
+      let text = try files.read(path)
+      let report = word_report(text, top: options.top, min_length: options.min_length)
+      for entry in report.counts
+        print("${entry.word}: ${entry.count}")
+      print("average word length: ${report.average_length}")
+
+test "counts words respecting min length and top N"
+  let report = word_report("the cat the dog the rat cat", top: 2, min_length: 3)
+  expect report.counts.length == 2
+  expect report.counts[0].word == "the"
+  expect report.counts[0].count == 3
+  expect report.counts[1].word == "cat"
+  expect report.counts[1].count == 2
+  expect report.average_length == 3.0
+
+test "filters out words shorter than the minimum length"
+  let report = word_report("a bb ccc dddd", top: 10, min_length: 3)
+  expect report.counts.length == 2
+
+test "an empty file has no words and zero average length"
+  let report = word_report("", top: 10, min_length: 1)
+  expect report.counts.length == 0
+  expect report.average_length == 0.0

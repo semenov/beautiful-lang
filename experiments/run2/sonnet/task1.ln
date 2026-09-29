@@ -1,0 +1,38 @@
+# Inventory: restocking and finding low-stock products.
+
+type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+fn restock(product: Product, amount: Int) -> Product
+  require amount > 0
+  return product.with(stock: product.stock + amount)
+
+fn low_stock_names(products: List<Product>) -> List<Text>
+  return products
+    .filter(p => p.stock < 5)
+    .sort_by(p => p.stock)
+    .map(p => p.name)
+
+test "restock increases stock"
+  let p = Product(name: "Widget", price: 9.99, stock: 2)
+  let restocked = p.restock(10)
+  expect restocked.stock == 12
+  expect restocked.name == "Widget"
+
+test "low stock names are sorted from lowest to highest"
+  let products = [
+    Product(name: "A", price: 1, stock: 3),
+    Product(name: "B", price: 1, stock: 1),
+    Product(name: "C", price: 1, stock: 10),
+    Product(name: "D", price: 1, stock: 4),
+  ]
+  expect low_stock_names(products) == ["B", "A", "D"]
+
+test "low stock excludes items with 5 or more"
+  let products = [
+    Product(name: "A", price: 1, stock: 5),
+    Product(name: "B", price: 1, stock: 4),
+  ]
+  expect low_stock_names(products) == ["B"]

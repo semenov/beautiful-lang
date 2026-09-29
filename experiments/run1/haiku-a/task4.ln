@@ -1,0 +1,51 @@
+# Task 4: Bank transfer
+# Move amount from one account to another with validation
+
+type Account
+  balance: Decimal
+
+fn transfer(from: Account, to: Account, amount: Decimal) throws -> (Account, Account)
+  require amount > 0
+  require from.balance >= amount
+
+  let new_from = from.with(balance: from.balance - amount)
+  let new_to = to.with(balance: to.balance + amount)
+
+  ensure result[0].balance >= 0
+  ensure result[1].balance == to.balance + amount
+
+  return (new_from, new_to)
+
+test "successful transfer"
+  let a1 = Account(balance: 100)
+  let a2 = Account(balance: 50)
+  let (a1_new, a2_new) = try transfer(a1, a2, 30)
+  expect a1_new.balance == 70
+  expect a2_new.balance == 80
+
+test "transfer fails with insufficient funds"
+  let a1 = Account(balance: 20)
+  let a2 = Account(balance: 50)
+  try
+    transfer(a1, a2, 30)
+  catch err
+    print("transfer failed as expected: {err.message}")
+
+test "transfer fails with non-positive amount"
+  let a1 = Account(balance: 100)
+  let a2 = Account(balance: 50)
+  try
+    transfer(a1, a2, -10)
+  catch err
+    print("transfer rejected: {err.message}")
+
+# Example call site showing error handling
+fn safe_transfer_demo()
+  let account1 = Account(balance: 100)
+  let account2 = Account(balance: 50)
+
+  try
+    let (new_a1, new_a2) = try transfer(account1, account2, 25)
+    print("transfer successful: {new_a1.balance} and {new_a2.balance}")
+  catch err
+    print("could not transfer: {err.message}")

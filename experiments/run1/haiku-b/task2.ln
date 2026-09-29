@@ -1,0 +1,52 @@
+# Task 2: CSV Parsing
+
+type Person
+  name: Text
+  age: Int
+
+fn parse_csv(text: Text) throws -> List<Person>
+  let lines = text.split("\n")
+  if lines.is_empty()
+    throw Error("missing header line")
+
+  let header = lines[0].split(",")
+  if header != ["name", "age"]
+    throw Error("wrong header")
+
+  let people = []
+  for i in 1..lines.length
+    let line = lines[i]
+    if line.is_empty()
+      continue
+
+    let parts = line.split(",")
+    if parts.length != 2
+      continue
+
+    let name = parts[0]
+    let age_str = parts[1]
+    let age = try parse_int(age_str) catch
+      continue
+
+    people.push(Person(name: name, age: age))
+
+  return people
+
+test "parse_csv with valid data"
+  let csv = "name,age\nAda,36\nAlan,41"
+  let people = try parse_csv(csv)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+
+test "parse_csv skips malformed lines"
+  let csv = "name,age\nAda,36\nBroken\nAlan,41"
+  let people = try parse_csv(csv)
+  expect people.length == 2
+
+test "parse_csv fails on wrong header"
+  let csv = "id,value\nAda,36"
+  try
+    try parse_csv(csv)
+  catch err
+    expect err.message.contains("header")

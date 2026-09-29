@@ -1,0 +1,68 @@
+# Task 10: Pricing rules
+
+type PricingRule = fn(Decimal) -> Decimal
+
+fn percent_off(percent: Float) -> PricingRule
+  return (total: Decimal) => total - total * percent / 100
+
+fn cap_at(max_price: Decimal) -> PricingRule
+  return (total: Decimal) => min(total, max_price)
+
+fn combine_rules(rules: List<PricingRule>) -> PricingRule
+  return (total: Decimal) =>
+    let result = total
+    for rule in rules
+      result = rule(result)
+    result
+
+fn apply_rules(total: Decimal, rules: List<PricingRule>) -> Decimal
+  let combined = combine_rules(rules)
+  return combined(total)
+
+# Define two unrelated types that can describe themselves
+
+type Book
+  title: Text
+  author: Text
+
+type Movie
+  title: Text
+  director: Text
+
+interface Describable
+  fn describe(self) -> Text
+
+fn describe(book: Book) -> Text
+  return "Book: {book.title} by {book.author}"
+
+fn describe(movie: Movie) -> Text
+  return "Movie: {movie.title} directed by {movie.director}"
+
+fn print_report(items: List<Describable>)
+  for item in items
+    print(item.describe())
+
+test "percent off rule"
+  let rule = percent_off(10)
+  expect rule(100) == 90
+
+test "cap at rule"
+  let rule = cap_at(50)
+  expect rule(100) == 50
+  expect rule(30) == 30
+
+test "combine rules"
+  let rules = [
+    percent_off(20),
+    cap_at(80),
+  ]
+  let final = apply_rules(100, rules: rules)
+  expect final == 80
+
+test "describe book"
+  let book = Book(title: "1984", author: "Orwell")
+  expect describe(book) == "Book: 1984 by Orwell"
+
+test "describe movie"
+  let movie = Movie(title: "2001", director: "Kubrick")
+  expect describe(movie) == "Movie: 2001 directed by Kubrick"

@@ -1,0 +1,19 @@
+import js "date-fns" as date_fns
+extern js "left-pad"
+  fn left_pad(str: Text, length: Int, ch: Text) -> Text
+
+fn format_today() -> Text
+  let today = js.Date()
+  return date_fns.format(today, "yyyy-MM-dd")
+
+fn pad_number(n: Int) -> Text
+  return left_pad(n.to_text(), length: 5, ch: "0")
+
+pub fn generate_report() -> Text
+  let date_str = format_today()
+  let padded = pad_number(7)
+  return "Date: {date_str}, Number: {padded}"
+
+test "generate_report"
+  let report = generate_report()
+  expect report.contains("Number: 00007")

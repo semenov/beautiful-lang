@@ -1,0 +1,16 @@
+# Interop: format today's date with date-fns and pad a number with left-pad.
+
+import time
+import js "date-fns"
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+pub fn build_report() throws -> Text
+  let date_str = try date_fns.format(time.now(), "yyyy-MM-dd")
+  let padded = leftPad("42", length: 5, fill: "0")
+  return "Date: {date_str}, Padded: {padded}"
+
+test "report contains the padded number"
+  let report = try build_report()
+  expect report.contains("00042")

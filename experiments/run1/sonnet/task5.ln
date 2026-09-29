@@ -1,0 +1,32 @@
+# GitHub users: fetch three profiles at the same time, decoding JSON,
+# with a fallback line for whichever fetch fails.
+
+import json
+import web
+
+type GithubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_user(username: Text) throws -> GithubUser
+  let text = try web.fetch("https://api.github.com/users/{username}")
+  return try json.decode<GithubUser>(text)
+
+fn describe_user(username: Text) -> Text
+  try
+    let user = try fetch_user(username)
+    let name = user.name ?? user.login
+    let bio = user.bio ?? "no bio"
+    return "{user.login} ({name}): {bio}"
+  catch err
+    return "{username}: could not fetch profile"
+
+parallel
+  let ada = describe_user("ada")
+  let torvalds = describe_user("torvalds")
+  let missing = describe_user("this-user-should-not-exist-xyz")
+
+print(ada)
+print(torvalds)
+print(missing)

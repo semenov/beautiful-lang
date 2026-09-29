@@ -1,0 +1,45 @@
+# Task 4: Bank Transfer
+
+type Account
+  holder: Text
+  balance: Decimal
+
+fn transfer(from_account: Account, to_account: Account, amount: Decimal) throws -> (Account, Account)
+  require amount > 0
+  if from_account.balance < amount
+    throw Error("insufficient funds: {from_account.holder} has {from_account.balance}, needs {amount}")
+
+  let updated_from = from_account.with(balance: from_account.balance - amount)
+  let updated_to = to_account.with(balance: to_account.balance + amount)
+  return (updated_from, updated_to)
+
+fn demo_transfer() throws
+  let alice = Account(holder: "Alice", balance: 100)
+  let bob = Account(holder: "Bob", balance: 50)
+
+  let (alice_new, bob_new) = try transfer(alice, bob, amount: 30)
+  print("{alice.holder}: {alice.balance} -> {alice_new.balance}")
+  print("{bob.holder}: {bob.balance} -> {bob_new.balance}")
+
+test "transfer succeeds with sufficient funds"
+  let alice = Account(holder: "Alice", balance: 100)
+  let bob = Account(holder: "Bob", balance: 50)
+  let (alice_new, bob_new) = try transfer(alice, bob, amount: 30)
+  expect alice_new.balance == 70
+  expect bob_new.balance == 80
+
+test "transfer fails with insufficient funds"
+  let alice = Account(holder: "Alice", balance: 20)
+  let bob = Account(holder: "Bob", balance: 50)
+  try
+    try transfer(alice, bob, amount: 30)
+  catch err
+    expect err.message.contains("insufficient")
+
+test "transfer fails with negative amount"
+  let alice = Account(holder: "Alice", balance: 100)
+  let bob = Account(holder: "Bob", balance: 50)
+  try
+    try transfer(alice, bob, amount: -10)
+  catch err
+    expect true

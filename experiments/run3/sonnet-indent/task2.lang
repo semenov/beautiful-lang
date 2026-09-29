@@ -1,0 +1,47 @@
+// Task 2: Parse a simple CSV of people, skipping malformed rows.
+
+import files
+
+pub type Person
+  name: Text
+  age: Int
+
+fn parse_people(text: Text) throws -> List<Person>
+  let lines = text.lines()
+  match lines.first()
+    none => throw Failure(message: "missing header line")
+    some(header) =>
+      if header != "name,age"
+        throw Failure(message: "wrong header line")
+  var people: List<Person> = []
+  for line in lines.drop(1)
+    let columns = line.split(",")
+    if columns.length != 2
+      continue
+    let age = try columns[1].trim().to_int() catch err
+      continue
+    people.append(Person(name: columns[0].trim(), age: age))
+  return people
+
+fn main() throws
+  let text = try files.read("people.csv")
+  let people = try parse_people(text)
+  for person in people
+    print("${person.name} is ${person.age}")
+
+test "parses valid rows and skips malformed ones"
+  let text = "name,age\nAda,36\nAlan,41\nbad,row,extra\nBob,notanumber"
+  let people = try parse_people(text)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+  expect people[1].name == "Alan"
+  expect people[1].age == 41
+
+test "fails when the header line is wrong"
+  let err = expect throws parse_people("id,age\nAda,36")
+  expect err is Failure(_)
+
+test "fails when there is no header line at all"
+  let err = expect throws parse_people("")
+  expect err is Failure(_)

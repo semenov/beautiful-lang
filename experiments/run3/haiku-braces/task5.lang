@@ -1,0 +1,64 @@
+import http
+import json
+
+type Note {
+  id: Int
+  title: Text
+  text: Text
+}
+
+type CreateNoteRequest {
+  title: Text
+  text: Text
+}
+
+var note_counter = 1
+var notes: Map<Int, Note> = {}
+
+fn create_note(req: http.Request) throws -> http.Response {
+  let body = try json.decode<CreateNoteRequest>(req.body)
+  let id = note_counter
+  note_counter += 1
+
+  let note = Note(id: id, title: body.title, text: body.text)
+  notes[id] = note
+
+  return http.json(200, note)
+}
+
+fn get_note(req: http.Request) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int()
+
+  if notes.contains_key(id) {
+    return http.json(200, notes[id])
+  } else {
+    return http.text(404, "Note not found")
+  }
+}
+
+test "create_note creates a note" {
+  var router = http.Router()
+  router.post("/notes", create_note)
+
+  let req = http.Request(method: "POST", path: "/notes", body: "{\"title\": \"test\", \"text\": \"content\"}")
+  let res = try router.handle(req)
+  expect res.status == 200
+}
+
+test "get_note returns 404 for missing note" {
+  var router = http.Router()
+  router.get("/notes/:id", get_note)
+
+  let req = http.Request(method: "GET", path: "/notes/999", body: "")
+  let res = try router.handle(req)
+  expect res.status == 404
+}
+
+fn main() throws {
+  var router = http.Router()
+  router.post("/notes", create_note)
+  router.get("/notes/:id", get_note)
+
+  try http.serve(router, port: 8080)
+}

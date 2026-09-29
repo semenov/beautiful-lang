@@ -1,0 +1,8 @@
+fn main() {
+  print("hello")
+  var total = 0
+  for i in 1..=10 {
+    total += i
+  }
+  print("sum: ${total}")
+}

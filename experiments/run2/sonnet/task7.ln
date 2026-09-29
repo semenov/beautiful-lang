@@ -1,0 +1,20 @@
+# Word stats: 3 most common long words and the average word length.
+
+fn word_stats(text: Text) -> (List<(Text, Int)>, Float)
+  let words = text.split_words()
+  let long_words = words.map(w => w.lower()).filter(w => w.length > 3)
+  let counts = long_words.count_each()
+  let top = counts.entries().sort_by((word, n) => n).reverse().take(3)
+  let avg_length = words.map(w => w.length).average() ?? 0.0
+  return (top, avg_length)
+
+test "finds the most common long words, most frequent first"
+  let (top, avg) = word_stats("apple apple banana banana banana cherry cherry cherry cherry")
+  expect top == [("cherry", 4), ("banana", 3), ("apple", 2)]
+  expect avg > 5.0
+
+test "ignores short words when counting, but not when averaging"
+  let (top, avg) = word_stats("a be to five five over over")
+  expect top.length == 2
+  expect top.map((word, n) => word).to_set() == ["five", "over"].to_set()
+  expect avg > 0.0

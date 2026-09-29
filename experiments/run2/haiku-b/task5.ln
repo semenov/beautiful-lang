@@ -1,0 +1,31 @@
+import json
+import web
+
+type GitHubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_github_user(username: Text) throws -> GitHubUser
+  let url = "https://api.github.com/users/{username}"
+  let response = try web.get(url)
+  return try json.decode<GitHubUser>(response)
+
+fn fetch_and_print(username: Text)
+  try
+    let user = try fetch_github_user(username)
+    print("{user.login}: {user.name ?? 'no name'}")
+  catch err
+    print("{username}: (error)")
+
+fn fetch_three_users()
+  fetch_and_print("torvalds")
+  fetch_and_print("gvanrossum")
+  fetch_and_print("stroustrup")
+
+test "github user type decoding"
+  # This test would need a mock response, skipped for now
+  let json_text = "{\"login\": \"test\", \"name\": \"Test User\", \"bio\": \"Testing\"}"
+  let user = try json.decode<GitHubUser>(json_text)
+  expect user.login == "test"
+  expect user.name == "Test User"

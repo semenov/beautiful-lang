@@ -1,0 +1,44 @@
+enum Shape
+  Circle(radius: Float)
+  Rectangle(width: Float, height: Float)
+  Triangle(base: Float, height: Float)
+
+fn shape_area(shape: Shape) -> Float
+  return match shape
+    case Circle(r) => PI * r ^ 2
+    case Rectangle(w, h) => w * h
+    case Triangle(b, h) => b * h / 2
+
+fn total_area(shapes: List<Shape>) -> Float
+  return shapes.map(s => shape_area(s)).sum()
+
+fn describe_size(area: Float) -> Text
+  if area < 10
+    return "small"
+  else if area < 100
+    return "medium"
+  else
+    return "large"
+
+fn describe_shape(shape: Shape) -> Text
+  return describe_size(shape_area(shape))
+
+test "shape_area_circle"
+  let area = shape_area(Circle(2.0))
+  expect area > 12.5 and area < 12.6
+
+test "shape_area_rectangle"
+  expect shape_area(Rectangle(3.0, 4.0)) == 12.0
+
+test "shape_area_triangle"
+  expect shape_area(Triangle(3.0, 4.0)) == 6.0
+
+test "total_area"
+  let shapes = [Circle(1.0), Rectangle(2.0, 3.0)]
+  let area = total_area(shapes)
+  expect area > 9.0 and area < 10.0
+
+test "describe_shape"
+  expect describe_shape(Circle(1.0)) == "small"
+  expect describe_shape(Circle(5.0)) == "medium"
+  expect describe_shape(Rectangle(20.0, 10.0)) == "large"

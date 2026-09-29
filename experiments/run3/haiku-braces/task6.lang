@@ -1,0 +1,62 @@
+import http
+import json
+import tasks
+import time
+
+type GitHubUser {
+  login: Text
+  name: Text? = none
+  bio: Text? = none
+}
+
+fn fetch_user(name: Text) throws -> GitHubUser {
+  let url = "https://api.github.com/users/${name}"
+  let response = try http.get(url)
+  let user = try json.decode<GitHubUser>(response.body)
+  return user
+}
+
+fn format_user(user: GitHubUser) -> Text {
+  let name_str = match user.name {
+    some(n) => n
+    none => "Unknown"
+  }
+  let bio_str = match user.bio {
+    some(b) => b
+    none => "No bio"
+  }
+  return "${user.login}: ${name_str} - ${bio_str}"
+}
+
+fn main() throws {
+  with group = try tasks.group() {
+    let user1 = group.run(() => try fetch_user("torvalds"))
+    let user2 = group.run(() => try fetch_user("gvanrossum"))
+    let user3 = group.run(() => try fetch_user("jashkenas"))
+
+    let result1 = try time.timeout(time.seconds(5), () => try user1.wait()) catch err {
+      print("torvalds: Failed to fetch")
+      none
+    }
+
+    let result2 = try time.timeout(time.seconds(5), () => try user2.wait()) catch err {
+      print("gvanrossum: Failed to fetch")
+      none
+    }
+
+    let result3 = try time.timeout(time.seconds(5), () => try user3.wait()) catch err {
+      print("jashkenas: Failed to fetch")
+      none
+    }
+
+    if result1 is some(u1) {
+      print(format_user(u1))
+    }
+    if result2 is some(u2) {
+      print(format_user(u2))
+    }
+    if result3 is some(u3) {
+      print(format_user(u3))
+    }
+  }
+}

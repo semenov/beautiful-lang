@@ -1,0 +1,99 @@
+// Task 3: Bank transfers between accounts kept in a map.
+
+pub type AccountId = Int
+pub type CustomerId = Int
+
+pub type Account
+  id: AccountId
+  owner: CustomerId
+  balance: Decimal
+
+// Distinct error kinds, so callers can tell exactly what went wrong.
+pub type AccountNotFound implements Error
+  id: AccountId
+
+  fn message(self) -> Text
+    return "no account with id ${self.id.value}"
+
+pub type InsufficientFunds implements Error
+  id: AccountId
+  balance: Decimal
+  requested: Decimal
+
+  fn message(self) -> Text
+    return "account ${self.id.value} has insufficient funds"
+
+pub type InvalidAmount implements Error
+  amount: Decimal
+
+  fn message(self) -> Text
+    return "transfer amount must be positive"
+
+fn require_account(accounts: Map<AccountId, Account>, id: AccountId) throws -> Account
+  match accounts[id]
+    some(account) => return account
+    none => throw AccountNotFound(id: id)
+
+// Moves `amount` from `from` to `to`, mutating the caller's map in place.
+fn transfer(accounts: var Map<AccountId, Account>, from: AccountId, to: AccountId, amount: Decimal) throws
+  if amount <= 0.0
+    throw InvalidAmount(amount: amount)
+  let source = try require_account(accounts, from)
+  let dest = try require_account(accounts, to)
+  if source.balance < amount
+    throw InsufficientFunds(id: from, balance: source.balance, requested: amount)
+  var updated_source = source
+  updated_source.balance -= amount
+  var updated_dest = dest
+  updated_dest.balance += amount
+  accounts[from] = updated_source
+  accounts[to] = updated_dest
+
+fn main() throws
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), owner: CustomerId(501), balance: 100.0),
+    AccountId(2): Account(id: AccountId(2), owner: CustomerId(502), balance: 20.0)
+  }
+  try transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 30.0) catch err
+    if err is AccountNotFound(_)
+      print("transfer failed: account not found")
+    else if err is InsufficientFunds(_)
+      print("transfer failed: not enough funds")
+    else
+      throw err
+  let updated = accounts[AccountId(2)] ?? Account(id: AccountId(2), owner: CustomerId(502), balance: 0.0)
+  print("account 2 balance: ${updated.balance}")
+
+test "transfer moves money between accounts"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), owner: CustomerId(501), balance: 100.0),
+    AccountId(2): Account(id: AccountId(2), owner: CustomerId(502), balance: 20.0)
+  }
+  try transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 30.0)
+  let from_account = accounts[AccountId(1)] ?? Account(id: AccountId(1), owner: CustomerId(501), balance: 0.0)
+  let to_account = accounts[AccountId(2)] ?? Account(id: AccountId(2), owner: CustomerId(502), balance: 0.0)
+  expect from_account.balance == 70.0
+  expect to_account.balance == 50.0
+
+test "transfer fails with insufficient funds"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), owner: CustomerId(501), balance: 10.0),
+    AccountId(2): Account(id: AccountId(2), owner: CustomerId(502), balance: 0.0)
+  }
+  let err = expect throws transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 30.0)
+  expect err is InsufficientFunds(_)
+
+test "transfer fails when the source account is missing"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(2): Account(id: AccountId(2), owner: CustomerId(502), balance: 0.0)
+  }
+  let err = expect throws transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 30.0)
+  expect err is AccountNotFound(_)
+
+test "transfer rejects a non-positive amount"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), owner: CustomerId(501), balance: 10.0),
+    AccountId(2): Account(id: AccountId(2), owner: CustomerId(502), balance: 0.0)
+  }
+  let err = expect throws transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 0.0)
+  expect err is InvalidAmount(_)

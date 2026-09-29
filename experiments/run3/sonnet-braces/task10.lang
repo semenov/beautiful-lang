@@ -1,0 +1,83 @@
+// 10. Pricing rules
+
+interface Describable {
+  fn describe(self) -> Text
+}
+
+type Order implements Describable {
+  id: Int
+  total: Decimal
+
+  fn describe(self) -> Text {
+    return "Order #${self.id}: ${self.total}"
+  }
+}
+
+type Customer implements Describable {
+  name: Text
+  email: Text
+
+  fn describe(self) -> Text {
+    return "Customer ${self.name} <${self.email}>"
+  }
+}
+
+fn percent_off(percent: Decimal) -> fn(Decimal) -> Decimal {
+  return total => total * (1.0 - percent / 100.0)
+}
+
+fn max_total(cap: Decimal) -> fn(Decimal) -> Decimal {
+  return total => min(total, cap)
+}
+
+fn combine(rules: List<fn(Decimal) -> Decimal>) -> fn(Decimal) -> Decimal {
+  return total => {
+    var result = total
+    for rule in rules {
+      result = rule(result)
+    }
+    result
+  }
+}
+
+fn print_report(items: List<Describable>) {
+  for item in items {
+    print(item.describe())
+  }
+}
+
+test "percent_off reduces the total by the given percentage" {
+  let rule = percent_off(20.0)
+  expect rule(200.0) == 160.0
+}
+
+test "max_total caps the total but leaves smaller totals alone" {
+  let rule = max_total(50.0)
+  expect rule(80.0) == 50.0
+  expect rule(30.0) == 30.0
+}
+
+test "combine applies every rule in order" {
+  let rule = combine([percent_off(10.0), max_total(100.0)])
+  expect rule(150.0) == 100.0
+  expect rule(50.0) == 45.0
+}
+
+test "unrelated types can each describe themselves" {
+  let order = Order(id: 7, total: 19.99)
+  let customer = Customer(name: "Grace", email: "grace@example.com")
+  expect order.describe() == "Order #7: 19.99"
+  expect customer.describe() == "Customer Grace <grace@example.com>"
+}
+
+fn main() {
+  let rule = combine([percent_off(10.0), max_total(100.0)])
+  let final_total = rule(150.0)
+  print("final total: ${final_total}")
+
+  let items: List<Describable> = [
+    Order(id: 1, total: 42.0),
+    Customer(name: "Ada", email: "ada@example.com")
+  ]
+  print_report(items)
+}

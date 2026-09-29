@@ -1,0 +1,35 @@
+# Shapes: circles, rectangles and triangles; total area and size description.
+
+enum Shape
+  Circle(radius: Float)
+  Rectangle(width: Float, height: Float)
+  Triangle(base: Float, height: Float)
+
+fn area(shape: Shape) -> Float
+  return match shape
+    case Circle(r) => PI * r ^ 2
+    case Rectangle(w, h) => w * h
+    case Triangle(b, h) => b * h / 2
+
+fn total_area(shapes: List<Shape>) -> Float
+  return shapes.map(area).sum()
+
+fn describe(shape: Shape) -> Text
+  let a = shape.area()
+  return match a
+    case x if x < 10 => "small"
+    case x if x < 100 => "medium"
+    case _ => "large"
+
+test "areas are computed per shape"
+  expect Rectangle(3, 4).area() == 12
+  expect Triangle(6, 4).area() == 12
+
+test "total area sums every shape"
+  let shapes = [Rectangle(2, 3), Triangle(4, 2)]
+  expect shapes.total_area() == 10
+
+test "small, medium and large are described correctly"
+  expect Rectangle(2, 2).describe() == "small"
+  expect Rectangle(5, 10).describe() == "medium"
+  expect Rectangle(20, 20).describe() == "large"

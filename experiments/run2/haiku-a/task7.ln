@@ -1,0 +1,38 @@
+# Task 7: Word stats
+
+type WordStats
+  top_three: List<(Text, Int)>
+  average_length: Float?
+
+fn word_stats(text: Text) -> WordStats
+  let words = text.split_words()
+  let long_words = words.filter(w => w.length > 3)
+  let counts = long_words.count_each()
+
+  let sorted = counts
+    .entries()
+    .sort_by((word, count) => 0 - count)
+    .take(3)
+
+  let total_length = words.map(w => w.length).sum()
+  let avg = if words.is_empty() then none else some(total_length / words.length)
+
+  return WordStats(top_three: sorted, average_length: avg)
+
+test "word stats counts correctly"
+  let text = "hello world hello foo bar hello"
+  let stats = word_stats(text)
+  expect stats.top_three.length == 3
+  expect stats.top_three[0][0] == "hello"
+  expect stats.top_three[0][1] == 3
+
+test "word stats filters by length"
+  let text = "a bb ccc dddd eeee eeee"
+  let stats = word_stats(text)
+  expect stats.top_three[0][0] == "eeee"
+  expect stats.top_three[0][1] == 2
+
+test "word stats calculates average length"
+  let text = "aa bb cc"
+  let stats = word_stats(text)
+  expect stats.average_length == some(2)

@@ -1,0 +1,102 @@
+// 9. Storage
+
+import files
+
+interface Storage {
+  fn get(self, key: Text) throws -> Text?
+  fn put(var self, key: Text, value: Text) throws
+  fn delete(var self, key: Text) throws
+}
+
+interface Listable {
+  fn keys(self) -> List<Text>
+}
+
+type MemoryStorage implements Storage, Listable {
+  data: Map<Text, Text> = {}
+
+  fn get(self, key: Text) throws -> Text? {
+    return self.data[key]
+  }
+
+  fn put(var self, key: Text, value: Text) throws {
+    self.data[key] = value
+  }
+
+  fn delete(var self, key: Text) throws {
+    self.data.remove(key)
+  }
+
+  fn keys(self) -> List<Text> {
+    return self.data.keys()
+  }
+}
+
+type FileStorage implements Storage {
+  dir: Text
+
+  fn get(self, key: Text) throws -> Text? {
+    let path = "${self.dir}/${key}"
+    if not files.exists(path) {
+      return none
+    }
+    return try files.read(path)
+  }
+
+  fn put(var self, key: Text, value: Text) throws {
+    let path = "${self.dir}/${key}"
+    try files.write(path, value)
+  }
+
+  fn delete(var self, key: Text) throws {
+    let path = "${self.dir}/${key}"
+    try files.delete(path)
+  }
+}
+
+fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: Text) throws {
+  for key in source.keys() {
+    if not key.starts_with(prefix) {
+      continue
+    }
+    let value = try source.get(key)
+    if value is some(v) {
+      try destination.put(key: key, value: v)
+    }
+  }
+}
+
+test "copies only keys with the given prefix into the destination" {
+  var memory = MemoryStorage()
+  try memory.put(key: "user:1", value: "Ada")
+  try memory.put(key: "user:2", value: "Alan")
+  try memory.put(key: "order:1", value: "Widget x3")
+
+  with dir = try files.temp_dir() {
+    var disk = FileStorage(dir: dir.path)
+    try copy_with_prefix(memory, &disk, "user:")
+
+    let user1 = try disk.get("user:1")
+    let user2 = try disk.get("user:2")
+    let order1 = try disk.get("order:1")
+
+    expect user1 == "Ada"
+    expect user2 == "Alan"
+    expect order1 == none
+  }
+}
+
+fn main() throws {
+  var memory = MemoryStorage()
+  try memory.put(key: "user:1", value: "Ada")
+  try memory.put(key: "user:2", value: "Alan")
+  try memory.put(key: "order:1", value: "Widget x3")
+
+  with dir = try files.temp_dir() {
+    var disk = FileStorage(dir: dir.path)
+    try copy_with_prefix(memory, &disk, "user:")
+
+    let copied = try disk.get("user:1")
+    print(copied ?? "missing")
+  }
+}

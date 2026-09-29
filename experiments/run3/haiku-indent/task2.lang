@@ -1,0 +1,74 @@
+type Person
+  name: Text
+  age: Int
+
+type ParseError implements Error
+  message: Text
+
+  fn message(self) -> Text
+    return self.message
+
+fn parse_csv(text: Text) throws -> List<Person>
+  let lines = text.lines()
+
+  if lines.is_empty()
+    throw ParseError(message: "CSV is empty")
+
+  let header = lines[0].split(",")
+  if header.length != 2 or header[0] != "name" or header[1] != "age"
+    throw ParseError(message: "Invalid header. Expected 'name,age'")
+
+  var people: List<Person> = []
+
+  for i in 1..<lines.length
+    let line = lines[i]
+    if line.is_empty()
+      continue
+
+    let parts = line.split(",")
+    if parts.length != 2
+      continue
+
+    let name = parts[0].trim()
+    let age_text = parts[1].trim()
+
+    let age = try age_text.to_int() catch err
+      continue
+
+    people.append(Person(name: name, age: age))
+
+  return people
+
+fn main()
+  let csv = """name,age
+Ada,36
+Alan,41
+Grace,37"""
+
+  let people = try parse_csv(csv)
+  for person in people
+    print("${person.name} is ${person.age}")
+
+test "parse valid csv"
+  let csv = """name,age
+Ada,36
+Alan,41"""
+  let people = try parse_csv(csv)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+
+test "skip malformed lines"
+  let csv = """name,age
+Ada,36
+malformed
+Alan,41
+bogus,text"""
+  let people = try parse_csv(csv)
+  expect people.length == 2
+
+test "error on bad header"
+  let csv = """wrong,header
+Ada,36"""
+  let err = expect throws parse_csv(csv)
+  expect err is ParseError(_)

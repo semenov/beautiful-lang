@@ -1,0 +1,40 @@
+# Fetch two forecasts at the same time and describe them in words.
+
+import json
+import web
+
+type Forecast
+  city: Text
+  degrees: Float
+  sky: Text
+
+
+# Ask the weather service about one city.
+fn forecast(city: Text) throws -> Forecast
+  let body = try web.get("https://weather.example.com/now/{city}")
+  return try json.decode<Forecast>(body)
+
+
+# Put a temperature into words.
+fn feeling(degrees: Float) -> Text
+  if degrees < 0
+    return "freezing"
+  if degrees < 15
+    return "chilly"
+  if degrees < 25
+    return "pleasant"
+  return "hot"
+
+test "feelings"
+  expect feeling(-5) == "freezing"
+  expect feeling(20) == "pleasant"
+
+
+try
+  parallel
+    let paris = try forecast("Paris")
+    let tokyo = try forecast("Tokyo")
+  for place in [paris, tokyo]
+    print("{place.city}: {place.degrees}°, {feeling(place.degrees)}, {place.sky}")
+catch err
+  print("No weather today: {err.message}")

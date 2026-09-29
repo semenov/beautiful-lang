@@ -1,0 +1,67 @@
+# Task 8: Stack
+# Generic stack with push, pop (returns optional), and peek
+
+type Stack<T>
+  items: List<T>
+
+fn create<T>() -> Stack<T>
+  return Stack<T>(items: [])
+
+fn push<T>(stack: Stack<T>, value: T) -> Stack<T>
+  return stack.with(items: [value] + stack.items)
+
+fn pop<T>(stack: Stack<T>) -> (T?, Stack<T>)
+  if stack.items.is_empty()
+    return (none, stack)
+  let head = stack.items[0]
+  let tail = stack.items.drop(1)
+  return (some(head), stack.with(items: tail))
+
+fn peek<T>(stack: Stack<T>) -> T?
+  if stack.items.is_empty()
+    return none
+  return some(stack.items[0])
+
+fn is_empty<T>(stack: Stack<T>) -> Bool
+  return stack.items.is_empty()
+
+test "stack with numbers"
+  let s = create<Int>()
+  let s = push(s, 1)
+  let s = push(s, 2)
+  let s = push(s, 3)
+
+  let (top, s) = pop(s)
+  expect top == some(3)
+
+  let (top, s) = pop(s)
+  expect top == some(2)
+
+  expect is_empty(s) == false
+
+test "stack with text"
+  let s = create<Text>()
+  let s = push(s, "world")
+  let s = push(s, "hello")
+
+  let (top, s) = pop(s)
+  expect top == some("hello")
+
+  let peek_val = peek(s)
+  expect peek_val == some("world")
+
+test "pop from empty stack"
+  let s = create<Int>()
+  let (top, s) = pop(s)
+  expect top == none
+  expect is_empty(s) == true
+
+test "peek without modifying"
+  let s = create<Text>()
+  let s = push(s, "keep this")
+
+  let peek_val = peek(s)
+  expect peek_val == some("keep this")
+
+  let peek_val2 = peek(s)
+  expect peek_val2 == some("keep this")

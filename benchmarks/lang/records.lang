@@ -1,0 +1,19 @@
+type P {
+  x: Int
+  y: Int
+}
+
+fn main() {
+  let n = 10_000_000
+  var sum = 0
+  for r in 0..<10 {
+    var pts: List<P> = []
+    for i in 0..<n {
+      pts.append(P(x: i, y: i * 2 + r))
+    }
+    for p in pts {
+      sum += p.x + p.y
+    }
+  }
+  print("${sum}")
+}

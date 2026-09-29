@@ -1,0 +1,65 @@
+import http
+import json
+
+type Note
+  id: Int
+  title: Text
+  text: Text
+
+type NoteInput
+  title: Text
+  text: Text
+
+fn get_note(req: http.Request, notes: Map<Int, Note>) throws -> http.Response
+  let id_text = req.param("id") ?? ""
+  let id = try id_text.to_int() catch err
+    return http.text(400, "Invalid note id")
+
+  if notes.contains_key(id)
+    return http.json(200, notes[id])
+  else
+    return http.text(404, "Note not found")
+
+fn create_note(req: http.Request, var notes: Map<Int, Note>) throws -> http.Response
+  let input = try json.decode<NoteInput>(req.body)
+
+  let next_id = if notes.is_empty()
+    1
+  else
+    notes.keys().max() ?? 0
+
+  let new_id = next_id + 1
+  let note = Note(id: new_id, title: input.title, text: input.text)
+  notes[new_id] = note
+
+  return http.json(201, note)
+
+fn main() throws
+  var notes: Map<Int, Note> = {}
+
+  var router = http.Router()
+
+  router.get("/notes/:id", req => get_note(req, notes))
+  router.post("/notes", req => create_note(req, &notes))
+
+  try http.serve(router, port: 8080)
+
+test "create_note"
+  var notes: Map<Int, Note> = {}
+  let req = http.Request(method: "POST", path: "/notes", body: """{"title": "Test", "text": "Hello"}""")
+  let res = try create_note(req, &notes)
+  expect res.status == 201
+
+test "get_note not found"
+  let notes: Map<Int, Note> = {}
+  let req = http.Request(method: "GET", path: "/notes/1", body: "")
+  let res = try get_note(req, notes)
+  expect res.status == 404
+
+test "get_note found"
+  let notes: Map<Int, Note> = {
+    1: Note(id: 1, title: "First", text: "Content"),
+  }
+  let req = http.Request(method: "GET", path: "/notes/1", body: "")
+  let res = try get_note(req, notes)
+  expect res.status == 200

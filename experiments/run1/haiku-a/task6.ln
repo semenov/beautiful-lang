@@ -1,0 +1,34 @@
+# Task 6: Interop
+# Use date-fns for date formatting and left-pad for string padding
+
+import js "date-fns"
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+pub fn format_today() -> Text
+  let today = Date()
+  let formatted = date_fns.format(today, "yyyy-MM-dd")
+  return formatted
+
+pub fn pad_number(n: Int, width: Int) -> Text
+  let text = n.to_string()
+  return leftPad(text, width, "0")
+
+pub fn report() -> Text
+  let date_str = format_today()
+  let padded = pad_number(42, 5)
+  return "Today is {date_str}, padded number is {padded}"
+
+test "format today returns valid date"
+  let formatted = format_today()
+  expect formatted.length == 10
+
+test "pad number works"
+  let padded = pad_number(7, 5)
+  expect padded == "00007"
+
+test "report combines both functions"
+  let msg = report()
+  expect msg.contains("Today is")
+  expect msg.contains("padded number")

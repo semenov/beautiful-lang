@@ -1,0 +1,59 @@
+// Task 1: Inventory tracking for a simple store.
+
+pub type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+pub type LowStockReport
+  low_stock_names: List<Text>
+  average_stock: Float
+
+// Restocks the product with the given name by `amount`, mutating the
+// caller's list in place. Fails if no product with that name exists.
+fn restock(products: var List<Product>, name: Text, amount: Int) throws
+  for i in 0..<products.length
+    if products[i].name == name
+      products[i].stock += amount
+      return
+  throw Failure(message: "no product named ${name}")
+
+// Names of products with fewer than 5 in stock, lowest stock first, plus
+// the average stock level across every product.
+fn low_stock_report(products: List<Product>) -> LowStockReport
+  let low_stock = products.filter(p => p.stock < 5).sorted_by(p => p.stock).map(p => p.name)
+  let total_stock = products.map(p => p.stock).sum()
+  let average = total_stock.to_float() / products.length.to_float()
+  return LowStockReport(low_stock_names: low_stock, average_stock: average)
+
+fn main() throws
+  var products = [
+    Product(name: "Widget", price: 9.99, stock: 12),
+    Product(name: "Gadget", price: 19.99, stock: 3),
+    Product(name: "Gizmo", price: 4.5, stock: 1)
+  ]
+  try restock(&products, name: "Gizmo", amount: 10)
+  let report = low_stock_report(products)
+  for name in report.low_stock_names
+    print("low on stock: ${name}")
+  print("average stock: ${report.average_stock}")
+
+test "restock increases the stock of the matching product"
+  var products = [Product(name: "Widget", price: 9.99, stock: 2)]
+  try restock(&products, name: "Widget", amount: 5)
+  expect products[0].stock == 7
+
+test "restock fails for an unknown product name"
+  var products = [Product(name: "Widget", price: 9.99, stock: 2)]
+  let err = expect throws restock(&products, name: "Nope", amount: 5)
+  expect err is Failure(_)
+
+test "low_stock_report lists names sorted by stock and computes the average"
+  let products = [
+    Product(name: "A", price: 1.0, stock: 8),
+    Product(name: "B", price: 1.0, stock: 2),
+    Product(name: "C", price: 1.0, stock: 2)
+  ]
+  let report = low_stock_report(products)
+  expect report.low_stock_names == ["B", "C"]
+  expect report.average_stock == 4.0

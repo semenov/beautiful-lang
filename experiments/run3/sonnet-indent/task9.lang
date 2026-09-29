@@ -1,0 +1,84 @@
+// Task 9: A key-value storage contract with two implementations, plus a
+// prefix-copy helper that needs the source to be listable.
+
+import files
+
+pub interface Storage
+  fn get(self, key: Text) throws -> Text?
+  fn put(var self, key: Text, value: Text) throws
+  fn delete(var self, key: Text) throws
+
+pub interface Listable
+  fn keys(self) -> List<Text>
+
+pub type MemoryStorage implements Storage, Listable
+  data: Map<Text, Text> = {}
+
+  fn get(self, key: Text) throws -> Text?
+    return self.data[key]
+
+  fn put(var self, key: Text, value: Text) throws
+    self.data[key] = value
+
+  fn delete(var self, key: Text) throws
+    let _ = self.data.remove(key)
+
+  fn keys(self) -> List<Text>
+    return self.data.keys()
+
+pub type FileStorage implements Storage
+  directory: Text
+
+  fn get(self, key: Text) throws -> Text?
+    let path = self.path_for(key)
+    if not files.exists(path)
+      return none
+    return try files.read(path)
+
+  fn put(var self, key: Text, value: Text) throws
+    try files.write(self.path_for(key), value)
+
+  fn delete(var self, key: Text) throws
+    try files.delete(self.path_for(key))
+
+  fn path_for(self, key: Text) -> Text
+    return "${self.directory}/${key}"
+
+// Copies every key starting with `prefix` from `source` to `destination`.
+// Only a source that can list its keys works here.
+fn copy_with_prefix(source: Storage + Listable, destination: var Storage, prefix: Text) throws
+  for key in source.keys()
+    if key.starts_with(prefix)
+      let value = try source.get(key)
+      match value
+        some(v) => try destination.put(key, v)
+        none => continue
+
+fn main() throws
+  var memory = MemoryStorage()
+  try memory.put("user:1", "Ada")
+  try memory.put("user:2", "Alan")
+  try memory.put("order:1", "Widget x3")
+  with dir = try files.temp_dir()
+    var disk = FileStorage(directory: dir.path)
+    try copy_with_prefix(memory, destination: &disk, prefix: "user:")
+    print(try disk.get("user:1") ?? "missing")
+
+test "copies matching keys from memory storage to file storage"
+  var memory = MemoryStorage()
+  try memory.put("user:1", "Ada")
+  try memory.put("user:2", "Alan")
+  try memory.put("order:1", "Widget x3")
+  with dir = try files.temp_dir()
+    var disk = FileStorage(directory: dir.path)
+    try copy_with_prefix(memory, destination: &disk, prefix: "user:")
+    expect (try disk.get("user:1")) == "Ada"
+    expect (try disk.get("user:2")) == "Alan"
+    expect (try disk.get("order:1")) == none
+
+test "memory storage stores and deletes values"
+  var memory = MemoryStorage()
+  try memory.put("a", "1")
+  expect (try memory.get("a")) == "1"
+  try memory.delete("a")
+  expect (try memory.get("a")) == none

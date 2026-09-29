@@ -1,0 +1,39 @@
+-- Fetch two forecasts at the same time and describe them like a person would.
+
+use web
+
+type Forecast has
+  city Text
+  degrees Number
+  sky Text
+
+
+-- Ask the weather service about one city.
+to forecast for city Text gives Forecast may fail
+  give try download "https://weather.example.com/now/{city}" as Forecast
+
+
+-- Put a temperature into words.
+to feeling of degrees Number gives Text
+  when degrees
+    is below 0
+      give "freezing"
+    is below 15
+      give "chilly"
+    is below 25
+      give "pleasant"
+    else
+      give "hot"
+
+check feeling of -5 is "freezing"
+check feeling of 20 is "pleasant"
+
+
+attempt
+  together
+    let paris be try forecast for "Paris"
+    let tokyo be try forecast for "Tokyo"
+  for place in [paris tokyo]
+    say "{place's city}: {place's degrees}°, {feeling of place's degrees}, {place's sky}"
+recover problem
+  say "No weather today: {problem's message}"

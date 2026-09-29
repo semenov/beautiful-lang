@@ -1,0 +1,30 @@
+# GitHub users: fetch three profiles in parallel and print a line for each.
+
+import web
+import json
+
+type GithubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_user(username: Text) throws -> GithubUser
+  let text = try web.get("https://api.github.com/users/{username}")
+  return try json.decode<GithubUser>(text)
+
+fn describe_user(username: Text, user: GithubUser?) -> Text
+  if user is some(u)
+    return "{u.login}: {u.name ?? u.login} — {u.bio ?? "no bio"}"
+  else
+    return "{username}: could not fetch profile"
+
+fn print_github_users(first: Text, second: Text, third: Text)
+  parallel
+    let user1 = fetch_user(first) catch none
+    let user2 = fetch_user(second) catch none
+    let user3 = fetch_user(third) catch none
+  print(describe_user(first, user1))
+  print(describe_user(second, user2))
+  print(describe_user(third, user3))
+
+print_github_users("octocat", "torvalds", "this-user-should-not-exist-xyz")

@@ -1,0 +1,15 @@
+import js "date-fns" as date_fns
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+pub fn generate_report() -> Text
+  let today = date_fns.format(js.Date(), "yyyy-MM-dd")
+  let padded = leftPad("42", length: 5, fill: "0")
+  return "Today: {today}, Padded: {padded}"
+
+test "generate_report creates report"
+  let report = generate_report()
+  expect report.contains("Today:")
+  expect report.contains("Padded:")
+  expect report.contains("00042")

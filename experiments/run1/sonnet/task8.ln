@@ -1,0 +1,42 @@
+# Stack: a generic stack with push, pop and peek.
+
+type Stack<T>
+  items: List<T>
+
+type PopResult<T>
+  item: T?
+  rest: Stack<T>
+
+fn empty_stack() -> Stack<T> = Stack(items: [])
+
+fn push(stack: Stack<T>, item: T) -> Stack<T>
+  return Stack(items: [item] + stack.items)
+
+fn peek(stack: Stack<T>) -> T?
+  if stack.items.length == 0
+    return none
+  return stack.items[0]
+
+fn pop(stack: Stack<T>) -> PopResult<T>
+  if stack.items.length == 0
+    return PopResult(item: none, rest: stack)
+  return PopResult(item: stack.items[0], rest: Stack(items: stack.items.skip(1)))
+
+test "stack of numbers"
+  let s = empty_stack().push(1).push(2).push(3)
+  expect s.peek() == 3
+  let first_pop = s.pop()
+  expect first_pop.item == 3
+  expect first_pop.rest.peek() == 2
+
+test "stack of text"
+  let s = empty_stack().push("a").push("b")
+  expect s.peek() == "b"
+  let popped = s.pop()
+  expect popped.item == "b"
+  expect popped.rest.peek() == "a"
+
+test "popping an empty stack returns nothing"
+  let s: Stack<Int> = empty_stack()
+  expect s.pop().item is none
+  expect s.peek() is none

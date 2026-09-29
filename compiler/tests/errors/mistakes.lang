@@ -1,0 +1,27 @@
+type User {
+  name: Text
+  age: Int
+}
+
+fn load(path: Text) throws -> User {
+  throw Failure(message: "nope")
+}
+
+fn avg(xs: List<Int>) -> Float {
+  return xs.sum() / xs.length
+}
+
+fn main() {
+  let u = load("x")
+  let v = try load("y")
+  var xs = [3, 1, 2]
+  xs.sorted()
+  let n = xs.size
+  let t = "a" + "b"
+  let m: Map<Text, Int> = {}
+  let x = m["a"] + 1
+  let f = User("Ada", 3)
+  let s = u.nme
+  let r = xs.map(x => try load("z"))
+  print(n)
+}

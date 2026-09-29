@@ -1,0 +1,20 @@
+fn double(x: Int) -> Int {
+  return x * 3
+}
+
+test "double works" {
+  expect double(2) == 4
+}
+
+test "list equality" {
+  expect [1, 2, 3].map(double) == [2, 4, 6]
+}
+
+test "passes" {
+  expect double(0) == 0
+}
+
+test "missing error" {
+  let err = expect throws "42".to_int()
+  expect err.message() == "?"
+}

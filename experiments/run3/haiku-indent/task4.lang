@@ -1,0 +1,55 @@
+import files
+import cli
+
+type Options
+  file: Text
+  top: Int = 10
+  min_length: Int = 1
+
+fn count_words(text: Text, min_length: Int) -> Map<Text, Int>
+  var counts: Map<Text, Int> = {}
+  let words = text.lower().split(r"[^\w]+")
+
+  for word in words
+    if word.length >= min_length
+      let current = counts[word] ?? 0
+      counts[word] = current + 1
+
+  return counts
+
+fn average_word_length(text: Text) -> Float
+  let words = text.lower().split(r"[^\w]+").filter(w => not w.is_empty())
+  if words.is_empty()
+    return 0.0
+
+  let total_length = words.fold(start: 0, step: (sum, w) => sum + w.length)
+  return total_length.to_float() / words.length.to_float()
+
+fn main() throws
+  let opts = try cli.decode<Options>()
+
+  let text = try files.read(opts.file) catch err
+    print("Error: file not found")
+    throw Failure(message: "File ${opts.file} not found", cause: err)
+
+  let counts = count_words(text, opts.min_length)
+
+  let sorted = counts.entries().sorted_by(e => 0 - e.value)
+  let top_n = sorted.take(opts.top)
+
+  for entry in top_n
+    print("${entry.key}: ${entry.value}")
+
+  let avg = average_word_length(text)
+  print("Average word length: ${avg}")
+
+test "count_words with min_length"
+  let text = "hello world hello"
+  let counts = count_words(text, 5)
+  expect counts["hello"] == 2
+  expect counts.contains_key("world")
+
+test "average_word_length"
+  let text = "hello world"
+  let avg = average_word_length(text)
+  expect avg > 4.0 and avg < 5.5

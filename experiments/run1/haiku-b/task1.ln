@@ -1,0 +1,31 @@
+# Task 1: Inventory
+
+type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+fn restock(product: Product, amount: Int) -> Product
+  require amount >= 0
+  return product.with(stock: product.stock + amount)
+
+fn low_stock_products(products: List<Product>) -> List<Text>
+  return products
+    .filter(p => p.stock < 5)
+    .sort_by(p => p.stock)
+    .map(p => p.name)
+
+test "restock adds to inventory"
+  let product = Product(name: "Widget", price: 9.99, stock: 3)
+  let restocked = restock(product, amount: 5)
+  expect restocked.stock == 8
+
+test "low_stock_products filters and sorts"
+  let products = [
+    Product(name: "A", price: 1.00, stock: 2),
+    Product(name: "B", price: 2.00, stock: 4),
+    Product(name: "C", price: 3.00, stock: 1),
+    Product(name: "D", price: 4.00, stock: 10),
+  ]
+  let low = low_stock_products(products)
+  expect low == ["C", "A", "B"]

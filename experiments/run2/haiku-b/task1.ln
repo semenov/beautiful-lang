@@ -1,0 +1,35 @@
+type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+fn restock(product: Product, amount: Int) -> Product
+  require amount >= 0
+  return product.with(stock: product.stock + amount)
+
+fn low_stock_products(products: List<Product>) -> List<Text>
+  let low = products.filter(p => p.stock < 5)
+  return low.sort_by(p => p.stock).map(p => p.name)
+
+test "restock increases stock"
+  let product = Product(name: "widget", price: 9.99, stock: 3)
+  let restocked = restock(product, 2)
+  expect restocked.stock == 5
+  expect restocked.name == "widget"
+
+test "low_stock_products returns sorted names"
+  let products = [
+    Product(name: "a", price: 1, stock: 2),
+    Product(name: "b", price: 1, stock: 1),
+    Product(name: "c", price: 1, stock: 10),
+  ]
+  let result = low_stock_products(products)
+  expect result == ["b", "a"]
+
+test "low_stock_products ignores well-stocked items"
+  let products = [
+    Product(name: "plenty", price: 1, stock: 100),
+    Product(name: "low", price: 1, stock: 2),
+  ]
+  let result = low_stock_products(products)
+  expect result == ["low"]

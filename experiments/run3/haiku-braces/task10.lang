@@ -1,0 +1,96 @@
+interface Describable {
+  fn describe(self) -> Text
+}
+
+type PricingRule {
+  apply: fn(Decimal) -> Decimal
+}
+
+fn percent_off(percent: Int) -> PricingRule {
+  return PricingRule(apply: total => {
+    let discount = total * (percent.to_float() / 100.0).to_decimal()
+    return total - discount
+  })
+}
+
+fn cap_at(max_price: Decimal) -> PricingRule {
+  return PricingRule(apply: total => {
+    if total > max_price {
+      return max_price
+    } else {
+      return total
+    }
+  })
+}
+
+fn combine_rules(rules: List<PricingRule>) -> PricingRule {
+  return PricingRule(apply: total => {
+    var result = total
+    for rule in rules {
+      result = rule.apply(result)
+    }
+    return result
+  })
+}
+
+type Product implements Describable {
+  name: Text
+  price: Decimal
+
+  fn describe(self) -> Text {
+    return "Product: ${self.name} costs ${self.price}"
+  }
+}
+
+type Service implements Describable {
+  name: Text
+  hourly_rate: Decimal
+
+  fn describe(self) -> Text {
+    return "Service: ${self.name} at ${self.hourly_rate} per hour"
+  }
+}
+
+fn print_descriptions(items: List<Describable>) {
+  for item in items {
+    print(item.describe())
+  }
+}
+
+test "percent_off reduces price correctly" {
+  let rule = percent_off(10)
+  let result = rule.apply(100.00)
+  expect result == 90.00
+}
+
+test "cap_at limits price" {
+  let rule = cap_at(50.00)
+  expect rule.apply(60.00) == 50.00
+  expect rule.apply(40.00) == 40.00
+}
+
+test "combine_rules applies multiple rules" {
+  let rules = [
+    percent_off(10),
+    cap_at(80.00)
+  ]
+  let combined = combine_rules(rules)
+  let result = combined.apply(100.00)
+  expect result == 80.00
+}
+
+fn main() {
+  let product = Product(name: "Laptop", price: 1000.00)
+  let service = Service(name: "Consulting", hourly_rate: 150.00)
+
+  let items: List<Describable> = [product, service]
+  print_descriptions(items)
+
+  let discount_rule = percent_off(20)
+  let capped_rule = cap_at(900.00)
+  let combined = combine_rules([discount_rule, capped_rule])
+
+  let original_price = 1000.00
+  let final_price = combined.apply(original_price)
+  print("Final price after rules: ${final_price}")
+}

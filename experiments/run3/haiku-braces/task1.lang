@@ -1,0 +1,74 @@
+type Product {
+  name: Text
+  price: Decimal
+  stock: Int
+}
+
+fn restock(var products: List<Product>, name: Text, amount: Int) {
+  for i in 0..<products.length {
+    if products[i].name == name {
+      products[i].stock += amount
+      return
+    }
+  }
+}
+
+fn low_stock_items(products: List<Product>) -> List<Text> {
+  let low = products.filter(p => p.stock < 5)
+  let sorted = low.sorted_by(p => p.stock)
+  return sorted.map(p => p.name)
+}
+
+fn average_stock(products: List<Product>) -> Float {
+  if products.is_empty() {
+    return 0.0
+  }
+  let total = products.fold(start: 0, step: (acc, p) => acc + p.stock)
+  return total.to_float() / products.length.to_float()
+}
+
+test "restock adds to product" {
+  var products = [Product(name: "apple", price: 1.50, stock: 3)]
+  restock(&products, "apple", 2)
+  expect products[0].stock == 5
+}
+
+test "low_stock_items returns empty when all have enough" {
+  let products = [Product(name: "apple", price: 1.50, stock: 10)]
+  let result = low_stock_items(products)
+  expect result.is_empty()
+}
+
+test "low_stock_items returns sorted low stock" {
+  let products = [
+    Product(name: "apple", price: 1.50, stock: 2),
+    Product(name: "banana", price: 0.50, stock: 1),
+    Product(name: "orange", price: 2.00, stock: 10)
+  ]
+  let result = low_stock_items(products)
+  expect result.length == 2
+  expect result[0] == "banana"
+  expect result[1] == "apple"
+}
+
+test "average_stock calculates correctly" {
+  let products = [
+    Product(name: "apple", price: 1.50, stock: 10),
+    Product(name: "banana", price: 0.50, stock: 20)
+  ]
+  let avg = average_stock(products)
+  expect avg == 15.0
+}
+
+fn main() {
+  var products = [
+    Product(name: "apple", price: 1.50, stock: 3),
+    Product(name: "banana", price: 0.50, stock: 2),
+    Product(name: "orange", price: 2.00, stock: 10)
+  ]
+  restock(&products, "apple", 2)
+  let low = low_stock_items(products)
+  print("Low stock items: ${low.join(", ")}")
+  let avg = average_stock(products)
+  print("Average stock: ${avg}")
+}

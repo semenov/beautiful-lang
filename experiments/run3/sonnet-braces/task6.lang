@@ -1,0 +1,54 @@
+// 6. GitHub users
+
+import http
+import json
+import tasks
+import time
+
+type GithubUser {
+  login: Text
+  name: Text? = none
+  bio: Text? = none
+}
+
+fn fetch_user(username: Text) throws -> GithubUser {
+  let response = try http.get("https://api.github.com/users/${username}")
+  return try json.decode<GithubUser>(response.body)
+}
+
+fn describe(username: Text, user: GithubUser?) -> Text {
+  return match user {
+    some(u) => "${u.login}: ${u.name ?? "(no name)"} - ${u.bio ?? "(no bio)"}"
+    none => "${username}: could not be fetched"
+  }
+}
+
+test "describe formats a successfully fetched user" {
+  let user = GithubUser(login: "octocat", name: "The Octocat", bio: none)
+  expect describe("octocat", user) == "octocat: The Octocat - (no bio)"
+}
+
+test "describe falls back when the user could not be fetched" {
+  expect describe("ghost", none) == "ghost: could not be fetched"
+}
+
+fn main() throws {
+  let usernames = ["octocat", "torvalds", "this-user-should-not-exist-zzz"]
+
+  let users = try time.timeout(time.seconds(5), () => {
+    var fetched: List<GithubUser?> = []
+    with group = try tasks.group() {
+      let user_tasks = usernames.map(name => group.run(() => try fetch_user(name) catch err {
+        none
+      }))
+      for t in user_tasks {
+        fetched.append(try t.wait())
+      }
+    }
+    fetched
+  })
+
+  for i in 0..<usernames.length {
+    print(describe(usernames[i], users[i]))
+  }
+}

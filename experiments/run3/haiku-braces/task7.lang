@@ -1,0 +1,32 @@
+import db
+import cli
+import env
+
+type User {
+  id: Int
+  name: Text
+  age: Int
+}
+
+type Options {
+  age: Int
+}
+
+fn main() throws {
+  let options = try cli.decode<Options>()
+  let database_url = env.get("DATABASE_URL") ?? "sqlite::memory:"
+
+  with conn = try db.open(database_url) {
+    try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+
+    try conn.execute("insert into users (name, age) values (?, ?)", ["Ada Lovelace", 36])
+    try conn.execute("insert into users (name, age) values (?, ?)", ["Alan Turing", 41])
+    try conn.execute("insert into users (name, age) values (?, ?)", ["Grace Hopper", 85])
+
+    let users = try conn.query<User>("select id, name, age from users where age > ?", [options.age])
+
+    for user in users {
+      print("${user.name} is ${user.age} years old")
+    }
+  }
+}

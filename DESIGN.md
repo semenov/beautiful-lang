@@ -1,0 +1,389 @@
+# Design from scratch
+
+A clean-slate redesign, started 2026-09-29. Linen (`README.md`, `AGENTS.md`)
+is the previous attempt. None of its features carry over by default: each one
+has to be justified again.
+
+## Goal
+
+- **Who:** AI agents write the code. People sometimes read it (review).
+- **What:** CLI utilities, scripts, backend services.
+- **Speed:** on par with Go. A garbage collector is fine.
+
+## Test for every feature
+
+A feature stays only if it **reduces what a reader has to keep in their
+head**, or **rules out a class of bugs**. It has to do so by more than it
+costs to learn, and by more than its interactions with other features cost.
+
+What follows from the audience:
+
+1. **Typing is free, ambiguity is expensive.** Keystroke-saving shortcuts
+   have no value.
+2. **Familiar syntax, strict meaning.** Agents write the "average of their
+   training data." The surface looks mainstream, and the meaning is stricter.
+3. **One way to write each thing.** A second way becomes a dialect that gets
+   mixed within one file.
+4. **Many checks, few concepts.** The compiler is the agent's reviewer in a
+   loop, so every error must have one obvious fix.
+5. **Compiler messages are part of the language.** They suggest the fix.
+6. **Signatures tell the reviewer what matters:** whether a function can fail.
+   A function never changes its arguments.
+7. **A reader understands a construct without knowing the rules.** If a
+   construct needs an explanation to be read (like `var` on a parameter), it's
+   a candidate for removal.
+
+## Decisions
+
+### Memory: automatic, by reference counting
+
+The programmer never manages memory. There's no `resource`/`weak`, and there
+are no cycles. APIs are designed so a handle is rarely needed
+(`files.read(path)`, `http.get(url)` open and close by themselves).
+
+Implementation: reference counting inserted by the compiler (like Swift, Koka,
+Roc), not a tracing GC. It fits the value model:
+- Values can't form cycles (there are no references), so counting frees
+  everything.
+- Copy-on-write comes for free: if the counter is 1, a change happens in
+  place, including `x = f(x)`.
+- No GC pauses, and memory is freed immediately.
+
+The only possible cycle is a `Shared` that holds itself, so a `Shared` can't
+contain another `Shared` in its value (a compile error).
+
+### Resources: `with`, enforced by the compiler
+
+```
+with conn = try db.connect(url)
+  let users = try conn.query("select …")
+# conn is closed here, even if an error was thrown
+```
+
+A type that needs closing (files, connections, sockets) can only be received
+through `with`. `let conn = db.connect(...)` is a compile error with the
+suggestion "use `with`". A long-lived resource (a pool for the whole server)
+goes in a `with` around all of `main`.
+
+### Data: mutable values (Swift-style)
+
+- All user-defined types are values. Assignment and passing are logical
+  copies (copy-on-write underneath). A `var` can be changed in place.
+- There are no classes and no user-defined reference types.
+- Things with identity (connections, files, the HTTP server) are opaque
+  handles from the standard library.
+- Shared mutable state uses only `Shared<T>`, which synchronizes access.
+- Graphs and back-links use IDs in a `Map`, not pointers.
+- Changes through access paths (`orders[id].items.append(x)`) happen in
+  place.
+- Compiler error: "you changed a copy that is never used afterward" (with
+  the suggested fix).
+- Implementation (copy-on-write with reference counting or persistent
+  structures) is decided later.
+
+### Functions never change their arguments
+
+A function that produces a changed value returns it, and the caller assigns
+it:
+
+```
+products = restock(products, name: "Widget", amount: 3)
+```
+
+Any reader understands this line without knowing the rules. There is no `var`
+on parameters and no `&`. The compiler may perform `x = f(x)` in place.
+Changing a value in place is done by a `mutating` method on your own type:
+`inventory.restock(name: "Widget", amount: 3)`.
+
+### Types
+
+- **Flow typing after `is`.** After `if err is InsufficientFunds`, `err` has
+  that type inside the block (fields are accessible). After
+  `if x is none { throw … }`, `x` is `T` for the rest of the block. A bare
+  type test without parentheses (`err is InsufficientFunds`) is allowed.
+- **Named function types:** `type Rule = fn(Decimal) -> Decimal` is a new
+  type like any other `type X = …`. A lambda takes the expected type, the
+  same way a number literal does, and a `Rule` value is called directly:
+  `rule(total)`.
+
+- **Records, enums with data, exhaustive `match`.**
+- **Automatic equality and hashing.** `==` and hashing are structural for
+  every type except functions and handles. Any record can be a `Map` key or a
+  `Set` element. Ordering (`<`) is built in only for numbers, `Text` and
+  time. Anything else is sorted with `sort_by(x => x.key)`.
+- **Generics without bounds.** `<T>` means "any type, the same one
+  everywhere." It doesn't need bounds: `==`, hashing and `sort_by` work for
+  everything.
+- **An interface used as a type** means "any type that implements it, and they
+  can differ": `List<Describable>`. This doesn't overlap with generics.
+- **Interfaces are implemented explicitly:** `type User implements
+  Describable`. The compiler checks it.
+- **`type UserId = Int` creates a distinct type**, not an alias. Mixing up
+  `UserId` and `OrderId` is a compile error. There are no plain aliases.
+- **Missing values:** `T?`, `none`, `??`, `if x is some(v)`, `match`. No
+  `?.`.
+- **Removed:** inheritance, overloading, operator overloading, tuples
+  (multiple results are a record; iterating a `Map` gives `entry.key` /
+  `entry.value`), default parameter values (record fields keep their
+  defaults; a function with many settings takes a record of options).
+
+### Methods belong to their type
+
+- A method is declared together with its type, in the same module. There are
+  no extension methods.
+- `x.f()` is looked up in exactly one place: the type of `x`. Anything else
+  is called as a function: `format_price(p)`.
+- A method that changes its receiver is declared `mutating fn increment()`
+  and can only be called on a `var`. The receiver isn't marked at the call
+  site: the method name says what happens (`xs.append(x)`).
+- Standard library chains (`xs.filter(...).map(...)`) work because these are
+  methods of `List`.
+
+### Paths through maps
+
+`m[key]` as a value gives `V?`. Changing through a path
+(`accounts[id].balance -= x`) is allowed; a missing key is a bug, like
+`xs[i]` out of range.
+
+### Results must be used
+
+Ignoring a return value is a compile error. The explicit form for the rare
+exception is `let _ = f()`. As a result, a line `x.method(...)` without a
+used result is always a mutation or an action. The rule also catches the
+`sort()` / `sorted()` confusion.
+
+### Control flow
+
+- Loops: `for x in xs` and `while`. Nothing else.
+- Ranges: `0..<n` excludes the end, `1..=n` includes it. A bare `..` is an
+  error.
+- Indices and map entries are records: `for item in xs.indexed()` →
+  `item.index`, `item.value`. `for entry in map` → `entry.key`,
+  `entry.value`.
+- `if` and `match` are expressions, written only as blocks. The value is the
+  last line. There is no one-line `if … then … else`.
+
+### Functions and lambdas
+
+- **Argument names:** the receiver of `x.f(...)` doesn't count. A function
+  with 3 or more parameters (besides the receiver) is called with every
+  argument after the first named. `router.get(path, handler)` and
+  `conn.query(sql, params)` stay positional.
+- **No `return` inside a lambda.** The last line is the value.
+- A line starting with `.` continues the expression above it (chains).
+
+- Signatures always spell out their types. Inside a body, `let` can infer
+  them.
+- Lambdas are `x => expr` or an indented block. They capture values by copy.
+  Changing a captured `var` is an error.
+- `throws` passes through lambdas: `try users.map(u => try load(u))`.
+  Higher-order functions declare this once in the standard library.
+
+### Modules
+
+- One file is one module.
+- Private by default. The public API is marked `pub`.
+- Imports are qualified only: `import json` → `json.decode(...)`. No `*` and
+  no importing individual names. Every name is either declared in this file or
+  has a module prefix.
+- No cyclic imports.
+
+### Numbers
+
+- `Int` is 64-bit. Overflow stops the program.
+- `Float` is 64-bit IEEE.
+- `Decimal` is a standard library type for money.
+- No implicit conversions, including `Int → Float`.
+- `/` on two `Int`s is a compile error. You write `a.div(b)` or
+  `a.to_float() / b.to_float()`.
+- A number literal takes the expected type: `let price: Decimal = 19.99`.
+
+### Errors: checked, untyped `throws`
+
+- A function that can fail says `throws` (without a list of types). Every call
+  to it starts with `try`.
+- `Error` is an interface (`fn message(self) -> Text`) that any record can
+  implement. Handling checks the type: `if err is NotFound`.
+- Two forms only:
+
+  ```
+  let text = try files.read(path)          # pass it up
+
+  let user = try load(id) catch err        # handle it here
+    if err is NotFound
+      return none
+    throw Wrapped("loading user {id}", cause: err)
+  ```
+
+  The `catch` block ends with a value, or with `return`, `break`, `continue`
+  or `throw`. The same applies to `match` arms and the right side of
+  `??`: `let user = users[id] ?? throw NotFound(id: id)`.
+- An implementation may declare less than its interface: a method that never
+  fails doesn't have to be `throws`. Nothing is swallowed silently. `cause` gives a chain of context
+  for logs.
+
+### Bugs: stop at the task boundary
+
+- `assert`, overflow, an out-of-range `xs[i]` and `panic("…")` are bugs. Code
+  can't catch them.
+- A bug stops the nearest task. In a server that means one request gets a 500
+  and a log entry, and the server keeps running. In a CLI tool it means the
+  whole program. The runtime and the standard library set the boundaries.
+- `m[key]` returns `V?` (a missing key is normal). `xs.first()` returns
+  `T?`.
+
+### Concurrency: lightweight tasks, structured
+
+- No `async`/`await` (no function coloring).
+- A task group is an ordinary resource received through `with`:
+
+  ```
+  with group = tasks.group()
+    let user = group.run(() => try load_user(id))       # Task<User>, starts right away
+    let orders = group.run(() => try load_orders(id))
+    show(try user.wait(), try orders.wait())
+  # the block doesn't exit until every task is finished
+  ```
+
+  Every line runs in order. Concurrency is visible exactly where `run` is
+  written.
+- Tasks can't outlive the group. An escaped `Task` is already finished, so
+  `wait()` just returns the stored result.
+- An error in one task cancels the others, and the group throws it.
+- Cancellation is automatic: a waiting operation (network, files, `sleep`, a
+  queue) in a cancelled task throws `Cancelled`. There's no `ctx`.
+- For a list: `try urls.parallel_map(limit: 10, url => try http.get(url))`.
+- Data races are impossible: tasks share data only through `Shared<T>` or
+  pass it through `Channel<T>`.
+- Timeouts: `try time.timeout(seconds: 5, () => try http.get(url))`.
+- No `spawn` outside a group and no futures or promises.
+- **Rejected:** a `parallel` block where every line runs at the same time. It
+  looks sequential but isn't, dependencies between lines need a special
+  rule, and adding one line changes the meaning.
+
+### Tests and tooling
+
+- `test "name"` blocks live next to the code, in the same file, and can see
+  private functions. `lang test` runs everything, with no configuration.
+- One check form, `expect cond`. On failure, the compiler prints the value of
+  each side of the expression (`left: 0`, `right: 5`). No `assertEqual`
+  family.
+- `let err = expect throws f(x)` returns the error for inspection. `assert`
+  and `panic` can't be tested: they mark bugs, not errors.
+- Tests run in parallel. They're isolated automatically, because there's no
+  global mutable state. External things use `with` and temporary resources
+  (`files.temp_dir()`).
+- No mocking framework (no reflection). Anything replaceable is passed as an
+  interface-typed parameter (`Clock`, `Mailer`). The standard library ships
+  test implementations: a fixed clock, an in-memory file system, calling an
+  HTTP handler without a network.
+- One binary: `lang run`, `lang build`, `lang test`, `lang fmt`, `lang doc`.
+  The formatter has no settings.
+
+### Standard library
+
+- **Batteries included for the domain.** A typical CLI tool or backend is
+  written without third-party packages.
+- **The most predictable names.** When mainstream languages disagree, pick
+  the one agents are most likely to guess. One name per concept. The compiler
+  suggests the closest match.
+- **All external data enters through `decode<T>`.** The compiler generates
+  the conversion into a record:
+
+  ```
+  let opts = try cli.decode<Options>()     # flags from fields, generated --help
+  let config = try env.decode<Config>()
+  let user = try json.decode<User>(body)
+  let users = try conn.query<User>("select * from users where age > ?", [18])
+  ```
+
+  A missing required field is an error that names the field. A `T?` field or
+  a field with a default is optional. There are no annotations: name mapping
+  is a decode option (`keys: CamelCase`). Anything unusual is decoded by hand
+  through `json.Value`.
+- **SQL:** the query text must be a string literal, and parameters are passed
+  separately. Concatenation or interpolation is a compile error.
+- **Designed for "results must be used":** `conn.execute(sql, params)`
+  returns nothing (`execute_counting` returns the row count), `map.remove(k)`
+  returns nothing (`map.take(k) -> V?` removes and returns). A result is
+  returned only when it's usually needed.
+- **`Shared<T>.update`** gives the lambda a mutable value and returns the
+  lambda's result, so read-modify-write is atomic:
+  `let id = state.update(s => { s.next_id += 1; s.next_id })`.
+- **Processes:** `process.run("git", ["log", "-n", "5"])` takes a list of
+  arguments, not a shell string.
+- **Time:** `Instant` and `Date` are different types. Time zones are always
+  explicit.
+- **Modules:** `json`, `cli`, `env`, `files`, `process`, `http` (client and
+  server), `db` (Postgres, SQLite), `time`, `log` (structured), `text`,
+  `crypto`, `tasks`.
+- **HTTP server:** a handler is `fn(Request) throws -> Response`. An error or
+  a bug becomes a 500. Handlers can be tested without a network.
+- **Third-party packages** are postponed. When they come, they work like Go's:
+  versions in a single file plus a lock file, no central registry at the
+  start.
+
+### Syntax: C family
+
+Experiment `experiments/run3`: braces and indentation gave no difference (0
+syntax slips in 40 files), so braces stay for the reasons below.
+
+
+- Braces for blocks, with a mandatory formatter, so indentation always
+  matches them. Reasons: most backend training data uses braces; wrapping a
+  block in `with`/`if` doesn't re-indent it (safer string-replacement edits,
+  cleaner diffs); truncated output is caught by an unbalanced brace.
+- `${x}` interpolation (backends put JSON in strings, so `{x}` would clash).
+- `and` / `or` / `not` (a reviewer misses `!` easily).
+- `//` comments, `name: Type`, `-> Result`, `<T>`, no semicolons.
+- `match x { Circle(r) => … }` without `case`.
+
+### Rejected
+
+- **`var` parameters with `&` at the call site** (`add_tag(&tags, "x")`).
+  A reader can't understand them without knowing the rule, whatever the
+  keyword (`var`, `mut`, `inout`). Rust's `&mut` also suggests references and
+  borrowing, which we don't have.
+- **`io` marker in signatures.** It's a second function color. Most of its
+  value is already covered by `throws`, and in a backend it would be on most
+  functions, so the signal would disappear. Tooling can infer purity if
+  needed.
+
+## Compiler (`compiler/`)
+
+Written in Rust. Pipeline:
+`lexer → parser → check (types, inference, all language rules) → lower (MIR,
+generics instantiated per type) → rc (reference counting from liveness) →
+cgen (C) → clang`.
+
+- **Memory:** reference counting inserted by the compiler from liveness:
+  a value is dropped right after its last use, and moved (not copied) into
+  its last use. Copy-on-write when the count is 1, so `x = f(x)` and
+  `xs.append(x)` change in place. Small objects come from per-size free
+  lists; large blocks go straight to the OS.
+- **Errors:** a failing function returns an error value; no unwinding.
+- **One C file** per program with the runtime (`src/runtime/rt.h`), so clang
+  inlines across everything.
+- `lang run | build | test | check`, `--debug` (AddressSanitizer + leak
+  count), `--emit-c`. Tests: `compiler/tests/run.sh`.
+- **Decided while building:** bit operations are `Int` methods
+  (`bit_and`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`), not
+  operators. The prelude marks higher-order functions `rethrows`, so
+  `xs.map(x => try f(x))` throws only when the lambda can.
+
+**Not implemented yet:** `with`, modules and `import`, `decode<T>`,
+`Decimal`, concurrency (`tasks`, `Shared`, `Channel`), the standard library
+modules (files, http, db, …), converting between interface combinations.
+
+## Open questions
+
+- **Changing a value behind an interface** without `var` parameters: a
+  function `copy(from: Storage + Listable, to: Storage) -> Storage` returns
+  the destination as `Storage`, so the caller loses its concrete type
+  (`FileStorage`). Options: generics with interface bounds (removed earlier),
+  or accept it.
+- **Text representation:** `split`/`lines`/`words` allocate every piece
+  (5 million small allocations in the `words` benchmark, where Go returns
+  views into the original text). Making `Text` a view (pointer + length +
+  owner) would make slicing free, at the cost of 24 bytes per value.
+

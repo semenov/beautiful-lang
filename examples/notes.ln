@@ -1,0 +1,67 @@
+# A tiny notes store on top of SQLite, called directly through the C ABI.
+
+import env
+
+# --- The trusted boundary: raw C declarations, kept in one place. ---
+
+extern c "sqlite3"
+  opaque Sqlite3 closed by sqlite3_close
+  opaque Statement closed by sqlite3_finalize
+  fn sqlite3_open(filename: CText, db: out Sqlite3?) -> CInt
+  fn sqlite3_errmsg(db: Sqlite3) -> CText
+  fn sqlite3_prepare_v2(db: Sqlite3, sql: CText, length: CInt, statement: out Statement?, tail: CPtr?) -> CInt
+  fn sqlite3_bind_text(statement: Statement, index: CInt, text: CText, length: CInt, destructor: CPtr?) -> CInt
+  fn sqlite3_step(statement: Statement) -> CInt
+  fn sqlite3_column_text(statement: Statement, column: CInt) -> CText
+
+let SQLITE_ROW = 100
+let SQLITE_DONE = 101
+
+
+# --- The Linen API the rest of the program sees. ---
+
+pub resource Database
+  handle: Sqlite3
+
+pub fn open_database(path: Text) throws -> Database
+  var handle: Sqlite3? = none
+  if sqlite3_open(path, db: handle) != 0
+    throw Error("cannot open {path}")
+  return Database(try handle.or_throw("sqlite returned no handle"))
+
+fn prepare(db: Database, sql: Text, params: List<Text>) throws -> Statement
+  var statement: Statement? = none
+  if sqlite3_prepare_v2(db.handle, sql: sql, length: -1, statement: statement, tail: none) != 0
+    throw Error(sqlite3_errmsg(db.handle))
+  let ready = try statement.or_throw("sqlite returned no statement")
+  for (i, param) in params.indexed()
+    sqlite3_bind_text(ready, index: i + 1, text: param, length: -1, destructor: none)
+  return ready
+
+pub fn execute(db: Database, sql: Text, params: List<Text>) throws
+  let statement = try prepare(db, sql: sql, params: params)
+  if sqlite3_step(statement) != SQLITE_DONE
+    throw Error(sqlite3_errmsg(db.handle))
+
+pub fn query_texts(db: Database, sql: Text, params: List<Text>) throws -> List<Text>
+  let statement = try prepare(db, sql: sql, params: params)
+  var rows: List<Text> = []
+  while sqlite3_step(statement) == SQLITE_ROW
+    rows.append(sqlite3_column_text(statement, column: 0))
+  return rows
+
+
+# --- An ordinary program. Statements and the database close themselves. ---
+
+test "notes round-trip through sqlite"
+  let db = try open_database(":memory:")
+  try db.execute("create table notes (body text)", params: [])
+  try db.execute("insert into notes values (?)", params: ["buy linen"])
+  expect try db.query_texts("select body from notes", params: []) == ["buy linen"]
+
+let db = try open_database("notes.db")
+try db.execute("create table if not exists notes (body text)", params: [])
+for body in env.args()
+  try db.execute("insert into notes values (?)", params: [body])
+for note in try db.query_texts("select body from notes", params: [])
+  print("• {note}")

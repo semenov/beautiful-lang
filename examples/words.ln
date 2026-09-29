@@ -1,0 +1,21 @@
+# The ten most common words in a file.
+
+import files
+
+fn top_words(path: Text) throws -> List<Text>
+  let text = try files.read(path)
+  return text
+    .lower()
+    .split_words()
+    .count_each()
+    .entries()
+    .sort_by((word, count) => count)
+    .reverse()
+    .take(10)
+    .map((word, count) => "{word}  {count}")
+
+test "counts words"
+  expect try top_words("fixtures/tiny.txt") == ["the  3", "cat  1"]
+
+for line in try top_words("book.txt")
+  print(line)

@@ -1,0 +1,56 @@
+-- A tiny shop: items, discounts and receipts.
+
+type Item has
+  name Text
+  price Number
+  quantity Number
+
+type Discount is one of
+  NoDiscount
+  Percent rate Number
+  Fixed amount Number
+
+type Order has
+  items List of Item
+  discount Discount
+
+
+-- What one line of an order costs.
+to cost of item Item gives Number
+  give item's price * item's quantity
+
+check cost of (Item name "tea" price 4 quantity 3) is 12
+
+
+-- Reduce a total by a discount, never below zero.
+to apply discount Discount to total Number gives Number
+  needs total is at least 0
+  promises result is at least 0
+  when discount
+    is NoDiscount
+      give total
+    is Percent rate r
+      give total - total * r / 100
+    is Fixed amount a
+      give 0 if a is above total else total - a
+
+check apply (Percent rate 10) to 200 is 180
+check apply (Fixed amount 50) to 30 is 0
+
+
+-- A printable receipt, one line per item and the total at the end.
+to receipt for order Order gives Text
+  let lines be each item in order's items give "{item's name} x{item's quantity}  {cost of item}"
+  let subtotal be sum of (each item in order's items give cost of item)
+  let total be apply order's discount to subtotal
+  give join (lines + ["Total  {total}"]) with newline
+
+
+let tea be Item name "Green tea" price 4 quantity 3
+let cake be Item name "Cheesecake" price 6 quantity 1
+
+let order be Order
+  items [tea cake]
+  discount Percent rate 10
+
+say receipt for order

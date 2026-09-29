@@ -1,0 +1,45 @@
+# Task 7: Word stats
+# Extract top 3 most common words and calculate average word length
+
+type WordCount
+  word: Text
+  count: Int
+
+fn word_stats(text: Text) -> (List<WordCount>, Float)
+  let words = text
+    .split(" ")
+    .map(w => w.lower())
+    .filter(w => w.length > 3 and w != "")
+
+  if words.is_empty()
+    return ([], 0)
+
+  let grouped = words.group_by(w => w)
+  let counts = grouped
+    .map(pair => WordCount(word: pair[0], count: pair[1].length))
+    .sort_by(wc => wc.count)
+    .reverse()
+    .take(3)
+
+  let total_length = words.sum(w => w.length)
+  let avg_length = Float(total_length) / Float(words.length)
+
+  return (counts, avg_length)
+
+test "word stats with common words"
+  let text = "hello world hello test hello again"
+  let (top_words, avg_len) = word_stats(text)
+  expect top_words.length == 3
+  expect top_words[0].word == "hello"
+  expect top_words[0].count == 3
+  expect avg_len > 4
+
+test "word stats filters short words"
+  let text = "a cat is the best pet ever"
+  let (top_words, avg_len) = word_stats(text)
+  expect top_words[0].word == "best" or top_words[0].word == "ever"
+
+test "word stats with empty string"
+  let (top_words, avg_len) = word_stats("")
+  expect top_words.length == 0
+  expect avg_len == 0

@@ -1,0 +1,65 @@
+// 4. Word count CLI
+
+import cli
+import files
+
+type Options {
+  args: List<Text> = []
+  top: Int = 10
+  min_length: Int = 1
+}
+
+fn word_counts(text: Text, min_length: Int) -> Map<Text, Int> {
+  let words = text.words()
+  let lowercased = words.map(w => w.lower())
+  let long_enough = lowercased.filter(w => w.length >= min_length)
+  return long_enough.count_each()
+}
+
+fn average_word_length(text: Text) -> Float {
+  let words = text.words()
+  if words.is_empty() {
+    return 0.0
+  }
+  let total = words.map(w => w.length).sum()
+  return total.to_float() / words.length.to_float()
+}
+
+test "word_counts lowercases and filters by minimum length" {
+  let counts = word_counts("The cat sat on the mat", 3)
+  expect counts["the"] == 2
+  expect counts["cat"] == 1
+  expect counts["mat"] == 1
+  expect counts.contains_key("on") == false
+}
+
+test "average_word_length averages over every word" {
+  expect average_word_length("a bb ccc") == 2.0
+}
+
+fn main() throws {
+  let options = try cli.decode<Options>()
+
+  if options.args.is_empty() {
+    throw Failure(message: "usage: wordcount <file> [--top N] [--min-length L]")
+  }
+  let path = options.args[0]
+
+  if not files.exists(path) {
+    throw Failure(message: "file not found: ${path}")
+  }
+
+  let text = try files.read(path)
+  let counts = word_counts(text, options.min_length)
+
+  let entries = counts.entries()
+  let by_count_ascending = entries.sorted_by(e => e.value)
+  let by_count_descending = by_count_ascending.reversed()
+  let top_entries = by_count_descending.take(options.top)
+
+  for entry in top_entries {
+    print("${entry.key}: ${entry.value}")
+  }
+
+  print("average word length: ${average_word_length(text)}")
+}

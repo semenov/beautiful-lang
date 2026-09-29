@@ -1,0 +1,52 @@
+# A tiny shop: items, discounts and receipts.
+
+type Item
+  name: Text
+  price: Decimal
+  quantity: Int
+
+enum Discount
+  NoDiscount
+  Percent(rate: Decimal)
+  Fixed(amount: Decimal)
+
+type Order
+  items: List<Item>
+  discount: Discount
+
+
+# What one line of an order costs.
+fn cost(item: Item) -> Decimal = item.price * item.quantity
+
+
+# Reduce a total by a discount, never below zero.
+fn apply(discount: Discount, total: Decimal) -> Decimal
+  require total >= 0
+  ensure result >= 0
+  return match discount
+    case NoDiscount => total
+    case Percent(rate) => total - total * rate / 100
+    case Fixed(amount) => max(total - amount, 0)
+
+
+# A printable receipt: one line per item, then the total.
+fn receipt(order: Order) -> Text
+  let lines = order.items.map(item => "{item.name} x{item.quantity}  {item.cost()}")
+  let subtotal = order.items.map(cost).sum()
+  let total = order.discount.apply(subtotal)
+  return (lines + ["Total  {total}"]).join("\n")
+
+
+test "cost multiplies price by quantity"
+  expect Item(name: "tea", price: 4, quantity: 3).cost() == 12
+
+test "discounts"
+  expect apply(Percent(10), total: 200) == 180
+  expect apply(Fixed(50), total: 30) == 0
+
+
+let tea = Item(name: "Green tea", price: 4, quantity: 3)
+let cake = Item(name: "Cheesecake", price: 6, quantity: 1)
+let order = Order(items: [tea, cake], discount: Percent(10))
+
+print(order.receipt())

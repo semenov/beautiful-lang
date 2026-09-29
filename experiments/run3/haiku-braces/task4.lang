@@ -1,0 +1,51 @@
+import files
+import cli
+
+type Options {
+  file: Text
+  top: Int = 10
+  min_length: Int = 1
+}
+
+fn count_words(text: Text, min_length: Int) -> Map<Text, Int> {
+  var counts: Map<Text, Int> = {}
+  for word in text.lower().split(" ") {
+    let trimmed = word.trim()
+    if trimmed.length >= min_length {
+      let current = counts[trimmed] ?? 0
+      counts[trimmed] = current + 1
+    }
+  }
+  return counts
+}
+
+fn average_word_length(text: Text) -> Float {
+  let words = text.split(" ").filter(w => not w.trim().is_empty())
+  if words.is_empty() {
+    return 0.0
+  }
+  let total_length = words.fold(start: 0, step: (acc, w) => acc + w.length)
+  return total_length.to_float() / words.length.to_float()
+}
+
+fn main() throws {
+  let options = try cli.decode<Options>()
+
+  let text = try files.read(options.file) catch err {
+    print("Error: file not found")
+    return
+  }
+
+  let word_counts = count_words(text, options.min_length)
+  let entries = word_counts.entries()
+  let sorted = entries.sorted_by(e => e.value)
+  let reversed = sorted.reversed()
+  let top_words = reversed.take(options.top)
+
+  for entry in top_words {
+    print("${entry.key}: ${entry.value}")
+  }
+
+  let avg_length = average_word_length(text)
+  print("Average word length: ${avg_length}")
+}

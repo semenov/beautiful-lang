@@ -1,0 +1,21 @@
+# Task 6: Interop
+
+import js "date-fns" as date_fns
+import time
+
+extern js "left-pad"
+  fn leftPad(text: Text, length: Int, fill: Text?) -> Text nothrow
+
+fn format_today() -> Text
+  let today = time.today()
+  let year = today.year.to_text()
+  let month = (today.month).to_text()
+  let day = (today.day).to_text()
+  let padded_month = leftPad(month, length: 2, fill: "0")
+  let padded_day = leftPad(day, length: 2, fill: "0")
+  return "{year}-{padded_month}-{padded_day}"
+
+pub fn report() -> Text
+  let date = format_today()
+  let padded_num = leftPad("42", length: 5, fill: "0")
+  return "Report for {date}: {padded_num}"

@@ -1,0 +1,39 @@
+resource Account
+  var balance: Float
+
+fn transfer(from: Account, to: Account, amount: Float) throws
+  require amount > 0
+
+  if from.balance < amount
+    throw Error("Insufficient funds")
+
+  from.balance = from.balance - amount
+  to.balance = to.balance + amount
+
+fn demo()
+  let alice = Account(balance: 100.0)
+  let bob = Account(balance: 50.0)
+
+  try transfer(from: alice, to: bob, amount: 30.0)
+  print("Transfer succeeded")
+
+  try transfer(from: alice, to: bob, amount: 100.0) catch
+    print("Transfer failed: not enough money")
+
+test "transfer_success"
+  let alice = Account(balance: 100.0)
+  let bob = Account(balance: 50.0)
+  try transfer(from: alice, to: bob, amount: 30.0)
+  expect alice.balance == 70.0
+  expect bob.balance == 80.0
+
+test "transfer_insufficient_funds"
+  let alice = Account(balance: 100.0)
+  let bob = Account(balance: 50.0)
+  let err = expect throws transfer(from: alice, to: bob, amount: 150.0)
+  expect err.message.contains("Insufficient funds")
+
+test "transfer_negative_amount"
+  let alice = Account(balance: 100.0)
+  let bob = Account(balance: 50.0)
+  expect throws transfer(from: alice, to: bob, amount: -10.0)

@@ -1,0 +1,35 @@
+enum Tree {
+  Leaf
+  Node(left: Tree, right: Tree)
+}
+
+fn build(depth: Int) -> Tree {
+  if depth == 0 {
+    return Leaf
+  }
+  return Node(left: build(depth - 1), right: build(depth - 1))
+}
+
+fn check(tree: Tree) -> Int {
+  return match tree {
+    Leaf => 1
+    Node(left, right) => 1 + check(left) + check(right)
+  }
+}
+
+fn main() {
+  let max_depth = 20
+  print("stretch ${check(build(max_depth + 1))}")
+  let long_lived = build(max_depth)
+  var depth = 4
+  while depth <= max_depth {
+    let iterations = 1.shift_left(max_depth - depth + 4)
+    var total = 0
+    for i in 0..<iterations {
+      total += check(build(depth))
+    }
+    print("${iterations} trees of depth ${depth}: ${total}")
+    depth += 2
+  }
+  print("long lived: ${check(long_lived)}")
+}

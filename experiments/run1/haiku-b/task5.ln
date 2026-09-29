@@ -1,0 +1,44 @@
+# Task 5: GitHub Users
+
+import js "node:https" as https
+import json
+
+type GitHubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_github_user(username: Text) throws -> GitHubUser
+  let url = "https://api.github.com/users/{username}"
+  let response = try https.get(url)
+  return try json.decode<GitHubUser>(response)
+
+fn describe_user(user: GitHubUser) -> Text
+  let name = match user.name
+    case some(n) => n
+    case none => user.login
+  let bio = match user.bio
+    case some(b) => b
+    case none => "(no bio)"
+  return "{name}: {bio}"
+
+fn fetch_users_demo(usernames: List<Text>)
+  parallel
+    let user1 = try fetch_github_user(usernames[0]) catch
+      return GitHubUser(login: usernames[0], name: none, bio: none)
+    let user2 = try fetch_github_user(usernames[1]) catch
+      return GitHubUser(login: usernames[1], name: none, bio: none)
+    let user3 = try fetch_github_user(usernames[2]) catch
+      return GitHubUser(login: usernames[2], name: none, bio: none)
+
+  print(describe_user(user1))
+  print(describe_user(user2))
+  print(describe_user(user3))
+
+test "describe_user with all fields"
+  let user = GitHubUser(login: "torvalds", name: some("Linus Torvalds"), bio: some("Linux creator"))
+  expect describe_user(user).contains("Linus Torvalds")
+
+test "describe_user with missing fields"
+  let user = GitHubUser(login: "unknown", name: none, bio: none)
+  expect describe_user(user) == "unknown: (no bio)"

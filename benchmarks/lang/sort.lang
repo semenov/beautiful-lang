@@ -1,0 +1,30 @@
+type Rng {
+  state: Int
+
+  mutating fn next() -> Int {
+    var x = self.state
+    x = x.bit_xor(x.shift_left(13).bit_and(4294967295))
+    x = x.bit_xor(x.shift_right(17))
+    x = x.bit_xor(x.shift_left(5).bit_and(4294967295))
+    self.state = x
+    return x
+  }
+}
+
+type Item {
+  id: Int
+  key: Int
+}
+
+fn main() {
+  let n = 3_000_000
+  var rng = Rng(state: 2463534242)
+  for round in 0..<5 {
+    var items: List<Item> = []
+    for i in 0..<n {
+      items.append(Item(id: i, key: rng.next()))
+    }
+    items.sort_by(item => item.key)
+    print("${items[0].key} ${items[n.div(2)].key} ${items[n - 1].key}")
+  }
+}

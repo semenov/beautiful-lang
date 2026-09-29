@@ -1,0 +1,74 @@
+import files
+
+interface Storage
+  fn get(self, key: Text) throws -> Bytes?
+  fn put(self, key: Text, value: Bytes) throws
+  fn delete(self, key: Text) throws
+
+interface Listable
+  fn list_keys(self, prefix: Text) throws -> List<Text>
+
+resource MemoryStore
+  var data: Map<Text, Bytes> = {}
+
+fn get(store: MemoryStore, key: Text) -> Bytes?
+  return store.data[key]
+
+fn put(store: MemoryStore, key: Text, value: Bytes)
+  store.data[key] = value
+
+fn delete(store: MemoryStore, key: Text)
+  store.data.remove(key)
+
+fn list_keys(store: MemoryStore, prefix: Text) -> List<Text>
+  return store.data.keys().filter(k => k.starts_with(prefix)).sort()
+
+resource FileStore
+  dir: Text
+
+fn get(store: FileStore, key: Text) throws -> Bytes?
+  let path = "{store.dir}/{key}"
+  if not files.exists(path)
+    return none
+  return try files.read_bytes(path)
+
+fn put(store: FileStore, key: Text, value: Bytes) throws
+  let path = "{store.dir}/{key}"
+  try files.write_bytes(path, value)
+
+fn delete(store: FileStore, key: Text) throws
+  let path = "{store.dir}/{key}"
+  if files.exists(path)
+    try files.delete(path)
+
+fn copy_prefix<S: Storage + Listable>(from: S, to: Storage, prefix: Text) throws
+  let keys = try from.list_keys(prefix)
+  for key in keys
+    let value = try from.get(key)
+    if value is some(v)
+      try to.put(key, v)
+
+test "copy_prefix with memory store"
+  let store1 = MemoryStore()
+  let store2 = MemoryStore()
+  put(store1, "foo:1", "value1".bytes())
+  put(store1, "foo:2", "value2".bytes())
+  put(store1, "bar:1", "value3".bytes())
+  try copy_prefix(store1, store2, "foo:")
+  expect get(store2, "foo:1") == "value1".bytes()
+  expect get(store2, "foo:2") == "value2".bytes()
+  expect get(store2, "bar:1") == none
+
+test "memory store get and put"
+  let store = MemoryStore()
+  put(store, "key1", "data1".bytes())
+  expect get(store, "key1") == "data1".bytes()
+  expect get(store, "missing") == none
+
+test "memory store list_keys"
+  let store = MemoryStore()
+  put(store, "test:1", "data1".bytes())
+  put(store, "test:2", "data2".bytes())
+  put(store, "other", "data3".bytes())
+  let keys = list_keys(store, "test:")
+  expect keys.length == 2

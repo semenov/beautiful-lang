@@ -1,0 +1,228 @@
+type Stack<T> {
+  items: List<T> = []
+
+  mutating fn push(item: T) {
+    self.items.append(item)
+  }
+
+  mutating fn pop() -> T? {
+    return self.items.pop()
+  }
+
+  fn peek(self) -> T? {
+    return self.items.last()
+  }
+}
+
+enum Tree {
+  Leaf
+  Node(left: Tree, value: Int, right: Tree)
+}
+
+fn insert(tree: Tree, v: Int) -> Tree {
+  return match tree {
+    Leaf => Node(left: Leaf, value: v, right: Leaf)
+    Node(l, x, r) if v < x => Node(left: insert(l, v), value: x, right: r)
+    Node(l, x, r) => Node(left: l, value: x, right: insert(r, v))
+  }
+}
+
+fn to_list(tree: Tree) -> List<Int> {
+  return match tree {
+    Leaf => []
+    Node(l, x, r) => to_list(l).concat([x]).concat(to_list(r))
+  }
+}
+
+interface Storage {
+  fn get(self, key: Text) -> Text?
+  mutating fn put(key: Text, value: Text)
+}
+
+type Memory implements Storage {
+  data: Map<Text, Text> = {}
+
+  fn get(self, key: Text) -> Text? {
+    return self.data[key]
+  }
+
+  mutating fn put(key: Text, value: Text) {
+    self.data[key] = value
+  }
+}
+
+type Order {
+  id: Int
+  items: List<Text> = []
+}
+
+type Point {
+  x: Int
+  y: Int
+}
+
+fn parse_all(texts: List<Text>) throws -> List<Int> {
+  return try texts.map(t => try t.to_int())
+}
+
+fn make_counter(start: Int) -> fn(Int) -> Int {
+  return n => start + n
+}
+
+test "generic stack" {
+  var s = Stack<Int>()
+  s.push(1)
+  s.push(2)
+  expect s.peek() == 2
+  expect s.pop() == 2
+  expect s.pop() == 1
+  expect s.pop() == none
+  var names = Stack<Text>()
+  names.push("a")
+  expect names.items == ["a"]
+}
+
+test "recursive enum" {
+  var t: Tree = Leaf
+  for v in [5, 2, 8, 1, 9, 3] {
+    t = insert(t, v)
+  }
+  expect to_list(t) == [1, 2, 3, 5, 8, 9]
+}
+
+test "interface with a mutating method" {
+  var store: Storage = Memory()
+  store.put(key: "a", value: "1")
+  let copy = store
+  store.put(key: "b", value: "2")
+  expect store.get("b") == "2"
+  expect copy.get("b") == none
+  expect copy.get("a") == "1"
+}
+
+test "values are copied" {
+  let a = [1, 2, 3]
+  var b = a
+  b.append(4)
+  expect a.length == 3
+  expect b.length == 4
+  var orders: Map<Int, Order> = {}
+  orders[1] = Order(id: 1)
+  orders[1].items.append("pen")
+  orders[1].items.append("ink")
+  let snapshot = orders
+  orders[1].items.append("paper")
+  expect snapshot[1] == Order(id: 1, items: ["pen", "ink"])
+  expect orders[1] != none
+}
+
+test "errors through lambdas" {
+  expect (try parse_all(["1", "2"])) == [1, 2]
+  let err = expect throws parse_all(["1", "x"])
+  expect err.message() == "\"x\" is not a whole number"
+}
+
+test "closures capture a copy" {
+  var base = 10
+  let add = make_counter(base)
+  base = 100
+  expect add(5) == 15
+  let items = [3, 1, 2]
+  let scaled = items.map(x => x * base)
+  expect scaled == [300, 100, 200]
+}
+
+test "maps, sets and grouping" {
+  let words = "b a c a b a".words()
+  let counts = words.count_each()
+  expect counts["a"] == 3
+  expect counts.keys() == ["b", "a", "c"]
+  let groups = [1, 2, 3, 4, 5, 6].group_by(x => x % 3)
+  expect groups[0] == [3, 6]
+  var seen = Set<Text>()
+  for w in words {
+    seen.add(w)
+  }
+  expect seen.length == 3
+  expect seen.contains("c")
+  var m = {"x": 1}
+  m.remove("x")
+  expect m.is_empty()
+}
+
+test "text" {
+  let t = "  Hello, World  "
+  expect t.trim() == "Hello, World"
+  expect t.trim().lower() == "hello, world"
+  expect "a,b,,c".split(",") == ["a", "b", "", "c"]
+  expect "héllo".length == 5
+  expect "héllo".slice(from: 1, to: 3) == "él"
+  expect "7".pad_start(width: 3, fill: "0") == "007"
+  expect "x".repeat(3) == "xxx"
+  expect "a-b".replace(old: "-", new: "+") == "a+b"
+  expect ["a", "b"].join("/") == "a/b"
+  let p = Point(x: 1, y: 2)
+  expect "${p}" == "Point(x: 1, y: 2)"
+  expect "${[p]}" == "[Point(x: 1, y: 2)]"
+  expect "${["a"]}" == "[\"a\"]"
+  let maybe: Int? = none
+  expect "${maybe}" == "none"
+}
+
+test "sorting" {
+  let pts = [Point(x: 3, y: 0), Point(x: 1, y: 5), Point(x: 2, y: 5)]
+  expect pts.sorted_by(p => p.x).map(p => p.x) == [1, 2, 3]
+  expect pts.sorted_by(p => p.y).map(p => p.x) == [3, 1, 2]
+  expect [5, 3, 9, 1].sorted() == [1, 3, 5, 9]
+  expect ["b", "a"].sorted() == ["a", "b"]
+  expect [4, 2, 7].max() == 7
+  expect [1.5, 0.5].min() == 0.5
+  expect pts.max_by(p => p.x) == Point(x: 3, y: 0)
+  expect [1, 2, 3].fold(start: 0, step: (acc, x) => acc + x) == 6
+}
+
+test "control flow" {
+  var found = -1
+  for i in 0..<100 {
+    if i * i > 50 {
+      found = i
+      break
+    }
+  }
+  expect found == 8
+  var odd = 0
+  for i in 1..=10 {
+    if i % 2 == 0 {
+      continue
+    }
+    odd += 1
+  }
+  expect odd == 5
+  var n = 0
+  while n < 1000 {
+    n += 7
+  }
+  expect n == 1001
+  let label = if n > 1000 { "big" } else { "small" }
+  expect label == "big"
+}
+
+test "flow typing" {
+  let values: Map<Text, Int> = {"a": 1}
+  let v = values["a"]
+  if v is none {
+    panic("missing")
+  }
+  expect v + 1 == 2
+  let x = values["zzz"] ?? 42
+  expect x == 42
+}
+
+test "integer division" {
+  expect 7.div(2) == 3
+  expect (-7).div(2) == -4
+  expect -7 % 3 == 2
+  expect 2.pow(10) == 1024
+  expect 10.to_float() / 4.0 == 2.5
+  expect 2.5.round() == 3
+}

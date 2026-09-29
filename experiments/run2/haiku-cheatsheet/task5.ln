@@ -1,0 +1,39 @@
+type GitHubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_github_user(username: Text) -> GitHubUser throws
+  let url = "https://api.github.com/users/{username}"
+  let json_text = try web.get(url)
+  return try json.decode<GitHubUser>(json_text)
+
+fn print_user(user: GitHubUser)
+  let name = user.name ?? "unknown"
+  let bio = user.bio ?? "no bio"
+  print("{user.login}: {name} - {bio}")
+
+fn main()
+  parallel
+    let user1 = try fetch_github_user("octocat") catch none
+    let user2 = try fetch_github_user("torvalds") catch none
+    let user3 = try fetch_github_user("gvanrossum") catch none
+
+  if user1 is some(u)
+    print_user(u)
+  else
+    print("Failed to fetch octocat")
+
+  if user2 is some(u)
+    print_user(u)
+  else
+    print("Failed to fetch torvalds")
+
+  if user3 is some(u)
+    print_user(u)
+  else
+    print("Failed to fetch gvanrossum")
+
+test "github_user_type"
+  let user = GitHubUser(login: "test", name: none, bio: none)
+  expect user.login == "test"

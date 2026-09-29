@@ -1,0 +1,3214 @@
+// Type checking: ast::Module -> types::Program.
+//
+// Declarations are collected first (types, then signatures), then every
+// function body is checked into the typed tree. Inference is local:
+// bidirectional checking plus unification variables inside one body.
+
+use crate::ast::{self, BinOp, Expr, ExprKind, Pattern, Stmt, TypeExpr, UnOp};
+use crate::diag::{Diag, Span};
+use crate::types::*;
+use std::collections::{HashMap, HashSet};
+
+#[derive(Clone, Copy, Debug)]
+enum Global {
+    Fn(FnId),
+    Type(DefId),
+}
+
+struct LambdaCtx {
+    level: usize,
+    captures: Vec<LocalId>,
+    throws: bool,
+    // `None` while the lambda's return type is still unknown
+    ret: Ty,
+}
+
+struct FnCtx {
+    locals: Vec<LocalDef>,
+    level: Vec<usize>, // lambda nesting level where each local was declared
+    scopes: Vec<HashMap<String, LocalId>>,
+    generics: Vec<String>,
+    vars: Vec<Option<Ty>>,
+    ret: Ty,
+    throws_ok: bool,
+    uses_throw: bool,
+    in_test: bool,
+    lambdas: Vec<LambdaCtx>,
+    loops: Vec<usize>, // lambda level of each enclosing loop
+    self_local: Option<LocalId>,
+    self_mutable: bool,
+    // set by `try` / `expect throws` for the call right below it
+    in_try: bool,
+    // the expression is a statement: `if`/`match` produce no value
+    stmt_pos: bool,
+    prelude: bool,
+}
+
+pub struct Checker {
+    pub prog: Program,
+    pub diags: Vec<Diag>,
+    user: HashMap<String, Global>,
+    prelude: HashMap<String, Global>,
+    prim: HashMap<DefId, Ty>,
+    f: Option<FnCtx>,
+    // AST of every function (methods included) by FnId, for body checking
+    fn_asts: Vec<Option<(ast::FnDecl, bool)>>,
+}
+
+fn orderable(t: &Ty) -> bool {
+    matches!(t, Ty::Int | Ty::Float | Ty::Text | Ty::Bool)
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for i in 1..=a.len() {
+        let mut cur = vec![i; b.len() + 1];
+        for j in 1..=b.len() {
+            let c = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            cur[j] = (prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + c);
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+fn synonym(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "size" | "len" | "count_of" => "length",
+        "push" | "add_item" | "push_back" => "append",
+        "skip" => "drop",
+        "toString" | "to_string" | "str" => "to_text",
+        "reduce" | "inject" => "fold",
+        "includes" | "has" => "contains",
+        "extend" => "append_all",
+        "get_or" | "unwrap_or" => "??",
+        "toLowerCase" | "lowercase" => "lower",
+        "toUpperCase" | "uppercase" => "upper",
+        "strip" => "trim",
+        "startsWith" => "starts_with",
+        "endsWith" => "ends_with",
+        "filter_map" => "map + filter",
+        "reverse_sorted" => "sorted().reversed()",
+        _ => return None,
+    })
+}
+
+pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> Option<String> {
+    if let Some(s) = synonym(name) {
+        return Some(s.to_string());
+    }
+    let mut best: Option<(usize, &String)> = None;
+    for c in candidates {
+        let d = levenshtein(name, c);
+        if d <= 2 && d < name.len() && best.map(|(bd, _)| d < bd).unwrap_or(true) {
+            best = Some((d, c));
+        }
+    }
+    best.map(|(_, c)| c.clone())
+}
+
+impl Checker {
+    pub fn new() -> Checker {
+        Checker {
+            prog: Program {
+                defs: vec![],
+                fns: vec![],
+                tests: vec![],
+                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0 },
+                main: None,
+            },
+            diags: vec![],
+            user: HashMap::new(),
+            prelude: HashMap::new(),
+            prim: HashMap::new(),
+            f: None,
+            fn_asts: vec![],
+        }
+    }
+
+    fn err(&mut self, span: Span, msg: impl Into<String>) {
+        self.diags.push(Diag::new(span, msg));
+    }
+    fn err_help(&mut self, span: Span, msg: impl Into<String>, help: impl Into<String>) {
+        self.diags.push(Diag::new(span, msg).help(help));
+    }
+    fn show(&self, t: &Ty) -> String {
+        let t = self.resolve(t);
+        self.prog.show(&t)
+    }
+
+    fn lookup_global(&self, name: &str, prelude: bool) -> Option<Global> {
+        if !prelude {
+            if let Some(g) = self.user.get(name) {
+                return Some(*g);
+            }
+        }
+        self.prelude.get(name).copied()
+    }
+
+    // ================= declaration collection =================
+
+    pub fn check_program(&mut self, prelude: &ast::Module, user: &ast::Module) {
+        self.collect_types(prelude, true);
+        self.collect_types(user, false);
+        let pl = |c: &Checker, n: &str| match c.prelude.get(n) {
+            Some(Global::Type(d)) => *d,
+            _ => panic!("prelude type {} missing", n),
+        };
+        self.prog.b = Builtins {
+            int: pl(self, "Int"),
+            float: pl(self, "Float"),
+            bool_: pl(self, "Bool"),
+            text: pl(self, "Text"),
+            list: pl(self, "List"),
+            map: pl(self, "Map"),
+            set: pl(self, "Set"),
+            entry: pl(self, "Entry"),
+            indexed: pl(self, "Indexed"),
+            error: pl(self, "Error"),
+            failure: pl(self, "Failure"),
+        };
+        let b = &self.prog.b;
+        self.prim.insert(b.int, Ty::Int);
+        self.prim.insert(b.float, Ty::Float);
+        self.prim.insert(b.bool_, Ty::Bool);
+        self.prim.insert(b.text, Ty::Text);
+        self.resolve_type_bodies(prelude, true);
+        self.resolve_type_bodies(user, false);
+        self.collect_fns(prelude, true);
+        self.collect_fns(user, false);
+        self.check_implements(prelude, true);
+        self.check_implements(user, false);
+        self.check_defaults(prelude, true);
+        self.check_defaults(user, false);
+        // bodies
+        for id in 0..self.fn_asts.len() {
+            if let Some((decl, is_prelude)) = self.fn_asts[id].clone() {
+                if decl.body.is_some() {
+                    self.check_fn_body(id, &decl, is_prelude);
+                }
+            }
+        }
+        for item in &user.items {
+            if let ast::Item::Test(t) = item {
+                self.check_test(t);
+            }
+        }
+        if let Some(Global::Fn(id)) = self.user.get("main").copied() {
+            let f = &self.prog.fns[id];
+            if !f.params.is_empty() || f.ret != Ty::Unit {
+                let sp = f.span;
+                self.err(sp, "`main` takes no parameters and returns nothing");
+            }
+            self.prog.main = Some(id);
+        }
+    }
+
+    fn add_def(&mut self, name: &str, generics: Vec<String>, span: Span, prelude: bool) -> DefId {
+        self.prog.defs.push(TypeDef {
+            name: name.to_string(),
+            generics,
+            kind: TypeKind::Builtin,
+            methods: HashMap::new(),
+            props: vec![],
+            implements: vec![],
+            span,
+            is_prelude: prelude,
+        });
+        let id = self.prog.defs.len() - 1;
+        let map = if prelude { &mut self.prelude } else { &mut self.user };
+        if map.insert(name.to_string(), Global::Type(id)).is_some() {
+            self.err(span, format!("`{}` is declared twice", name));
+        }
+        id
+    }
+
+    fn collect_types(&mut self, m: &ast::Module, prelude: bool) {
+        for item in &m.items {
+            match item {
+                ast::Item::Record(r) => {
+                    self.add_def(&r.name, r.generics.clone(), r.span, prelude);
+                }
+                ast::Item::Enum(e) => {
+                    self.add_def(&e.name, e.generics.clone(), e.span, prelude);
+                }
+                ast::Item::Newtype(n) => {
+                    self.add_def(&n.name, vec![], n.span, prelude);
+                }
+                ast::Item::Interface(i) => {
+                    self.add_def(&i.name, vec![], i.span, prelude);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn def_id(&self, name: &str, prelude: bool) -> DefId {
+        match self.lookup_global(name, prelude) {
+            Some(Global::Type(d)) => d,
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn resolve_texpr(&mut self, t: &TypeExpr, generics: &[String], prelude: bool) -> Ty {
+        match t {
+            TypeExpr::Optional(inner, sp) => {
+                let i = self.resolve_texpr(inner, generics, prelude);
+                if matches!(i, Ty::Opt(_)) {
+                    self.err(*sp, "`T??` is not a type: a value is either missing or not");
+                }
+                Ty::opt(i)
+            }
+            TypeExpr::Func { params, ret, throws, .. } => {
+                let ps = params.iter().map(|p| self.resolve_texpr(p, generics, prelude)).collect();
+                let r = match ret {
+                    Some(r) => self.resolve_texpr(r, generics, prelude),
+                    None => Ty::Unit,
+                };
+                Ty::func(ps, r, *throws)
+            }
+            TypeExpr::Combo(parts, sp) => {
+                let mut ids = vec![];
+                for p in parts {
+                    match self.resolve_texpr(p, generics, prelude) {
+                        Ty::Iface(v) => ids.extend(v),
+                        Ty::Err => return Ty::Err,
+                        other => {
+                            let s = self.show(&other);
+                            self.err(*sp, format!("`A + B` combines interfaces, but `{}` is not an interface", s));
+                            return Ty::Err;
+                        }
+                    }
+                }
+                ids.sort();
+                ids.dedup();
+                Ty::Iface(ids)
+            }
+            TypeExpr::Named { path, args, span } => {
+                if path.len() > 1 {
+                    self.err(*span, format!("unknown type `{}`", path.join(".")));
+                    return Ty::Err;
+                }
+                let name = &path[0];
+                if let Some(i) = generics.iter().position(|g| g == name) {
+                    if !args.is_empty() {
+                        self.err(*span, "a type parameter takes no type arguments");
+                    }
+                    return Ty::Param(i as u32);
+                }
+                let targs: Vec<Ty> = args.iter().map(|a| self.resolve_texpr(a, generics, prelude)).collect();
+                match name.as_str() {
+                    "Never" if prelude => return Ty::Never,
+                    _ => {}
+                }
+                match self.lookup_global(name, prelude) {
+                    Some(Global::Type(d)) => {
+                        if let Some(p) = self.prim.get(&d) {
+                            return p.clone();
+                        }
+                        let def = &self.prog.defs[d];
+                        if let TypeKind::Interface { .. } = def.kind {
+                            return Ty::Iface(vec![d]);
+                        }
+                        // interfaces are resolved before their kind is set; check by AST later
+                        if def.generics.len() != targs.len() {
+                            let n = def.generics.len();
+                            let dn = def.name.clone();
+                            if n == 0 {
+                                self.err(*span, format!("`{}` takes no type arguments", dn));
+                            } else {
+                                self.err(*span, format!("`{}` takes {} type argument(s): `{}<{}>`", dn, n, dn, def.generics.join(", ")));
+                            }
+                            return Ty::Err;
+                        }
+                        Ty::Adt(d, targs)
+                    }
+                    _ => {
+                        let hint = match name.as_str() {
+                            "String" | "str" | "string" => Some("Text"),
+                            "int" | "i64" | "Integer" | "Long" => Some("Int"),
+                            "float" | "Double" | "double" | "f64" | "Number" => Some("Float"),
+                            "bool" | "Boolean" => Some("Bool"),
+                            "Array" | "Vec" | "Vector" | "ArrayList" => Some("List"),
+                            "Dict" | "HashMap" | "Dictionary" | "Record" => Some("Map"),
+                            "HashSet" => Some("Set"),
+                            "Option" | "Optional" | "Maybe" => Some("T?"),
+                            "Result" => Some("`throws` on the function"),
+                            "void" | "Void" | "Unit" | "None" => Some("no `->` at all"),
+                            _ => None,
+                        };
+                        match hint {
+                            Some(h) => self.err_help(*span, format!("unknown type `{}`", name), format!("use {}", h)),
+                            None => self.err(*span, format!("unknown type `{}`", name)),
+                        }
+                        Ty::Err
+                    }
+                }
+            }
+        }
+    }
+
+    fn resolve_type_bodies(&mut self, m: &ast::Module, prelude: bool) {
+        // interfaces first so that fields can mention them
+        for item in &m.items {
+            if let ast::Item::Interface(i) = item {
+                let d = self.def_id(&i.name, prelude);
+                self.prog.defs[d].kind = TypeKind::Interface { methods: vec![] };
+            }
+        }
+        for item in &m.items {
+            match item {
+                ast::Item::Record(r) => {
+                    let d = self.def_id(&r.name, prelude);
+                    let mut fields = vec![];
+                    let mut props = vec![];
+                    let mut seen = HashSet::new();
+                    for f in &r.fields {
+                        if !seen.insert(f.name.clone()) {
+                            self.err(f.span, format!("field `{}` is declared twice", f.name));
+                        }
+                        let ty = self.resolve_texpr(&f.ty, &r.generics, prelude);
+                        if r.builtin {
+                            props.push((f.name.clone(), ty));
+                        } else {
+                            fields.push(FieldDef { name: f.name.clone(), ty, default: None, span: f.span });
+                        }
+                    }
+                    let def = &mut self.prog.defs[d];
+                    def.props = props;
+                    if !r.builtin {
+                        def.kind = TypeKind::Record { fields };
+                    }
+                }
+                ast::Item::Enum(e) => {
+                    let d = self.def_id(&e.name, prelude);
+                    let mut variants = vec![];
+                    let mut seen = HashSet::new();
+                    for v in &e.variants {
+                        if !seen.insert(v.name.clone()) {
+                            self.err(v.span, format!("variant `{}` is declared twice", v.name));
+                        }
+                        let fields = v
+                            .fields
+                            .iter()
+                            .map(|f| FieldDef {
+                                name: f.name.clone(),
+                                ty: self.resolve_texpr(&f.ty, &e.generics, prelude),
+                                default: None,
+                                span: f.span,
+                            })
+                            .collect();
+                        variants.push(VariantDef { name: v.name.clone(), fields });
+                    }
+                    self.prog.defs[d].kind = TypeKind::Enum { variants };
+                }
+                ast::Item::Newtype(n) => {
+                    let d = self.def_id(&n.name, prelude);
+                    let ty = self.resolve_texpr(&n.ty, &[], prelude);
+                    if let Ty::Adt(inner, _) = &ty {
+                        if let TypeKind::Newtype(_) = self.prog.defs[*inner].kind {
+                            self.err(n.span, "a new type can't wrap another new type");
+                        }
+                    }
+                    self.prog.defs[d].kind = TypeKind::Newtype(ty);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn new_fn(&mut self, decl: &ast::FnDecl, owner: Option<DefId>, owner_generics: &[String], prelude: bool) -> FnId {
+        let mut generics: Vec<String> = owner_generics.to_vec();
+        for g in &decl.generics {
+            if generics.contains(g) {
+                self.err(decl.span, format!("type parameter `{}` is already declared by the type", g));
+            }
+            generics.push(g.clone());
+        }
+        let mut params = vec![];
+        let mut seen = HashSet::new();
+        for p in &decl.params {
+            if !seen.insert(p.name.clone()) {
+                self.err(p.span, format!("parameter `{}` is declared twice", p.name));
+            }
+            params.push((p.name.clone(), self.resolve_texpr(&p.ty, &generics, prelude)));
+        }
+        let ret = match &decl.ret {
+            Some(t) => self.resolve_texpr(t, &generics, prelude),
+            None => Ty::Unit,
+        };
+        let self_mode = if decl.mutating {
+            SelfMode::Mutating
+        } else if decl.has_self {
+            SelfMode::Value
+        } else {
+            SelfMode::None
+        };
+        if owner.is_some() && self_mode == SelfMode::None {
+            self.err_help(decl.span, "a method takes `self` as its first parameter", "write `fn name(self, ...)`; a function that doesn't need `self` goes outside the type");
+        }
+        self.prog.fns.push(FnDef {
+            name: decl.name.clone(),
+            owner,
+            generics,
+            self_mode,
+            params,
+            ret,
+            throws: decl.throws || decl.rethrows,
+            rethrows: decl.rethrows,
+            intrinsic: decl.intrinsic,
+            body: None,
+            span: decl.span,
+            is_prelude: prelude,
+        });
+        self.fn_asts.push(Some((decl.clone(), prelude)));
+        self.prog.fns.len() - 1
+    }
+
+    fn add_methods(&mut self, d: DefId, methods: &[ast::FnDecl], generics: &[String], prelude: bool) {
+        for m in methods {
+            let id = self.new_fn(m, Some(d), generics, prelude);
+            if self.prog.defs[d].methods.insert(m.name.clone(), id).is_some() {
+                self.err(m.span, format!("method `{}` is declared twice (there is no overloading)", m.name));
+            }
+        }
+    }
+
+    fn collect_fns(&mut self, m: &ast::Module, prelude: bool) {
+        for item in &m.items {
+            match item {
+                ast::Item::Fn(f) => {
+                    let id = self.new_fn(f, None, &[], prelude);
+                    let map = if prelude { &mut self.prelude } else { &mut self.user };
+                    if map.insert(f.name.clone(), Global::Fn(id)).is_some() {
+                        self.err(f.span, format!("`{}` is declared twice (there is no overloading)", f.name));
+                    }
+                    if f.body.is_none() && !prelude {
+                        self.err(f.span, "a function needs a body: `{ ... }`");
+                    }
+                }
+                ast::Item::Record(r) => {
+                    let d = self.def_id(&r.name, prelude);
+                    self.add_methods(d, &r.methods, &r.generics, prelude);
+                }
+                ast::Item::Enum(e) => {
+                    let d = self.def_id(&e.name, prelude);
+                    self.add_methods(d, &e.methods, &e.generics, prelude);
+                }
+                ast::Item::Interface(i) => {
+                    let d = self.def_id(&i.name, prelude);
+                    let mut ids = vec![];
+                    for m in &i.methods {
+                        let id = self.new_fn(m, Some(d), &[], prelude);
+                        // interface methods have no body to check
+                        self.fn_asts[id] = None;
+                        self.prog.defs[d].methods.insert(m.name.clone(), id);
+                        ids.push(id);
+                    }
+                    self.prog.defs[d].kind = TypeKind::Interface { methods: ids };
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn check_implements(&mut self, m: &ast::Module, prelude: bool) {
+        for item in &m.items {
+            let (name, impls, generics) = match item {
+                ast::Item::Record(r) => (&r.name, &r.implements, &r.generics),
+                ast::Item::Enum(e) => (&e.name, &e.implements, &e.generics),
+                _ => continue,
+            };
+            let d = self.def_id(name, prelude);
+            for (iname, isp) in impls {
+                let iface = match self.lookup_global(iname, prelude) {
+                    Some(Global::Type(i)) if matches!(self.prog.defs[i].kind, TypeKind::Interface { .. }) => i,
+                    _ => {
+                        self.err(*isp, format!("`{}` is not an interface", iname));
+                        continue;
+                    }
+                };
+                if !generics.is_empty() {
+                    self.err(*isp, "a generic type can't implement an interface yet");
+                    continue;
+                }
+                self.prog.defs[d].implements.push(iface);
+                let imethods = match &self.prog.defs[iface].kind {
+                    TypeKind::Interface { methods } => methods.clone(),
+                    _ => vec![],
+                };
+                for im in imethods {
+                    let want = self.prog.fns[im].clone();
+                    match self.prog.defs[d].methods.get(&want.name).copied() {
+                        None => {
+                            let sig = self.sig_text(&want);
+                            self.err_help(*isp, format!("`{}` doesn't have the method `{}` required by `{}`", name, want.name, iname), format!("add `{}`", sig));
+                        }
+                        Some(have) => {
+                            let h = self.prog.fns[have].clone();
+                            let same_params = h.params.len() == want.params.len()
+                                && h.params.iter().zip(&want.params).all(|(a, b)| a.1 == b.1);
+                            let mode_ok = h.self_mode == want.self_mode
+                                || (want.self_mode == SelfMode::Mutating && h.self_mode == SelfMode::Value);
+                            let throws_ok = want.throws || !h.throws;
+                            if !same_params || h.ret != want.ret || !mode_ok || !throws_ok || !h.generics.is_empty() {
+                                let sig = self.sig_text(&want);
+                                self.err_help(h.span, format!("`{}` doesn't match the method required by `{}`", want.name, iname), format!("the interface declares `{}`", sig));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn sig_text(&self, f: &FnDef) -> String {
+        let mut ps = vec![];
+        if f.self_mode != SelfMode::None {
+            ps.push("self".to_string());
+        }
+        for (n, t) in &f.params {
+            ps.push(format!("{}: {}", n, self.prog.show(t)));
+        }
+        let mut s = format!("{}fn {}({})", if f.self_mode == SelfMode::Mutating { "mutating " } else { "" }, f.name, ps.join(", "));
+        if f.throws {
+            s += " throws";
+        }
+        if f.ret != Ty::Unit {
+            s += &format!(" -> {}", self.prog.show(&f.ret));
+        }
+        s
+    }
+
+    fn check_defaults(&mut self, m: &ast::Module, prelude: bool) {
+        for item in &m.items {
+            if let ast::Item::Record(r) = item {
+                if r.builtin {
+                    continue;
+                }
+                let d = self.def_id(&r.name, prelude);
+                for (i, f) in r.fields.iter().enumerate() {
+                    if let Some(def) = &f.default {
+                        self.begin_fn(r.generics.clone(), Ty::Unit, false, prelude);
+                        let fty = match &self.prog.defs[d].kind {
+                            TypeKind::Record { fields } => fields[i].ty.clone(),
+                            _ => Ty::Err,
+                        };
+                        let e = self.expr_coerce(def, &fty);
+                        let body = self.end_fn(TBlock { stmts: vec![], tail: Some(Box::new(e)), ty: fty });
+                        let e = *body.block.tail.unwrap();
+                        if !body.locals.is_empty() {
+                            self.err(f.span, "a default value can't declare names");
+                        }
+                        if let TypeKind::Record { fields } = &mut self.prog.defs[d].kind {
+                            fields[i].default = Some(e);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ================= function bodies =================
+
+    fn begin_fn(&mut self, generics: Vec<String>, ret: Ty, throws_ok: bool, prelude: bool) {
+        self.f = Some(FnCtx {
+            locals: vec![],
+            level: vec![],
+            scopes: vec![HashMap::new()],
+            generics,
+            vars: vec![],
+            ret,
+            throws_ok,
+            uses_throw: false,
+            in_test: false,
+            lambdas: vec![],
+            loops: vec![],
+            self_local: None,
+            self_mutable: false,
+            in_try: false,
+            stmt_pos: false,
+            prelude,
+        });
+    }
+
+    fn fcx(&mut self) -> &mut FnCtx {
+        self.f.as_mut().unwrap()
+    }
+    fn fc(&self) -> &FnCtx {
+        self.f.as_ref().unwrap()
+    }
+
+    fn end_fn(&mut self, mut block: TBlock) -> TBody {
+        let mut locals = self.fcx().locals.clone();
+        let mut unresolved: Option<Span> = None;
+        self.zonk_block(&mut block, &mut unresolved);
+        for l in &mut locals {
+            l.ty = self.zonk_ty(&l.ty, &mut None);
+        }
+        if let Some(sp) = unresolved {
+            self.err_help(sp, "can't figure out the type here", "add a type: `let xs: List<Int> = []`");
+        }
+        let params = vec![];
+        self.f = None;
+        TBody { locals, params, block }
+    }
+
+    fn check_fn_body(&mut self, id: FnId, decl: &ast::FnDecl, prelude: bool) {
+        let f = self.prog.fns[id].clone();
+        self.begin_fn(f.generics.clone(), f.ret.clone(), f.throws, prelude);
+        let mut params = vec![];
+        if f.self_mode != SelfMode::None {
+            let owner = f.owner.unwrap();
+            let n_owner = self.prog.defs[owner].generics.len();
+            let self_ty = match self.prim.get(&owner) {
+                Some(p) => p.clone(),
+                None => Ty::Adt(owner, (0..n_owner as u32).map(Ty::Param).collect()),
+            };
+            let l = self.declare(decl.span, "self", self_ty, false);
+            self.fcx().self_local = Some(l);
+            self.fcx().self_mutable = f.self_mode == SelfMode::Mutating;
+            params.push(l);
+        }
+        for (i, (name, ty)) in f.params.iter().enumerate() {
+            let l = self.declare(decl.params[i].span, name, ty.clone(), false);
+            params.push(l);
+        }
+        let body = decl.body.as_ref().unwrap();
+        let block = self.block(body, false, None);
+        if f.ret != Ty::Unit && block.ty != Ty::Never && !matches!(f.ret, Ty::Never) {
+            if !self.block_returns(body) {
+                self.err_help(body.span, format!("`{}` must return a `{}` at the end", f.name, self.show(&f.ret)), "add `return ...` as the last line");
+            }
+        }
+        let uses_throw = self.fc().uses_throw;
+        let mut tb = self.end_fn(block);
+        tb.params = params;
+        if f.throws && !uses_throw && !prelude && !f.intrinsic {
+            // a `throws` function that can never fail is allowed (interfaces), no error
+        }
+        self.prog.fns[id].body = Some(tb);
+    }
+
+    fn block_returns(&self, b: &ast::Block) -> bool {
+        match b.stmts.last() {
+            Some(Stmt::Return(..)) | Some(Stmt::Throw(..)) => true,
+            Some(Stmt::Expr(e)) => self.expr_returns(e),
+            Some(Stmt::While { cond, .. }) => matches!(cond.kind, ExprKind::Bool(true)),
+            _ => false,
+        }
+    }
+    fn expr_returns(&self, e: &Expr) -> bool {
+        match &e.kind {
+            ExprKind::If { then, els: Some(els), .. } => self.block_returns(then) && self.expr_returns(els),
+            ExprKind::Block(b) => self.block_returns(b),
+            ExprKind::Match { arms, .. } => arms.iter().all(|a| self.expr_returns(&a.body)),
+            ExprKind::Diverge(_) => true,
+            ExprKind::Call { callee, .. } => matches!(&callee.kind, ExprKind::Ident(n) if n == "panic"),
+            _ => false,
+        }
+    }
+
+    fn check_test(&mut self, t: &ast::TestDecl) {
+        self.begin_fn(vec![], Ty::Unit, true, false);
+        self.fcx().in_test = true;
+        let block = self.block(&t.body, false, None);
+        let body = self.end_fn(block);
+        self.prog.tests.push(TestDef { name: t.name.clone(), body, span: t.span });
+    }
+
+    // ---- locals and scopes ----
+
+    fn declare(&mut self, span: Span, name: &str, ty: Ty, mutable: bool) -> LocalId {
+        if name != "self" && name != "_" {
+            let exists = self.fc().scopes.iter().any(|s| s.contains_key(name));
+            if exists {
+                self.err_help(span, format!("`{}` is already declared", name), "names can't be redeclared (no shadowing): pick another name, or use `var` and assign");
+            }
+        }
+        let level = self.fc().lambdas.len();
+        let fc = self.fcx();
+        fc.locals.push(LocalDef { name: name.to_string(), ty, mutable });
+        fc.level.push(level);
+        let id = fc.locals.len() - 1;
+        fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
+        id
+    }
+
+    // Rebinds a name in the current scope (flow typing), without the
+    // redeclaration check.
+    fn rebind(&mut self, name: &str, ty: Ty) -> LocalId {
+        let level = self.fc().lambdas.len();
+        let fc = self.fcx();
+        fc.locals.push(LocalDef { name: name.to_string(), ty, mutable: false });
+        fc.level.push(level);
+        let id = fc.locals.len() - 1;
+        fc.scopes.last_mut().unwrap().insert(name.to_string(), id);
+        id
+    }
+
+    fn lookup_local(&mut self, name: &str) -> Option<LocalId> {
+        let fc = self.fc();
+        let mut found = None;
+        for s in fc.scopes.iter().rev() {
+            if let Some(id) = s.get(name) {
+                found = Some(*id);
+                break;
+            }
+        }
+        let id = found?;
+        self.note_use(id);
+        Some(id)
+    }
+
+    // Records captures for every lambda between the local's level and now.
+    fn note_use(&mut self, id: LocalId) {
+        let fc = self.fcx();
+        let lvl = fc.level[id];
+        for lc in fc.lambdas.iter_mut() {
+            if lc.level > lvl && !lc.captures.contains(&id) {
+                lc.captures.push(id);
+            }
+        }
+    }
+
+    fn is_captured(&self, id: LocalId) -> bool {
+        let fc = self.fc();
+        fc.level[id] < fc.lambdas.len()
+    }
+
+    // ---- inference variables ----
+
+    fn fresh(&mut self) -> Ty {
+        let fc = self.fcx();
+        fc.vars.push(None);
+        Ty::Var((fc.vars.len() - 1) as u32)
+    }
+
+    fn resolve(&self, t: &Ty) -> Ty {
+        match t {
+            Ty::Var(v) => match self.f.as_ref().and_then(|f| f.vars.get(*v as usize).cloned().flatten()) {
+                Some(t) => self.resolve(&t),
+                None => t.clone(),
+            },
+            Ty::Adt(d, a) => Ty::Adt(*d, a.iter().map(|x| self.resolve(x)).collect()),
+            Ty::Opt(x) => Ty::opt(self.resolve(x)),
+            Ty::Func(f) => Ty::Func(Box::new(FnTy {
+                params: f.params.iter().map(|x| self.resolve(x)).collect(),
+                ret: self.resolve(&f.ret),
+                throws: f.throws,
+            })),
+            t => t.clone(),
+        }
+    }
+
+    fn occurs(&self, v: u32, t: &Ty) -> bool {
+        match self.resolve(t) {
+            Ty::Var(w) => w == v,
+            Ty::Adt(_, a) => a.iter().any(|x| self.occurs(v, x)),
+            Ty::Opt(x) => self.occurs(v, &x),
+            Ty::Func(f) => f.params.iter().any(|x| self.occurs(v, x)) || self.occurs(v, &f.ret),
+            _ => false,
+        }
+    }
+
+    // Unifies exactly (no coercions). Function types unify ignoring `throws`
+    // only when `loose` is set.
+    fn unify(&mut self, a: &Ty, b: &Ty) -> bool {
+        let a = self.resolve(a);
+        let b = self.resolve(b);
+        match (&a, &b) {
+            (Ty::Err, _) | (_, Ty::Err) => true,
+            (Ty::Var(x), Ty::Var(y)) if x == y => true,
+            (Ty::Var(x), t) | (t, Ty::Var(x)) => {
+                if self.occurs(*x, t) {
+                    return false;
+                }
+                self.fcx().vars[*x as usize] = Some(t.clone());
+                true
+            }
+            (Ty::Adt(d1, a1), Ty::Adt(d2, a2)) => {
+                d1 == d2 && a1.len() == a2.len() && a1.clone().iter().zip(a2.clone().iter()).all(|(x, y)| self.unify(x, y))
+            }
+            (Ty::Opt(x), Ty::Opt(y)) => {
+                let (x, y) = (*x.clone(), *y.clone());
+                self.unify(&x, &y)
+            }
+            (Ty::Func(f), Ty::Func(g)) => {
+                if f.params.len() != g.params.len() || f.throws != g.throws {
+                    return false;
+                }
+                let (f, g) = (f.clone(), g.clone());
+                f.params.iter().zip(g.params.iter()).all(|(x, y)| self.unify(x, y)) && self.unify(&f.ret, &g.ret)
+            }
+            _ => a == b,
+        }
+    }
+
+    fn implements(&self, d: DefId, ifaces: &[DefId]) -> bool {
+        ifaces.iter().all(|i| self.prog.defs[d].implements.contains(i))
+    }
+
+    // Checks that `e` fits `expected`, inserting conversions:
+    // T -> T?, a type -> an interface it implements, Never -> anything,
+    // a non-throwing function -> a throwing function type.
+    fn coerce(&mut self, e: TExpr, expected: &Ty) -> TExpr {
+        let exp = self.resolve(expected);
+        let act = self.resolve(&e.ty);
+        if act == Ty::Never || exp == Ty::Err || act == Ty::Err {
+            return TExpr { ty: if act == Ty::Never { exp } else { act }, ..e };
+        }
+        match (&act, &exp) {
+            (Ty::Opt(_), Ty::Opt(_)) | (Ty::Var(_), _) | (_, Ty::Var(_)) => {}
+            (_, Ty::Opt(inner)) => {
+                let inner = *inner.clone();
+                let e = self.coerce(e, &inner);
+                let sp = e.span;
+                return TExpr { kind: TK::Some(Box::new(e)), ty: exp, span: sp };
+            }
+            (Ty::Adt(d, _), Ty::Iface(ids)) => {
+                if self.implements(*d, ids) {
+                    let sp = e.span;
+                    return TExpr { kind: TK::ToIface(Box::new(e)), ty: exp, span: sp };
+                }
+            }
+            (Ty::Iface(have), Ty::Iface(want)) if have != want => {
+                if want.iter().all(|w| have.contains(w)) {
+                    let sp = e.span;
+                    return TExpr { kind: TK::ToIface(Box::new(e)), ty: exp, span: sp };
+                }
+            }
+            (Ty::Func(f), Ty::Func(g)) if !f.throws && g.throws => {
+                let mut f2 = (**f).clone();
+                f2.throws = true;
+                if self.unify(&Ty::Func(Box::new(f2)), &exp) {
+                    let sp = e.span;
+                    // calling convention changes: lowered as an adapter
+                    return TExpr { kind: TK::Wrap(Box::new(e)), ty: exp, span: sp };
+                }
+            }
+            _ => {}
+        }
+        if !self.unify(&act, &exp) {
+            self.mismatch(e.span, &exp, &act);
+            return TExpr { ty: Ty::Err, ..e };
+        }
+        e
+    }
+
+    fn mismatch(&mut self, span: Span, exp: &Ty, act: &Ty) {
+        let exp = self.resolve(exp);
+        let act = self.resolve(act);
+        let es = self.prog.show(&exp);
+        let as_ = self.prog.show(&act);
+        let msg = format!("expected `{}`, found `{}`", es, as_);
+        let help: Option<String> = match (&exp, &act) {
+            (Ty::Float, Ty::Int) => Some("convert explicitly: `x.to_float()`".into()),
+            (Ty::Int, Ty::Float) => Some("convert explicitly: `x.round()`, `x.floor()` or `x.ceil()`".into()),
+            (Ty::Text, Ty::Int) | (Ty::Text, Ty::Float) | (Ty::Text, Ty::Bool) => Some("use interpolation: `\"${x}\"`, or `x.to_text()`".into()),
+            (Ty::Int, Ty::Text) => Some("parse it: `try text.to_int()`".into()),
+            (t, Ty::Opt(inner)) if **inner == *t => Some("the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`".into()),
+            (Ty::Adt(d, _), _) if matches!(self.prog.defs[*d].kind, TypeKind::Newtype(_)) => {
+                Some(format!("wrap it: `{}(x)`", self.prog.defs[*d].name))
+            }
+            (_, Ty::Adt(d, _)) if matches!(self.prog.defs[*d].kind, TypeKind::Newtype(_)) => Some("unwrap it: `x.value`".into()),
+            (Ty::Iface(ids), Ty::Adt(d, _)) => {
+                let iname = self.prog.defs[ids[0]].name.clone();
+                Some(format!("declare it: `type {} implements {} {{ ... }}`", self.prog.defs[*d].name, iname))
+            }
+            (Ty::Func(g), Ty::Func(f)) if f.throws && !g.throws => Some("this function uses `try`, but a function that can't fail is expected here".into()),
+            _ => None,
+        };
+        match help {
+            Some(h) => self.err_help(span, msg, h),
+            None => self.err(span, msg),
+        }
+    }
+
+    fn expr_coerce(&mut self, e: &Expr, expected: &Ty) -> TExpr {
+        let t = self.expr(e, Some(expected));
+        self.coerce(t, expected)
+    }
+
+    // ================= statements =================
+
+    fn block(&mut self, b: &ast::Block, want_value: bool, expected: Option<&Ty>) -> TBlock {
+        self.fcx().scopes.push(HashMap::new());
+        let mut stmts = vec![];
+        let mut tail = None;
+        let mut diverges = false;
+        let n = b.stmts.len();
+        for (i, s) in b.stmts.iter().enumerate() {
+            if diverges {
+                self.err(stmt_span(s), "this line is never reached");
+                break;
+            }
+            if want_value && i == n - 1 {
+                if let Stmt::Expr(e) = s {
+                    let te = self.expr(e, expected);
+                    if te.ty == Ty::Never {
+                        diverges = true;
+                    }
+                    tail = Some(Box::new(te));
+                    continue;
+                }
+            }
+            let ts = self.stmt(s);
+            if stmt_diverges(&ts) {
+                diverges = true;
+            }
+            // flow typing: `if x is none { <diverges> }` makes `x` a `T` below
+            if let (Stmt::Expr(e), TStmt::Expr(te)) = (s, &ts) {
+                if let Some((name, id, inner)) = self.narrowing(e, te) {
+                    stmts.push(ts);
+                    let new_id = self.rebind(&name, inner.clone());
+                    let sp = e.span;
+                    let src = TExpr { kind: TK::Local(id), ty: Ty::opt(inner.clone()), span: sp };
+                    let un = TExpr { kind: TK::Unwrap(Box::new(src)), ty: inner, span: sp };
+                    stmts.push(TStmt::Let(new_id, un));
+                    continue;
+                }
+            }
+            stmts.push(ts);
+        }
+        self.fcx().scopes.pop();
+        let ty = if diverges {
+            Ty::Never
+        } else if let Some(t) = &tail {
+            t.ty.clone()
+        } else {
+            Ty::Unit
+        };
+        if want_value && tail.is_none() && !diverges {
+            if let Some(exp) = expected {
+                let r = self.resolve(exp);
+                if r != Ty::Unit && !matches!(r, Ty::Var(_)) {
+                    self.err(b.span, format!("this block must end with a `{}` value", self.show(&r)));
+                }
+            }
+        }
+        TBlock { stmts, tail, ty }
+    }
+
+    fn narrowing(&mut self, e: &Expr, te: &TExpr) -> Option<(String, LocalId, Ty)> {
+        if let ExprKind::If { cond, els: None, .. } = &e.kind {
+            if let ExprKind::Is(scrut, Pattern::None(_)) = &cond.kind {
+                if let ExprKind::Ident(name) = &scrut.kind {
+                    if let TK::If { then, .. } = &te.kind {
+                        if then.ty == Ty::Never {
+                            let id = self.lookup_local(name)?;
+                            if let Ty::Opt(inner) = self.resolve(&self.fc().locals[id].ty) {
+                                return Some((name.clone(), id, *inner));
+                            }
+                        }
+                    }
+                    if let TK::Match { arms, .. } = &te.kind {
+                        if arms.first().map(|a| a.body.ty == Ty::Never).unwrap_or(false) {
+                            let id = self.lookup_local(name)?;
+                            if let Ty::Opt(inner) = self.resolve(&self.fc().locals[id].ty) {
+                                return Some((name.clone(), id, *inner));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn check_unused(&mut self, e: &TExpr, src: &Expr) {
+        let t = self.resolve(&e.ty);
+        if matches!(t, Ty::Unit | Ty::Never | Ty::Err) {
+            return;
+        }
+        let mut help = "use the result, or write `let _ = ...` if you really don't need it".to_string();
+        if let ExprKind::Call { callee, .. } = &src.kind {
+            if let ExprKind::Field(_, name, _) = &callee.kind {
+                let alt = match name.as_str() {
+                    "sorted" => Some("sort()"),
+                    "sorted_by" => Some("sort_by(...)"),
+                    "reversed" => Some("reverse()"),
+                    "concat" => Some("append_all(...)"),
+                    _ => None,
+                };
+                if let Some(a) = alt {
+                    help = format!("`{}` returns a new value; to change the list in place, write `{}`", name, a);
+                }
+            }
+        }
+        let ts = self.show(&t);
+        self.err_help(e.span, format!("the result (`{}`) is not used", ts), help);
+    }
+
+    fn stmt(&mut self, s: &Stmt) -> TStmt {
+        match s {
+            Stmt::Let { name, mutable, ty, value, span } => {
+                if name == "_" {
+                    if *mutable {
+                        self.err(*span, "write `let _ = ...`");
+                    }
+                    let v = self.expr(value, None);
+                    return TStmt::Discard(v);
+                }
+                let prelude = self.fc().prelude;
+                let generics = self.fc().generics.clone();
+                let v = match ty {
+                    Some(t) => {
+                        let t = self.resolve_texpr(t, &generics, prelude);
+                        self.expr_coerce(value, &t)
+                    }
+                    None => self.expr(value, None),
+                };
+                let vt = self.resolve(&v.ty);
+                if vt == Ty::Unit {
+                    self.err(value.span, "this produces no value");
+                }
+                if vt == Ty::Never {
+                    self.err(value.span, "this never produces a value");
+                }
+                let id = self.declare(*span, name, v.ty.clone(), *mutable);
+                TStmt::Let(id, v)
+            }
+            Stmt::Assign { target, op, value, span } => {
+                let place = match self.place(target, true) {
+                    Some(p) => p,
+                    None => {
+                        let _ = self.expr(value, None);
+                        return TStmt::Expr(TExpr { kind: TK::Unit, ty: Ty::Unit, span: *span });
+                    }
+                };
+                let pty = place.ty.clone();
+                let v = match op {
+                    None => self.expr_coerce(value, &pty),
+                    Some(op) => {
+                        let cur = self.place_read(&place, target.span);
+                        let rhs = self.expr(value, Some(&pty));
+                        self.binary(*op, cur, rhs, *span, Some(&pty))
+                    }
+                };
+                let v = self.coerce(v, &pty);
+                TStmt::Assign(place, v)
+            }
+            Stmt::Expr(e) => {
+                self.fcx().stmt_pos = true;
+                let te = self.expr(e, None);
+                self.fcx().stmt_pos = false;
+                let te = self.fix_stmt_expr(te);
+                self.check_unused(&te, e);
+                TStmt::Expr(te)
+            }
+            Stmt::Return(v, span) => {
+                if !self.fc().lambdas.is_empty() {
+                    self.err_help(*span, "no `return` inside a lambda", "the lambda's last line is its value");
+                }
+                let ret = self.fc().ret.clone();
+                match v {
+                    Some(v) => {
+                        if ret == Ty::Unit {
+                            self.err(v.span, "this function returns nothing (it has no `->`)");
+                            let _ = self.expr(v, None);
+                            TStmt::Return(None)
+                        } else {
+                            TStmt::Return(Some(self.expr_coerce(v, &ret)))
+                        }
+                    }
+                    None => {
+                        if ret != Ty::Unit {
+                            let r = self.show(&ret);
+                            self.err(*span, format!("return a `{}` value", r));
+                        }
+                        TStmt::Return(None)
+                    }
+                }
+            }
+            Stmt::Break(span) | Stmt::Continue(span) => {
+                let lvl = self.fc().lambdas.len();
+                match self.fc().loops.last() {
+                    Some(l) if *l == lvl => {}
+                    Some(_) => self.err(*span, "no `break`/`continue` inside a lambda"),
+                    None => self.err(*span, "`break`/`continue` outside a loop"),
+                }
+                if matches!(s, Stmt::Break(_)) {
+                    TStmt::Break
+                } else {
+                    TStmt::Continue
+                }
+            }
+            Stmt::Throw(e, span) => {
+                let et = self.prog.error_ty();
+                let v = self.expr(e, None);
+                let vt = self.resolve(&v.ty);
+                let ok = match &vt {
+                    Ty::Adt(d, _) => self.prog.defs[*d].implements.contains(&self.prog.b.error),
+                    Ty::Iface(ids) => ids.contains(&self.prog.b.error),
+                    Ty::Err => true,
+                    _ => false,
+                };
+                if !ok {
+                    let s = self.show(&vt);
+                    self.err_help(e.span, format!("`{}` is not an error", s), "throw `Failure(message: \"...\")`, or a type that `implements Error`");
+                }
+                self.note_throw(*span);
+                let v = if ok { self.coerce(v, &et) } else { v };
+                TStmt::Throw(v)
+            }
+            Stmt::While { cond, body, .. } => {
+                let c = self.expr_coerce(cond, &Ty::Bool);
+                let lvl = self.fc().lambdas.len();
+                self.fcx().loops.push(lvl);
+                let b = self.block(body, false, None);
+                self.fcx().loops.pop();
+                TStmt::While(c, b)
+            }
+            Stmt::For { var, iter, body, span } => {
+                if let ExprKind::Range { lo, hi, inclusive } = &iter.kind {
+                    let lo = self.expr_coerce(lo, &Ty::Int);
+                    let hi = self.expr_coerce(hi, &Ty::Int);
+                    self.fcx().scopes.push(HashMap::new());
+                    let v = self.declare(*span, var, Ty::Int, false);
+                    let lvl = self.fc().lambdas.len();
+                    self.fcx().loops.push(lvl);
+                    let b = self.block(body, false, None);
+                    self.fcx().loops.pop();
+                    self.fcx().scopes.pop();
+                    return TStmt::ForRange { var: v, lo, hi, inclusive: *inclusive, body: b };
+                }
+                let it = self.expr(iter, None);
+                let ity = self.resolve(&it.ty);
+                let (kind, elem) = match &ity {
+                    Ty::Adt(d, a) if *d == self.prog.b.list => (0, a[0].clone()),
+                    Ty::Adt(d, a) if *d == self.prog.b.map => (1, Ty::Adt(self.prog.b.entry, a.clone())),
+                    Ty::Adt(d, a) if *d == self.prog.b.set => (2, a[0].clone()),
+                    Ty::Err => (0, Ty::Err),
+                    Ty::Text => {
+                        self.err_help(iter.span, "can't loop over `Text` directly", "use `text.chars()`, `text.words()` or `text.lines()`");
+                        (0, Ty::Err)
+                    }
+                    t => {
+                        let s = self.prog.show(t);
+                        self.err(iter.span, format!("can't loop over a `{}`", s));
+                        (0, Ty::Err)
+                    }
+                };
+                self.fcx().scopes.push(HashMap::new());
+                let v = self.declare(*span, var, elem, false);
+                let lvl = self.fc().lambdas.len();
+                self.fcx().loops.push(lvl);
+                let b = self.block(body, false, None);
+                self.fcx().loops.pop();
+                self.fcx().scopes.pop();
+                match kind {
+                    0 => TStmt::ForList { var: v, list: it, body: b },
+                    1 => TStmt::ForMap { var: v, map: it, body: b },
+                    _ => TStmt::ForSet { var: v, set: it, body: b },
+                }
+            }
+            Stmt::With { span, value, .. } => {
+                let _ = self.expr(value, None);
+                self.err(*span, "`with` is not supported by this compiler yet");
+                TStmt::Expr(TExpr { kind: TK::Unit, ty: Ty::Unit, span: *span })
+            }
+            Stmt::Expect { cond, span } => {
+                if !self.fc().in_test {
+                    self.err_help(*span, "`expect` is only allowed in tests", "use `assert(cond)` for a condition that can only fail because of a bug");
+                }
+                let c = self.expr_coerce(cond, &Ty::Bool);
+                TStmt::Expect { cond: c, text: String::new(), span: cond.span }
+            }
+        }
+    }
+
+    // A statement-level `if`/`match` has no value: its branches were checked
+    // with want_value, which is fine; nothing to fix up for now.
+    fn fix_stmt_expr(&mut self, e: TExpr) -> TExpr {
+        e
+    }
+
+    fn note_throw(&mut self, span: Span) {
+        let fc = self.fcx();
+        if let Some(l) = fc.lambdas.last_mut() {
+            l.throws = true;
+            return;
+        }
+        fc.uses_throw = true;
+        if !fc.throws_ok {
+            self.err_help(span, "this function can't fail: it isn't declared `throws`", "add `throws` before `->`: `fn f() throws -> T`, or handle the error with `catch`");
+        }
+    }
+
+    // ================= places =================
+
+    fn place(&mut self, e: &Expr, write: bool) -> Option<TPlace> {
+        match &e.kind {
+            ExprKind::Ident(name) => {
+                let id = match self.lookup_local(name) {
+                    Some(id) => id,
+                    None => {
+                        self.err(e.span, format!("unknown name `{}`", name));
+                        return None;
+                    }
+                };
+                let l = self.fc().locals[id].clone();
+                if write {
+                    if self.is_captured(id) {
+                        self.err(e.span, format!("can't change `{}` inside a lambda: lambdas capture a copy", name));
+                        return None;
+                    }
+                    if !l.mutable {
+                        self.err_help(e.span, format!("can't change `{}`: it's declared with `let`", name), format!("declare it with `var {} = ...`", name));
+                        return None;
+                    }
+                }
+                Some(TPlace { root: id, path: vec![], ty: l.ty })
+            }
+            ExprKind::SelfRef => {
+                let id = match self.fc().self_local {
+                    Some(id) => id,
+                    None => {
+                        self.err(e.span, "`self` is only available in methods");
+                        return None;
+                    }
+                };
+                self.note_use(id);
+                if write && !self.fc().self_mutable {
+                    self.err_help(e.span, "can't change `self` in a method that isn't `mutating`", "declare it `mutating fn ...`");
+                    return None;
+                }
+                if write && self.is_captured(id) {
+                    self.err(e.span, "can't change `self` inside a lambda");
+                    return None;
+                }
+                let ty = self.fc().locals[id].ty.clone();
+                Some(TPlace { root: id, path: vec![], ty })
+            }
+            ExprKind::Field(base, name, nsp) => {
+                let mut p = self.place(base, write)?;
+                let bt = self.resolve(&p.ty);
+                match &bt {
+                    Ty::Adt(d, args) => {
+                        if let TypeKind::Record { fields } = &self.prog.defs[*d].kind {
+                            if let Some(i) = fields.iter().position(|f| f.name == *name) {
+                                let fty = fields[i].ty.subst(args);
+                                p.path.push(PlaceElem::Field(i));
+                                p.ty = fty;
+                                return Some(p);
+                            }
+                        }
+                        let s = self.prog.show(&bt);
+                        self.err(*nsp, format!("`{}` has no field `{}` that can be changed", s, name));
+                        None
+                    }
+                    Ty::Opt(_) => {
+                        self.err_help(*nsp, "this value may be missing", "unwrap it first: `if x is some(v) { ... }`");
+                        None
+                    }
+                    _ => {
+                        let s = self.prog.show(&bt);
+                        self.err(*nsp, format!("`{}` has no field `{}`", s, name));
+                        None
+                    }
+                }
+            }
+            ExprKind::Index(base, idx) => {
+                let mut p = self.place(base, write)?;
+                let bt = self.resolve(&p.ty);
+                match &bt {
+                    Ty::Adt(d, args) if *d == self.prog.b.list => {
+                        let i = self.expr_coerce(idx, &Ty::Int);
+                        p.path.push(PlaceElem::Index(i));
+                        p.ty = args[0].clone();
+                        Some(p)
+                    }
+                    Ty::Adt(d, args) if *d == self.prog.b.map => {
+                        let k = self.expr_coerce(idx, &args[0]);
+                        p.path.push(PlaceElem::MapKey(k));
+                        p.ty = args[1].clone();
+                        Some(p)
+                    }
+                    _ => {
+                        let s = self.prog.show(&bt);
+                        self.err(e.span, format!("can't index a `{}`", s));
+                        None
+                    }
+                }
+            }
+            _ => {
+                if write {
+                    self.err(e.span, "can't assign to this");
+                } else {
+                    self.err(e.span, "a mutating method needs a variable here");
+                }
+                None
+            }
+        }
+    }
+
+    fn place_read(&mut self, p: &TPlace, span: Span) -> TExpr {
+        let root_ty = self.fc().locals[p.root].ty.clone();
+        let mut e = TExpr { kind: TK::Local(p.root), ty: root_ty, span };
+        for el in &p.path {
+            let bt = self.resolve(&e.ty);
+            e = match el {
+                PlaceElem::Field(i) => {
+                    let fty = match &bt {
+                        Ty::Adt(d, args) => match &self.prog.defs[*d].kind {
+                            TypeKind::Record { fields } => fields[*i].ty.subst(args),
+                            _ => Ty::Err,
+                        },
+                        _ => Ty::Err,
+                    };
+                    TExpr { kind: TK::Field(Box::new(e), *i), ty: fty, span }
+                }
+                PlaceElem::Index(i) => {
+                    let et = match &bt {
+                        Ty::Adt(_, a) => a[0].clone(),
+                        _ => Ty::Err,
+                    };
+                    TExpr { kind: TK::Index(Box::new(e), Box::new(i.clone())), ty: et, span }
+                }
+                PlaceElem::MapKey(k) => {
+                    // reading `m[k]` inside a compound assignment: the key must exist
+                    let vt = match &bt {
+                        Ty::Adt(_, a) => a[1].clone(),
+                        _ => Ty::Err,
+                    };
+                    let get = TExpr { kind: TK::MapGet(Box::new(e), Box::new(k.clone())), ty: Ty::opt(vt.clone()), span };
+                    TExpr { kind: TK::Unwrap(Box::new(get)), ty: vt, span }
+                }
+            };
+        }
+        e
+    }
+
+    // ================= expressions =================
+
+    fn lit_int(&mut self, v: i64, span: Span, expected: Option<&Ty>) -> TExpr {
+        let exp = expected.map(|t| self.resolve(t));
+        match exp {
+            Some(Ty::Float) => TExpr { kind: TK::Float(v as f64), ty: Ty::Float, span },
+            Some(Ty::Opt(inner)) if *inner == Ty::Float => TExpr { kind: TK::Float(v as f64), ty: Ty::Float, span },
+            _ => TExpr { kind: TK::Int(v), ty: Ty::Int, span },
+        }
+    }
+
+    pub fn expr(&mut self, e: &Expr, expected: Option<&Ty>) -> TExpr {
+        let span = e.span;
+        let mk = |kind, ty| TExpr { kind, ty, span };
+        // `try` applies only to the call right below it
+        let in_try = std::mem::replace(&mut self.fcx().in_try, false);
+        let stmt_pos = std::mem::replace(&mut self.fcx().stmt_pos, false);
+        if in_try && !matches!(e.kind, ExprKind::Call { .. }) {
+            self.err_help(span, "`try` goes right before a call that can fail", "write `try f(x)`");
+        }
+        match &e.kind {
+            ExprKind::Int(v) => self.lit_int(*v, span, expected),
+            ExprKind::Float(v) => {
+                if let Some(Ty::Int) = expected.map(|t| self.resolve(t)) {
+                    self.err_help(span, "expected an `Int`, found a `Float` literal", "write a whole number, or convert: `x.round()`");
+                }
+                mk(TK::Float(*v), Ty::Float)
+            }
+            ExprKind::Bool(b) => mk(TK::Bool(*b), Ty::Bool),
+            ExprKind::None => {
+                let ty = match expected.map(|t| self.resolve(t)) {
+                    Some(t @ Ty::Opt(_)) => t,
+                    _ => {
+                        let v = self.fresh();
+                        Ty::opt(v)
+                    }
+                };
+                mk(TK::NoneLit, ty)
+            }
+            ExprKind::Str(segs) => {
+                let mut parts = vec![];
+                for s in segs {
+                    match s {
+                        ast::StrSeg::Lit(t) => parts.push(TExpr { kind: TK::Text(t.clone()), ty: Ty::Text, span }),
+                        ast::StrSeg::Expr(x) => {
+                            let te = self.expr(x, None);
+                            let t = self.resolve(&te.ty);
+                            match t {
+                                Ty::Text => parts.push(te),
+                                Ty::Unit | Ty::Func(_) | Ty::Never => {
+                                    let s = self.prog.show(&t);
+                                    self.err(x.span, format!("a `{}` can't be put into text", s));
+                                }
+                                _ => {
+                                    let sp = te.span;
+                                    parts.push(TExpr { kind: TK::ToText(Box::new(te)), ty: Ty::Text, span: sp });
+                                }
+                            }
+                        }
+                    }
+                }
+                if parts.len() == 1 && matches!(parts[0].kind, TK::Text(_)) {
+                    return parts.pop().unwrap();
+                }
+                if parts.is_empty() {
+                    return mk(TK::Text(String::new()), Ty::Text);
+                }
+                mk(TK::Interp(parts), Ty::Text)
+            }
+            ExprKind::Ident(name) => self.ident(name, span, expected),
+            ExprKind::SelfRef => match self.fc().self_local {
+                Some(id) => {
+                    self.note_use(id);
+                    let ty = self.fc().locals[id].ty.clone();
+                    mk(TK::Local(id), ty)
+                }
+                None => {
+                    self.err(span, "`self` is only available in methods");
+                    mk(TK::Unit, Ty::Err)
+                }
+            },
+            ExprKind::List(items) => {
+                let elem = match expected.map(|t| self.resolve(t)) {
+                    Some(Ty::Adt(d, a)) if d == self.prog.b.list => a[0].clone(),
+                    _ => self.fresh(),
+                };
+                let mut out = vec![];
+                for it in items {
+                    let te = self.expr(it, Some(&elem));
+                    let te = self.coerce(te, &elem);
+                    out.push(te);
+                }
+                let ty = self.prog.list_of(elem);
+                mk(TK::List(out), ty)
+            }
+            ExprKind::Map(entries) => {
+                let exp = expected.map(|t| self.resolve(t));
+                if let Some(Ty::Adt(d, a)) = &exp {
+                    if *d == self.prog.b.set {
+                        if !entries.is_empty() {
+                            self.err_help(span, "a set has no literal with values", "start with `Set<T>()` and `add` items");
+                        }
+                        return mk(TK::EmptySet, Ty::Adt(*d, a.clone()));
+                    }
+                }
+                let (k, v) = match &exp {
+                    Some(Ty::Adt(d, a)) if *d == self.prog.b.map => (a[0].clone(), a[1].clone()),
+                    _ => (self.fresh(), self.fresh()),
+                };
+                let mut out = vec![];
+                for (ke, ve) in entries {
+                    let kt = self.expr_coerce(ke, &k);
+                    let vt = self.expr_coerce(ve, &v);
+                    out.push((kt, vt));
+                }
+                mk(TK::Map(out), Ty::Adt(self.prog.b.map, vec![k, v]))
+            }
+            ExprKind::Field(base, name, nsp) => self.field(base, name, *nsp, span),
+            ExprKind::Call { callee, type_args, args } => self.call(e, callee, type_args, args, expected, in_try),
+            ExprKind::Index(base, idx) => {
+                let b = self.expr(base, None);
+                let bt = self.resolve(&b.ty);
+                match &bt {
+                    Ty::Adt(d, a) if *d == self.prog.b.list => {
+                        let i = self.expr_coerce(idx, &Ty::Int);
+                        mk(TK::Index(Box::new(b), Box::new(i)), a[0].clone())
+                    }
+                    Ty::Adt(d, a) if *d == self.prog.b.map => {
+                        let k = self.expr_coerce(idx, &a[0]);
+                        mk(TK::MapGet(Box::new(b), Box::new(k)), Ty::opt(a[1].clone()))
+                    }
+                    Ty::Text => {
+                        self.err_help(span, "text can't be indexed", "use `text.slice(from: i, to: i + 1)` or `text.chars()`");
+                        mk(TK::Unit, Ty::Err)
+                    }
+                    Ty::Err => mk(TK::Unit, Ty::Err),
+                    t => {
+                        let s = self.prog.show(t);
+                        self.err(span, format!("can't index a `{}`", s));
+                        mk(TK::Unit, Ty::Err)
+                    }
+                }
+            }
+            ExprKind::Unary(op, x) => match op {
+                UnOp::Not => {
+                    let t = self.expr_coerce(x, &Ty::Bool);
+                    mk(TK::Unary(UnOp::Not, Box::new(t)), Ty::Bool)
+                }
+                UnOp::Neg => {
+                    let t = self.expr(x, expected);
+                    let ty = self.resolve(&t.ty);
+                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Err) {
+                        let s = self.prog.show(&ty);
+                        self.err(span, format!("can't negate a `{}`", s));
+                    }
+                    mk(TK::Unary(UnOp::Neg, Box::new(t)), ty)
+                }
+            },
+            ExprKind::Binary(op, l, r) => {
+                let arith_op = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem);
+                let (lt, rt) = if is_literal(l) && !is_literal(r) {
+                    let rt = self.expr(r, if arith_op { expected } else { None });
+                    let rty = self.resolve(&rt.ty);
+                    let lt = self.expr(l, Some(&rty));
+                    (lt, rt)
+                } else {
+                    let arith = matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem);
+                    let lt = self.expr(l, if arith { expected } else { None });
+                    let lty = self.resolve(&lt.ty);
+                    let rt = self.expr(r, Some(&lty));
+                    (lt, rt)
+                };
+                self.binary(*op, lt, rt, span, expected)
+            }
+            ExprKind::Coalesce(l, r) => {
+                let exp_opt = expected.map(|t| Ty::opt(self.resolve(t)));
+                let lt = self.expr(l, exp_opt.as_ref());
+                let lty = self.resolve(&lt.ty);
+                let inner = match &lty {
+                    Ty::Opt(i) => (**i).clone(),
+                    Ty::Err => Ty::Err,
+                    Ty::Var(_) => {
+                        let v = self.fresh();
+                        self.unify(&lty, &Ty::opt(v.clone()));
+                        v
+                    }
+                    t => {
+                        let s = self.prog.show(t);
+                        self.err_help(l.span, format!("`??` needs a value that may be missing, but this is a `{}`", s), "remove `?? ...`");
+                        t.clone()
+                    }
+                };
+                let rt = self.expr(r, Some(&inner));
+                let rty = self.resolve(&rt.ty);
+                // `a ?? b` where b is itself optional keeps the optional
+                let (rt, ty) = if let Ty::Opt(_) = rty {
+                    let rt = self.coerce(rt, &Ty::opt(inner.clone()));
+                    (rt, Ty::opt(inner))
+                } else {
+                    (self.coerce(rt, &inner), inner)
+                };
+                mk(TK::Coalesce(Box::new(lt), Box::new(rt)), ty)
+            }
+            ExprKind::Range { .. } => {
+                self.err_help(span, "a range can only be used in `for`", "write `for i in 0..<n { ... }`");
+                mk(TK::Unit, Ty::Err)
+            }
+            ExprKind::Lambda { params, body } => self.lambda(params, body, span, expected),
+            ExprKind::Block(b) => {
+                let tb = self.block(b, true, expected);
+                let ty = tb.ty.clone();
+                mk(TK::Block(tb), ty)
+            }
+            ExprKind::If { cond, then, els } => self.if_expr(cond, then, els.as_deref(), span, expected, !stmt_pos),
+            ExprKind::Match { scrut, arms } => self.match_expr(scrut, arms, span, expected, !stmt_pos),
+            ExprKind::Is(x, pat) => {
+                let te = self.expr(x, None);
+                let n_before = self.fc().locals.len();
+                let ty = te.ty.clone();
+                self.fcx().scopes.push(HashMap::new());
+                let p = self.pattern(pat, &ty);
+                self.fcx().scopes.pop();
+                if self.fc().locals.len() != n_before {
+                    self.err_help(pat.span(), "names bound by `is` can only be used in an `if` condition", "write `if x is some(v) { ... }`");
+                }
+                mk(TK::Is(Box::new(te), p), Ty::Bool)
+            }
+            ExprKind::Try { expr, catch } => {
+                if !matches!(expr.kind, ExprKind::Call { .. }) {
+                    self.err_help(expr.span, "`try` goes right before a call that can fail", "write `try f(x)`");
+                    let t = self.expr(expr, expected);
+                    return t;
+                }
+                self.fcx().in_try = true;
+                let call = self.expr(expr, if catch.is_some() { expected } else { expected });
+                let ty = call.ty.clone();
+                match catch {
+                    None => {
+                        if let TK::Call { throws: true, .. } | TK::MutCall { throws: true, .. } | TK::IfaceMutCall { throws: true, .. } = call.kind {
+                            self.note_throw(span);
+                        }
+                        mk(TK::Try { call: Box::new(call), catch: None }, ty)
+                    }
+                    Some((name, blk)) => {
+                        self.fcx().scopes.push(HashMap::new());
+                        let et = self.prog.error_ty();
+                        let err_local = self.declare(span, name, et, false);
+                        let exp = self.resolve(&ty);
+                        let b = self.block(blk, exp != Ty::Unit, if exp == Ty::Unit { None } else { Some(&exp) });
+                        self.fcx().scopes.pop();
+                        let mut b = b;
+                        if let Some(t) = b.tail.take() {
+                            let t = self.coerce(*t, &exp);
+                            b.tail = Some(Box::new(t));
+                        }
+                        mk(TK::Try { call: Box::new(call), catch: Some((err_local, b)) }, ty)
+                    }
+                }
+            }
+            ExprKind::ExpectThrows(x) => {
+                if !self.fc().in_test {
+                    self.err(span, "`expect throws` is only allowed in tests");
+                }
+                if !matches!(x.kind, ExprKind::Call { .. }) {
+                    self.err(x.span, "`expect throws` goes right before a call that can fail");
+                }
+                self.fcx().in_try = true;
+                let call = self.expr(x, None);
+                let et = self.prog.error_ty();
+                mk(TK::ExpectThrows(Box::new(call)), et)
+            }
+            ExprKind::Diverge(s) => {
+                let ts = self.stmt(s);
+                mk(TK::Diverge(Box::new(ts)), Ty::Never)
+            }
+        }
+    }
+
+    fn ident(&mut self, name: &str, span: Span, expected: Option<&Ty>) -> TExpr {
+        let mk = |kind, ty| TExpr { kind, ty, span };
+        if let Some(id) = self.lookup_local(name) {
+            let ty = self.fc().locals[id].ty.clone();
+            return mk(TK::Local(id), ty);
+        }
+        let prelude = self.fc().prelude;
+        match self.lookup_global(name, prelude) {
+            Some(Global::Fn(id)) => {
+                let f = self.prog.fns[id].clone();
+                let targs: Vec<Ty> = f.generics.iter().map(|_| self.fresh()).collect();
+                let ps = f.params.iter().map(|p| p.1.subst(&targs)).collect();
+                let ty = Ty::func(ps, f.ret.subst(&targs), f.throws);
+                return mk(TK::FnRef(id, targs), ty);
+            }
+            Some(Global::Type(d)) => {
+                let n = self.prog.defs[d].name.clone();
+                self.err_help(span, format!("`{}` is a type, not a value", n), format!("build a value with `{}(...)`", n));
+                return mk(TK::Unit, Ty::Err);
+            }
+            None => {}
+        }
+        // an enum variant without fields
+        if let Some((d, idx)) = self.find_variant(name, expected, span) {
+            let (fields, ng) = match &self.prog.defs[d].kind {
+                TypeKind::Enum { variants } => (variants[idx].fields.len(), self.prog.defs[d].generics.len()),
+                _ => (0, 0),
+            };
+            let targs: Vec<Ty> = (0..ng).map(|_| self.fresh()).collect();
+            let ty = Ty::Adt(d, targs);
+            if let Some(exp) = expected {
+                self.unify(&ty, exp);
+            }
+            if fields > 0 {
+                self.err_help(span, format!("`{}` needs its fields", name), format!("write `{}(...)`", name));
+            }
+            return mk(TK::Variant { def: d, idx, fields: vec![] }, ty);
+        }
+        let hint = match name {
+            "null" | "nil" | "None" | "undefined" => Some("use `none`".to_string()),
+            "True" | "False" => Some(format!("use `{}`", name.to_lowercase())),
+            "this" => Some("use `self`".into()),
+            _ => {
+                let cands: Vec<String> = self.fc().scopes.iter().flat_map(|s| s.keys().cloned()).collect();
+                suggest(name, cands.iter()).map(|s| format!("did you mean `{}`?", s))
+            }
+        };
+        match hint {
+            Some(h) => self.err_help(span, format!("unknown name `{}`", name), h),
+            None => self.err(span, format!("unknown name `{}`", name)),
+        }
+        mk(TK::Unit, Ty::Err)
+    }
+
+    fn find_variant(&mut self, name: &str, expected: Option<&Ty>, span: Span) -> Option<(DefId, usize)> {
+        if let Some(Ty::Adt(d, _)) = expected.map(|t| self.resolve(t)) {
+            if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
+                if let Some(i) = variants.iter().position(|v| v.name == name) {
+                    return Some((d, i));
+                }
+            }
+        }
+        let prelude = self.fc().prelude;
+        let mut found = vec![];
+        for (d, def) in self.prog.defs.iter().enumerate() {
+            if def.is_prelude != prelude && !(!prelude && def.is_prelude) {
+                continue;
+            }
+            if let TypeKind::Enum { variants } = &def.kind {
+                if let Some(i) = variants.iter().position(|v| v.name == name) {
+                    found.push((d, i));
+                }
+            }
+        }
+        match found.len() {
+            0 => None,
+            1 => Some(found[0]),
+            _ => {
+                let names: Vec<String> = found.iter().map(|(d, _)| format!("`{}.{}`", self.prog.defs[*d].name, name)).collect();
+                self.err_help(span, format!("`{}` is a variant of several enums", name), format!("write {}", names.join(" or ")));
+                Some(found[0])
+            }
+        }
+    }
+
+    fn field(&mut self, base: &Expr, name: &str, nsp: Span, span: Span) -> TExpr {
+        let mk = |kind, ty| TExpr { kind, ty, span };
+        // `Status.Draft`
+        if let ExprKind::Ident(tn) = &base.kind {
+            if self.lookup_local(tn).is_none() {
+                let prelude = self.fc().prelude;
+                if let Some(Global::Type(d)) = self.lookup_global(tn, prelude) {
+                    if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
+                        if let Some(i) = variants.iter().position(|v| v.name == name) {
+                            let ng = self.prog.defs[d].generics.len();
+                            let targs: Vec<Ty> = (0..ng).map(|_| self.fresh()).collect();
+                            return mk(TK::Variant { def: d, idx: i, fields: vec![] }, Ty::Adt(d, targs));
+                        }
+                    }
+                    let n = self.prog.defs[d].name.clone();
+                    self.err(nsp, format!("`{}` has no variant `{}`", n, name));
+                    return mk(TK::Unit, Ty::Err);
+                }
+            }
+        }
+        let b = self.expr(base, None);
+        let bt = self.resolve(&b.ty);
+        match &bt {
+            Ty::Adt(d, args) => {
+                let def = self.prog.defs[*d].clone();
+                match &def.kind {
+                    TypeKind::Record { fields } => {
+                        if let Some(i) = fields.iter().position(|f| f.name == name) {
+                            let fty = fields[i].ty.subst(args);
+                            return mk(TK::Field(Box::new(b), i), fty);
+                        }
+                    }
+                    TypeKind::Newtype(inner) if name == "value" => {
+                        return mk(TK::Unwrap(Box::new(b)), inner.clone());
+                    }
+                    _ => {}
+                }
+                if let Some((_, pty)) = def.props.iter().find(|p| p.0 == name) {
+                    return mk(TK::Prop(Box::new(b), name.to_string()), pty.subst(args));
+                }
+                if def.methods.contains_key(name) {
+                    self.err_help(nsp, format!("`{}` is a method", name), format!("call it: `.{}()`", name));
+                } else {
+                    let mut cands: Vec<String> = def.props.iter().map(|p| p.0.clone()).collect();
+                    if let TypeKind::Record { fields } = &def.kind {
+                        cands.extend(fields.iter().map(|f| f.name.clone()));
+                    }
+                    let s = self.prog.show(&bt);
+                    match suggest(name, cands.iter()) {
+                        Some(c) => self.err_help(nsp, format!("`{}` has no field `{}`", s, name), format!("did you mean `{}`?", c)),
+                        None => self.err(nsp, format!("`{}` has no field `{}`", s, name)),
+                    }
+                }
+                mk(TK::Unit, Ty::Err)
+            }
+            Ty::Text => {
+                if name == "length" {
+                    return mk(TK::Prop(Box::new(b), "length".into()), Ty::Int);
+                }
+                let tdef = self.prog.b.text;
+                if self.prog.defs[tdef].methods.contains_key(name) {
+                    self.err_help(nsp, format!("`{}` is a method", name), format!("call it: `.{}()`", name));
+                } else {
+                    self.err(nsp, format!("`Text` has no field `{}`", name));
+                }
+                mk(TK::Unit, Ty::Err)
+            }
+            Ty::Opt(_) => {
+                self.err_help(nsp, "this value may be missing", format!("unwrap it first: `if x is some(v) {{ v.{} }}`, or give a fallback with `??`", name));
+                mk(TK::Unit, Ty::Err)
+            }
+            Ty::Err => mk(TK::Unit, Ty::Err),
+            Ty::Var(_) => {
+                self.err_help(nsp, "the type isn't known here yet", "add a type annotation");
+                mk(TK::Unit, Ty::Err)
+            }
+            t => {
+                let s = self.prog.show(t);
+                self.err(nsp, format!("`{}` has no field `{}`", s, name));
+                mk(TK::Unit, Ty::Err)
+            }
+        }
+    }
+
+    // ---- calls ----
+
+    fn check_args(
+        &mut self,
+        params: &[(String, Ty)],
+        args: &[ast::Arg],
+        span: Span,
+        what: &str,
+        named_rule: bool,
+    ) -> Vec<TExpr> {
+        if args.len() != params.len() {
+            let names: Vec<&str> = params.iter().map(|p| p.0.as_str()).collect();
+            self.err_help(span, format!("{} takes {} argument(s), but {} were given", what, params.len(), args.len()), format!("parameters: ({})", names.join(", ")));
+        }
+        // names
+        for (i, a) in args.iter().enumerate() {
+            if let Some(n) = &a.name {
+                match params.get(i) {
+                    Some(p) if p.0 == *n => {}
+                    Some(p) => {
+                        if params.iter().any(|q| q.0 == *n) {
+                            self.err_help(a.span, format!("argument `{}` is out of order", n), format!("arguments go in the declared order; here `{}` is expected", p.0));
+                        } else {
+                            self.err_help(a.span, format!("there is no parameter `{}`", n), format!("the parameter here is `{}`", p.0));
+                        }
+                    }
+                    None => {}
+                }
+            }
+        }
+        if named_rule && params.len() >= 3 {
+            let missing: Vec<usize> = (1..args.len()).filter(|i| args[*i].name.is_none()).collect();
+            if !missing.is_empty() && args.len() == params.len() {
+                let fixed: Vec<String> = args
+                    .iter()
+                    .enumerate()
+                    .map(|(i, _)| if i == 0 { "…".to_string() } else { format!("{}: …", params[i].0) })
+                    .collect();
+                self.err_help(args[missing[0]].span, format!("{} has 3 or more parameters: name every argument after the first", what), format!("write ({})", fixed.join(", ")));
+            }
+        } else if named_rule {
+            for a in args {
+                if a.name.is_some() && params.len() < 3 {
+                    // allowed but not needed; `lang fmt` would remove it
+                }
+            }
+        }
+        // non-lambda arguments first, so lambdas see known types
+        let mut out: Vec<Option<TExpr>> = vec![None; args.len()];
+        for pass in 0..2 {
+            for (i, a) in args.iter().enumerate() {
+                let is_lambda = matches!(a.value.kind, ExprKind::Lambda { .. });
+                if (pass == 0) == is_lambda {
+                    continue;
+                }
+                let pty = params.get(i).map(|p| p.1.clone()).unwrap_or(Ty::Err);
+                out[i] = Some(self.expr_coerce(&a.value, &pty));
+            }
+        }
+        out.into_iter().map(|x| x.unwrap()).collect()
+    }
+
+    fn call(&mut self, e: &Expr, callee: &Expr, type_args: &[TypeExpr], args: &[ast::Arg], expected: Option<&Ty>, in_try: bool) -> TExpr {
+        let span = e.span;
+        let generics = self.fc().generics.clone();
+        let prelude = self.fc().prelude;
+        let explicit: Vec<Ty> = type_args.iter().map(|t| self.resolve_texpr(t, &generics, prelude)).collect();
+        let result = match &callee.kind {
+            ExprKind::Field(recv, name, nsp) => {
+                // `Status.Circle(...)`
+                if let ExprKind::Ident(tn) = &recv.kind {
+                    if self.lookup_local(tn).is_none() {
+                        if let Some(Global::Type(d)) = self.lookup_global(tn, prelude) {
+                            if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
+                                if let Some(i) = variants.iter().position(|v| v.name == *name) {
+                                    return self.variant_ctor(d, i, args, span, expected);
+                                }
+                            }
+                            let n = self.prog.defs[d].name.clone();
+                            self.err_help(*nsp, format!("`{}` has no variant or function `{}`", n, name), "types have no static functions: use a plain function");
+                            return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                        }
+                    }
+                }
+                self.method_call(recv, name, *nsp, &explicit, args, span, in_try, expected)
+            }
+            ExprKind::Ident(name) => {
+                if name == "some" && self.lookup_local(name).is_none() {
+                    self.err_help(span, "`some(x)` is only a pattern", "a plain value is already accepted where `T?` is expected: write `x`");
+                    for a in args {
+                        let _ = self.expr(&a.value, None);
+                    }
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+                if let Some(id) = self.lookup_local(name) {
+                    let ty = self.fc().locals[id].ty.clone();
+                    let f = TExpr { kind: TK::Local(id), ty, span: callee.span };
+                    self.value_call(f, args, span, in_try)
+                } else {
+                    match self.lookup_global(name, prelude) {
+                        Some(Global::Fn(id)) => self.fn_call(id, None, &explicit, args, span, in_try, expected),
+                        Some(Global::Type(d)) => self.ctor(d, &explicit, args, span, expected),
+                        None => {
+                            if let Some((d, i)) = self.find_variant(name, expected, span) {
+                                return self.variant_ctor(d, i, args, span, expected);
+                            }
+                            let hint = match name.as_str() {
+                                "len" => Some("use `xs.length`"),
+                                "str" | "String" => Some("use interpolation: `\"${x}\"`"),
+                                "int" | "parseInt" | "Int" => Some("use `try text.to_int()`"),
+                                "float" | "Float" => Some("use `try text.to_float()` or `n.to_float()`"),
+                                "println" | "console" | "puts" | "printf" => Some("use `print(text)`"),
+                                "range" => Some("use `for i in 0..<n`"),
+                                "sorted" => Some("use `xs.sorted()`"),
+                                _ => None,
+                            };
+                            match hint {
+                                Some(h) => self.err_help(callee.span, format!("unknown function `{}`", name), h),
+                                None => {
+                                    let cands: Vec<String> = self.user.keys().chain(self.prelude.keys()).cloned().collect();
+                                    match suggest(name, cands.iter()) {
+                                        Some(s) => self.err_help(callee.span, format!("unknown function `{}`", name), format!("did you mean `{}`?", s)),
+                                        None => self.err(callee.span, format!("unknown function `{}`", name)),
+                                    }
+                                }
+                            }
+                            for a in args {
+                                let _ = self.expr(&a.value, None);
+                            }
+                            TExpr { kind: TK::Unit, ty: Ty::Err, span }
+                        }
+                    }
+                }
+            }
+            _ => {
+                let f = self.expr(callee, None);
+                self.value_call(f, args, span, in_try)
+            }
+        };
+        // `try` rules
+        let throws = match &result.kind {
+            TK::Call { throws, .. } | TK::MutCall { throws, .. } | TK::IfaceMutCall { throws, .. } => *throws,
+            _ => false,
+        };
+        if throws && !in_try {
+            self.err_help(span, "this call can fail", "write `try` before it: `try f(x)`, or handle it: `try f(x) catch err { ... }`");
+        }
+        if !throws && in_try && result.ty != Ty::Err {
+            self.err_help(span, "this call can't fail", "remove `try`");
+        }
+        result
+    }
+
+    fn value_call(&mut self, f: TExpr, args: &[ast::Arg], span: Span, _in_try: bool) -> TExpr {
+        let ft = self.resolve(&f.ty);
+        let fty = match &ft {
+            Ty::Func(ft) => (**ft).clone(),
+            Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
+                TypeKind::Newtype(Ty::Func(ft)) => {
+                    let inner = (**ft).clone();
+                    let sp = f.span;
+                    let unwrapped = TExpr { kind: TK::Unwrap(Box::new(f)), ty: Ty::Func(Box::new(inner.clone())), span: sp };
+                    return self.value_call(unwrapped, args, span, _in_try);
+                }
+                _ => {
+                    let s = self.prog.show(&ft);
+                    self.err(span, format!("a `{}` can't be called", s));
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+            },
+            Ty::Err => return TExpr { kind: TK::Unit, ty: Ty::Err, span },
+            t => {
+                let s = self.prog.show(t);
+                self.err(span, format!("a `{}` can't be called", s));
+                return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+            }
+        };
+        for a in args {
+            if a.name.is_some() {
+                self.err(a.span, "arguments of a function value are positional");
+            }
+        }
+        let params: Vec<(String, Ty)> = fty.params.iter().enumerate().map(|(i, t)| (format!("#{}", i), t.clone())).collect();
+        let targs = self.check_args(&params, args, span, "this function", false);
+        TExpr { kind: TK::Call { callee: Callee::Value(Box::new(f)), args: targs, throws: fty.throws }, ty: fty.ret.clone(), span }
+    }
+
+    fn instantiate(&mut self, f: &FnDef, owner_args: &[Ty], explicit: &[Ty], span: Span) -> Vec<Ty> {
+        let n_own = f.generics.len() - owner_args.len();
+        let mut targs: Vec<Ty> = owner_args.to_vec();
+        if !explicit.is_empty() {
+            if explicit.len() != n_own {
+                self.err(span, format!("`{}` takes {} type argument(s)", f.name, n_own));
+            }
+            for i in 0..n_own {
+                targs.push(explicit.get(i).cloned().unwrap_or(Ty::Err));
+            }
+        } else {
+            for _ in 0..n_own {
+                let v = self.fresh();
+                targs.push(v);
+            }
+        }
+        targs
+    }
+
+    fn rethrow_result(&self, f: &FnDef, targs: &[TExpr], throws: bool) -> bool {
+        if !f.rethrows {
+            return throws;
+        }
+        targs.iter().any(|a| match self.resolve(&a.ty) {
+            Ty::Func(ft) => ft.throws && !matches!(a.kind, TK::Wrap(_)),
+            _ => false,
+        })
+    }
+
+    fn fn_call(&mut self, id: FnId, recv: Option<TExpr>, explicit: &[Ty], args: &[ast::Arg], span: Span, _in_try: bool, expected: Option<&Ty>) -> TExpr {
+        let f = self.prog.fns[id].clone();
+        let targs = self.instantiate(&f, &[], explicit, span);
+        let params: Vec<(String, Ty)> = f.params.iter().map(|(n, t)| (n.clone(), t.subst(&targs))).collect();
+        let ret = f.ret.subst(&targs);
+        if let Some(exp) = expected {
+            // let the expected type flow into generic results (`let xs: List<Int> = f()`)
+            if ret.has_params() || matches!(self.resolve(&ret), Ty::Var(_)) || f.generics.len() > 0 {
+                let r = self.resolve(&ret);
+                let e = self.resolve(exp);
+                if !matches!(e, Ty::Opt(_) | Ty::Iface(_)) || matches!(r, Ty::Opt(_)) {
+                    let _ = self.try_unify(&r, &e);
+                }
+            }
+        }
+        let mut targs_e = vec![];
+        if let Some(r) = recv {
+            targs_e.push(r);
+        }
+        let what = format!("`{}`", f.name);
+        let checked = self.check_args(&params, args, span, &what, true);
+        targs_e.extend(checked);
+        let throws = self.rethrow_result(&f, &targs_e[if f.self_mode == SelfMode::None { 0 } else { 1 }..], f.throws);
+        self.check_constraints(&f, &targs, span);
+        TExpr { kind: TK::Call { callee: Callee::Fn(id, targs), args: targs_e, throws }, ty: ret, span }
+    }
+
+    fn try_unify(&mut self, a: &Ty, b: &Ty) -> bool {
+        // unify without leaving partial bindings on failure
+        let saved = self.fc().vars.clone();
+        if self.unify(a, b) {
+            true
+        } else {
+            self.fcx().vars = saved;
+            false
+        }
+    }
+
+    fn check_constraints(&mut self, f: &FnDef, targs: &[Ty], span: Span) {
+        if !f.is_prelude {
+            return;
+        }
+        let owner = f.owner.map(|d| self.prog.defs[d].name.clone()).unwrap_or_default();
+        let t0 = targs.first().map(|t| self.resolve(t));
+        let last = targs.last().map(|t| self.resolve(t));
+        let need = |c: &mut Checker, t: Option<Ty>, ok: fn(&Ty) -> bool, what: &str| {
+            if let Some(t) = t {
+                if matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) {
+                    return;
+                }
+                if !ok(&t) {
+                    let s = c.prog.show(&t);
+                    c.err(span, format!("`{}` needs {}, but this is `{}`", f.name, what, s));
+                }
+            }
+        };
+        match (owner.as_str(), f.name.as_str()) {
+            ("List", "sum") => need(self, t0, |t| matches!(t, Ty::Int | Ty::Float), "numbers"),
+            ("List", "min") | ("List", "max") | ("List", "sort") | ("List", "sorted") => {
+                need(self, t0, orderable, "values that can be ordered (numbers or text); for other types use `sort_by(x => x.key)`")
+            }
+            ("List", "join") => need(self, t0, |t| *t == Ty::Text, "a list of `Text`"),
+            ("List", "sort_by") | ("List", "sorted_by") | ("List", "min_by") | ("List", "max_by") => {
+                need(self, last, orderable, "a key that can be ordered (a number or text)")
+            }
+            ("", "min") | ("", "max") | ("", "__less") => need(self, t0, orderable, "values that can be ordered (numbers or text)"),
+            _ => {}
+        }
+    }
+
+    // The type of a place expression, with `m[k]` giving the value type (no
+    // errors, no captures recorded).
+    fn peek_place_ty(&mut self, e: &Expr) -> Option<Ty> {
+        match &e.kind {
+            ExprKind::Ident(n) => {
+                let fc = self.fc();
+                for s in fc.scopes.iter().rev() {
+                    if let Some(id) = s.get(n) {
+                        return Some(self.resolve(&fc.locals[*id].ty));
+                    }
+                }
+                None
+            }
+            ExprKind::SelfRef => self.fc().self_local.map(|l| self.fc().locals[l].ty.clone()),
+            ExprKind::Field(b, name, _) => {
+                let bt = self.peek_place_ty(b)?;
+                match &bt {
+                    Ty::Adt(d, args) => match &self.prog.defs[*d].kind {
+                        TypeKind::Record { fields } => fields.iter().find(|f| f.name == *name).map(|f| f.ty.subst(args)),
+                        _ => None,
+                    },
+                    _ => None,
+                }
+            }
+            ExprKind::Index(b, _) => {
+                let bt = self.peek_place_ty(b)?;
+                match &bt {
+                    Ty::Adt(d, a) if *d == self.prog.b.list => Some(a[0].clone()),
+                    Ty::Adt(d, a) if *d == self.prog.b.map => Some(a[1].clone()),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn is_mutating_on(&self, t: &Ty, name: &str) -> bool {
+        let d = match t {
+            Ty::Adt(d, _) => *d,
+            Ty::Int => self.prog.b.int,
+            Ty::Float => self.prog.b.float,
+            Ty::Text => self.prog.b.text,
+            Ty::Iface(ids) => {
+                return ids.iter().any(|i| self.prog.defs[*i].methods.get(name).map(|m| self.prog.fns[*m].self_mode == SelfMode::Mutating).unwrap_or(false));
+            }
+            _ => return false,
+        };
+        self.prog.defs[d].methods.get(name).map(|m| self.prog.fns[*m].self_mode == SelfMode::Mutating).unwrap_or(false)
+    }
+
+    fn method_call(&mut self, recv: &Expr, name: &str, nsp: Span, explicit: &[Ty], args: &[ast::Arg], span: Span, in_try: bool, expected: Option<&Ty>) -> TExpr {
+        // a mutating method on a path through maps: check it as a place
+        if matches!(recv.kind, ExprKind::Field(..) | ExprKind::Index(..)) {
+            if let Some(pt) = self.peek_place_ty(recv) {
+                if self.is_mutating_on(&pt, name) {
+                    let fake = TExpr { kind: TK::Unit, ty: pt, span: recv.span };
+                    return self.method_call_typed(fake, recv, name, nsp, explicit, args, span, in_try, expected);
+                }
+            }
+        }
+        let r = self.expr(recv, None);
+        self.method_call_typed(r, recv, name, nsp, explicit, args, span, in_try, expected)
+    }
+
+    fn method_call_typed(&mut self, r: TExpr, recv: &Expr, name: &str, nsp: Span, explicit: &[Ty], args: &[ast::Arg], span: Span, in_try: bool, expected: Option<&Ty>) -> TExpr {
+        let mut rt = self.resolve(&r.ty);
+        // `m[k].append(x)`: a mutating call through a map key sees the value type
+        let mut via_map_key = false;
+        if let (TK::MapGet(..), Ty::Opt(inner)) = (&r.kind, &rt) {
+            let inner = (**inner).clone();
+            let def = match &inner {
+                Ty::Adt(d, _) => Some(*d),
+                Ty::Int => Some(self.prog.b.int),
+                Ty::Float => Some(self.prog.b.float),
+                Ty::Text => Some(self.prog.b.text),
+                _ => None,
+            };
+            if let Some(d) = def {
+                if let Some(m) = self.prog.defs[d].methods.get(name) {
+                    if self.prog.fns[*m].self_mode == SelfMode::Mutating {
+                        rt = inner;
+                        via_map_key = true;
+                    }
+                }
+            }
+        }
+        let _ = via_map_key;
+        let err = |c: &mut Checker, msg: String, help: Option<String>| {
+            match help {
+                Some(h) => c.err_help(nsp, msg, h),
+                None => c.err(nsp, msg),
+            }
+            for a in args {
+                let _ = c.expr(&a.value, None);
+            }
+            TExpr { kind: TK::Unit, ty: Ty::Err, span }
+        };
+        let (def, owner_args) = match &rt {
+            Ty::Adt(d, a) => (*d, a.clone()),
+            Ty::Int => (self.prog.b.int, vec![]),
+            Ty::Float => (self.prog.b.float, vec![]),
+            Ty::Bool => (self.prog.b.bool_, vec![]),
+            Ty::Text => (self.prog.b.text, vec![]),
+            Ty::Iface(ids) => {
+                let ids = ids.clone();
+                return self.iface_call(r, &ids, name, nsp, args, span);
+            }
+            Ty::Opt(_) => {
+                return err(self, "this value may be missing".into(), Some(format!("unwrap it first: `if x is some(v) {{ v.{}(...) }}`, or use `??`", name)));
+            }
+            Ty::Err => {
+                for a in args {
+                    let _ = self.expr(&a.value, None);
+                }
+                return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+            }
+            Ty::Var(_) => return err(self, "the type isn't known here yet".into(), Some("add a type annotation".into())),
+            Ty::Param(_) => return err(self, format!("can't call `{}` on a generic value", name), Some("generic values can only be compared, used as keys and put into text".into())),
+            t => {
+                let s = self.prog.show(t);
+                return err(self, format!("a `{}` has no methods", s), None);
+            }
+        };
+        let id = match self.prog.defs[def].methods.get(name).copied() {
+            Some(id) => id,
+            None => {
+                let d = self.prog.defs[def].clone();
+                let s = self.prog.show(&rt);
+                // a field holding a function
+                if let TypeKind::Record { fields } = &d.kind {
+                    if let Some(fd) = fields.iter().find(|f| f.name == name) {
+                        if matches!(fd.ty, Ty::Func(_)) {
+                            return err(self, format!("`{}` is a field, not a method", name), Some(format!("to call a stored function: `let f = x.{}` then `f(...)`; or name the function type: `type Rule = fn(...)`", name)));
+                        }
+                    }
+                }
+                let cands: Vec<String> = d.methods.keys().cloned().collect();
+                let help = suggest(name, cands.iter()).map(|c| format!("did you mean `{}`?", c));
+                return err(self, format!("`{}` has no method `{}`", s, name), help);
+            }
+        };
+        let f = self.prog.fns[id].clone();
+        let n_owner = self.prog.defs[def].generics.len();
+        let targs = self.instantiate(&f, &owner_args[..n_owner.min(owner_args.len())], explicit, span);
+        let params: Vec<(String, Ty)> = f.params.iter().map(|(n, t)| (n.clone(), t.subst(&targs))).collect();
+        let ret = f.ret.subst(&targs);
+        if let Some(exp) = expected {
+            if f.generics.len() > n_owner {
+                let (r2, e2) = (self.resolve(&ret), self.resolve(exp));
+                let _ = self.try_unify(&r2, &e2);
+            }
+        }
+        let what = format!("`{}`", f.name);
+        let checked = self.check_args(&params, args, span, &what, true);
+        let throws = self.rethrow_result(&f, &checked, f.throws);
+        self.check_constraints(&f, &targs, span);
+        if f.self_mode == SelfMode::Mutating {
+            let place = match self.place(recv, true) {
+                Some(p) => p,
+                None => return TExpr { kind: TK::Unit, ty: Ty::Err, span },
+            };
+            let _ = in_try;
+            return TExpr { kind: TK::MutCall { fn_id: id, type_args: targs, place, args: checked, throws }, ty: ret, span };
+        }
+        let mut all = vec![r];
+        all.extend(checked);
+        TExpr { kind: TK::Call { callee: Callee::Fn(id, targs), args: all, throws }, ty: ret, span }
+    }
+
+    fn iface_call(&mut self, r: TExpr, ids: &[DefId], name: &str, nsp: Span, args: &[ast::Arg], span: Span) -> TExpr {
+        let mut found = None;
+        for i in ids {
+            if let Some(m) = self.prog.defs[*i].methods.get(name) {
+                found = Some((*i, *m));
+            }
+        }
+        let (iface, mid) = match found {
+            Some(x) => x,
+            None => {
+                let s = self.prog.show(&Ty::Iface(ids.to_vec()));
+                self.err(nsp, format!("`{}` has no method `{}`", s, name));
+                return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+            }
+        };
+        let f = self.prog.fns[mid].clone();
+        let what = format!("`{}`", f.name);
+        let checked = self.check_args(&f.params, args, span, &what, true);
+        if f.self_mode == SelfMode::Mutating {
+            // need a place: re-derive from the receiver expression is not
+            // possible here; interface mutation goes through a variable
+            if let TK::Local(l) = r.kind {
+                if !self.fc().locals[l].mutable {
+                    let n = self.fc().locals[l].name.clone();
+                    self.err_help(r.span, format!("can't change `{}`: it's declared with `let`", n), format!("declare it with `var {} = ...`", n));
+                }
+                let place = TPlace { root: l, path: vec![], ty: r.ty.clone() };
+                return TExpr { kind: TK::IfaceMutCall { iface, method: mid, place, args: checked, throws: f.throws }, ty: f.ret.clone(), span };
+            }
+            self.err(r.span, "a mutating method needs a variable here");
+            return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+        }
+        let mut all = vec![r];
+        all.extend(checked);
+        TExpr { kind: TK::Call { callee: Callee::Iface { iface, method: mid }, args: all, throws: f.throws }, ty: f.ret.clone(), span }
+    }
+
+    fn ctor(&mut self, d: DefId, explicit: &[Ty], args: &[ast::Arg], span: Span, expected: Option<&Ty>) -> TExpr {
+        let def = self.prog.defs[d].clone();
+        let targs: Vec<Ty> = if !explicit.is_empty() {
+            if explicit.len() != def.generics.len() {
+                self.err(span, format!("`{}` takes {} type argument(s)", def.name, def.generics.len()));
+            }
+            (0..def.generics.len()).map(|i| explicit.get(i).cloned().unwrap_or(Ty::Err)).collect()
+        } else {
+            let v: Vec<Ty> = def.generics.iter().map(|_| self.fresh()).collect();
+            if let Some(exp) = expected {
+                let e = self.resolve(exp);
+                let e = match e {
+                    Ty::Opt(i) => *i,
+                    t => t,
+                };
+                let _ = self.try_unify(&Ty::Adt(d, v.clone()), &e);
+            }
+            v
+        };
+        let ty = Ty::Adt(d, targs.clone());
+        match &def.kind {
+            TypeKind::Record { fields } => {
+                let mut out: Vec<Option<TExpr>> = vec![None; fields.len()];
+                for a in args {
+                    let name = match &a.name {
+                        Some(n) => n.clone(),
+                        None => {
+                            let hint = fields.iter().map(|f| format!("{}: …", f.name)).collect::<Vec<_>>().join(", ");
+                            self.err_help(a.span, format!("fields of `{}` are passed by name", def.name), format!("write `{}({})`", def.name, hint));
+                            let _ = self.expr(&a.value, None);
+                            continue;
+                        }
+                    };
+                    match fields.iter().position(|f| f.name == name) {
+                        Some(i) => {
+                            if out[i].is_some() {
+                                self.err(a.span, format!("field `{}` is given twice", name));
+                            }
+                            let fty = fields[i].ty.subst(&targs);
+                            out[i] = Some(self.expr_coerce(&a.value, &fty));
+                        }
+                        None => {
+                            let cands: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
+                            match suggest(&name, cands.iter()) {
+                                Some(c) => self.err_help(a.span, format!("`{}` has no field `{}`", def.name, name), format!("did you mean `{}`?", c)),
+                                None => self.err(a.span, format!("`{}` has no field `{}`", def.name, name)),
+                            }
+                            let _ = self.expr(&a.value, None);
+                        }
+                    }
+                }
+                let mut fs = vec![];
+                let mut missing = vec![];
+                for (i, f) in fields.iter().enumerate() {
+                    match out[i].take() {
+                        Some(e) => fs.push(e),
+                        None => match &f.default {
+                            Some(dv) => {
+                                let mut dv = dv.clone();
+                                dv.ty = dv.ty.subst(&targs);
+                                fs.push(dv);
+                            }
+                            None => {
+                                missing.push(f.name.clone());
+                                fs.push(TExpr { kind: TK::Unit, ty: Ty::Err, span });
+                            }
+                        },
+                    }
+                }
+                if !missing.is_empty() {
+                    self.err(span, format!("missing field(s) of `{}`: {}", def.name, missing.join(", ")));
+                }
+                TExpr { kind: TK::Record { def: d, fields: fs }, ty, span }
+            }
+            TypeKind::Newtype(inner) => {
+                if args.len() != 1 || args[0].name.is_some() {
+                    self.err_help(span, format!("`{}` wraps one value", def.name), format!("write `{}(x)`", def.name));
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+                let v = self.expr_coerce(&args[0].value, inner);
+                TExpr { kind: TK::Wrap(Box::new(v)), ty, span }
+            }
+            TypeKind::Builtin if d == self.prog.b.set || d == self.prog.b.map || d == self.prog.b.list => {
+                if !args.is_empty() {
+                    self.err(span, format!("`{}<...>()` takes no arguments", def.name));
+                }
+                let kind = if d == self.prog.b.set {
+                    TK::EmptySet
+                } else if d == self.prog.b.map {
+                    TK::Map(vec![])
+                } else {
+                    TK::List(vec![])
+                };
+                TExpr { kind, ty, span }
+            }
+            TypeKind::Interface { .. } => {
+                self.err(span, format!("`{}` is an interface: build a value of a type that implements it", def.name));
+                TExpr { kind: TK::Unit, ty: Ty::Err, span }
+            }
+            TypeKind::Enum { .. } => {
+                self.err_help(span, format!("`{}` is an enum", def.name), format!("build one of its variants: `{}.Variant(...)`", def.name));
+                TExpr { kind: TK::Unit, ty: Ty::Err, span }
+            }
+            _ => {
+                self.err(span, format!("`{}` can't be built this way", def.name));
+                TExpr { kind: TK::Unit, ty: Ty::Err, span }
+            }
+        }
+    }
+
+    fn variant_ctor(&mut self, d: DefId, idx: usize, args: &[ast::Arg], span: Span, expected: Option<&Ty>) -> TExpr {
+        let def = self.prog.defs[d].clone();
+        let v = match &def.kind {
+            TypeKind::Enum { variants } => variants[idx].clone(),
+            _ => unreachable!(),
+        };
+        let targs: Vec<Ty> = def.generics.iter().map(|_| self.fresh()).collect();
+        if let Some(exp) = expected {
+            let _ = self.try_unify(&Ty::Adt(d, targs.clone()), exp);
+        }
+        let mut out = vec![];
+        if args.len() != v.fields.len() {
+            let hint = v.fields.iter().map(|f| format!("{}: …", f.name)).collect::<Vec<_>>().join(", ");
+            self.err_help(span, format!("`{}` has {} field(s)", v.name, v.fields.len()), format!("write `{}({})`", v.name, hint));
+        }
+        for (i, a) in args.iter().enumerate() {
+            let f = match v.fields.get(i) {
+                Some(f) => f,
+                None => {
+                    let _ = self.expr(&a.value, None);
+                    continue;
+                }
+            };
+            match &a.name {
+                Some(n) if *n == f.name => {}
+                Some(n) => self.err_help(a.span, format!("expected field `{}`, found `{}`", f.name, n), "fields go in the declared order"),
+                None => self.err_help(a.span, format!("fields of `{}` are passed by name", v.name), format!("write `{}: …`", f.name)),
+            }
+            let fty = f.ty.subst(&targs);
+            out.push(self.expr_coerce(&a.value, &fty));
+        }
+        TExpr { kind: TK::Variant { def: d, idx, fields: out }, ty: Ty::Adt(d, targs), span }
+    }
+
+    // ---- operators ----
+
+    fn binary(&mut self, op: BinOp, l: TExpr, r: TExpr, span: Span, _expected: Option<&Ty>) -> TExpr {
+        let lt = self.resolve(&l.ty);
+        let rt = self.resolve(&r.ty);
+        let mk = |kind, ty| TExpr { kind, ty, span };
+        let bad = |c: &mut Checker, msg: String, help: Option<&str>| {
+            match help {
+                Some(h) => c.err_help(span, msg, h),
+                None => c.err(span, msg),
+            }
+            TExpr { kind: TK::Unit, ty: Ty::Err, span }
+        };
+        if lt == Ty::Err || rt == Ty::Err {
+            return mk(TK::Binary(op, Box::new(l), Box::new(r)), if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem) { Ty::Err } else { Ty::Bool });
+        }
+        match op {
+            BinOp::And | BinOp::Or => {
+                let l = self.coerce(l, &Ty::Bool);
+                let r = self.coerce(r, &Ty::Bool);
+                mk(TK::Binary(op, Box::new(l), Box::new(r)), Ty::Bool)
+            }
+            BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Rem => {
+                if lt == Ty::Text || rt == Ty::Text {
+                    return bad(self, "there is no `+` on text".into(), Some("use interpolation: `\"${a}${b}\"`, or `parts.join(\"\")`"));
+                }
+                if matches!(lt, Ty::Adt(d, _) if d == self.prog.b.list) {
+                    return bad(self, "there is no `+` on lists".into(), Some("use `a.concat(b)`, or `xs.append_all(ys)` on a `var`"));
+                }
+                if !matches!(lt, Ty::Int | Ty::Float | Ty::Var(_)) {
+                    let s = self.prog.show(&lt);
+                    return bad(self, format!("arithmetic needs numbers, but this is `{}`", s), None);
+                }
+                if !self.try_unify(&lt, &rt) {
+                    let (a, b) = (self.prog.show(&lt), self.prog.show(&rt));
+                    let help = if (lt == Ty::Int && rt == Ty::Float) || (lt == Ty::Float && rt == Ty::Int) {
+                        Some("numbers don't convert on their own: use `n.to_float()`")
+                    } else {
+                        None
+                    };
+                    return bad(self, format!("can't combine `{}` and `{}`", a, b), help);
+                }
+                let t = self.resolve(&lt);
+                if op == BinOp::Div && t == Ty::Int {
+                    return bad(self, "`/` on two `Int`s is not allowed".into(), Some("write `a.div(b)` for whole-number division, or `a.to_float() / b.to_float()`"));
+                }
+                if op == BinOp::Rem && t != Ty::Int {
+                    return bad(self, "`%` works on `Int` only".into(), None);
+                }
+                mk(TK::Binary(op, Box::new(l), Box::new(r)), t)
+            }
+            BinOp::Eq | BinOp::Ne => {
+                // T? == T: wrap the plain side
+                let (l, r) = match (&lt, &rt) {
+                    (Ty::Opt(_), Ty::Opt(_)) => (l, r),
+                    (Ty::Opt(_), _) => {
+                        let lt2 = lt.clone();
+                        let r = self.coerce(r, &lt2);
+                        (l, r)
+                    }
+                    (_, Ty::Opt(_)) => {
+                        let rt2 = rt.clone();
+                        let l = self.coerce(l, &rt2);
+                        (l, r)
+                    }
+                    _ => {
+                        let r = self.coerce(r, &lt);
+                        (l, r)
+                    }
+                };
+                let t = self.resolve(&l.ty);
+                if contains_fn(&t, &self.prog) {
+                    return bad(self, "functions can't be compared".into(), None);
+                }
+                mk(TK::Binary(op, Box::new(l), Box::new(r)), Ty::Bool)
+            }
+            BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                if !self.try_unify(&lt, &rt) {
+                    let (a, b) = (self.prog.show(&lt), self.prog.show(&rt));
+                    return bad(self, format!("can't compare `{}` and `{}`", a, b), None);
+                }
+                let t = self.resolve(&lt);
+                if !orderable(&t) && !matches!(t, Ty::Var(_)) {
+                    let s = self.prog.show(&t);
+                    let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers and text can be ordered; compare a field instead") };
+                    return bad(self, format!("`{}` values can't be ordered", s), help);
+                }
+                mk(TK::Binary(op, Box::new(l), Box::new(r)), Ty::Bool)
+            }
+        }
+    }
+
+    // ---- lambdas ----
+
+    fn lambda(&mut self, params: &[(String, Span)], body: &Expr, span: Span, expected: Option<&Ty>) -> TExpr {
+        let exp = expected.map(|t| self.resolve(t));
+        // a named function type wraps the lambda
+        if let Some(Ty::Adt(d, _)) = &exp {
+            if let TypeKind::Newtype(inner @ Ty::Func(_)) = self.prog.defs[*d].kind.clone() {
+                let l = self.lambda(params, body, span, Some(&inner));
+                let l = self.coerce(l, &inner);
+                return TExpr { kind: TK::Wrap(Box::new(l)), ty: exp.clone().unwrap(), span };
+            }
+        }
+        let (ptys, ret, throws_allowed) = match &exp {
+            Some(Ty::Func(f)) => {
+                if f.params.len() != params.len() {
+                    self.err(span, format!("this lambda takes {} parameter(s), but {} are expected here", params.len(), f.params.len()));
+                }
+                let ps: Vec<Ty> = (0..params.len()).map(|i| f.params.get(i).cloned().unwrap_or(Ty::Err)).collect();
+                (ps, f.ret.clone(), f.throws)
+            }
+            _ => {
+                let ps: Vec<Ty> = params.iter().map(|_| self.fresh()).collect();
+                let r = self.fresh();
+                (ps, r, true)
+            }
+        };
+        self.fcx().scopes.push(HashMap::new());
+        let level = self.fc().lambdas.len() + 1;
+        self.fcx().lambdas.push(LambdaCtx { level, captures: vec![], throws: false, ret: ret.clone() });
+        let mut pids = vec![];
+        for (i, (n, sp)) in params.iter().enumerate() {
+            pids.push(self.declare(*sp, n, ptys[i].clone(), false));
+        }
+        let saved_loops = std::mem::take(&mut self.fcx().loops);
+        let b = match &body.kind {
+            ExprKind::Block(blk) => {
+                let tb = self.block(blk, true, Some(&ret));
+                let ty = tb.ty.clone();
+                TExpr { kind: TK::Block(tb), ty, span: body.span }
+            }
+            _ => self.expr(body, Some(&ret)),
+        };
+        self.fcx().loops = saved_loops;
+        let lc = self.fcx().lambdas.pop().unwrap();
+        self.fcx().scopes.pop();
+        let rty = self.resolve(&ret);
+        let _ = rty;
+        let b = self.coerce(b, &ret);
+        if lc.throws && !throws_allowed {
+            self.err_help(span, "this lambda uses `try`, but a function that can't fail is expected here", "handle the error inside: `try f(x) catch err { fallback }`");
+        }
+        // captures that belong to this lambda (declared outside of it)
+        let captures: Vec<LocalId> = lc.captures.iter().copied().filter(|c| self.fc().level[*c] < level).collect();
+        let fty = Ty::func(ptys, ret, lc.throws);
+        TExpr { kind: TK::Lambda { params: pids, captures, body: Box::new(b) }, ty: fty, span }
+    }
+
+    // ---- if / match ----
+
+    fn if_expr(&mut self, cond: &Expr, then: &ast::Block, els: Option<&Expr>, span: Span, expected: Option<&Ty>, want: bool) -> TExpr {
+        // `if x is P { } else { }` and `if x is P and c { }` become a match
+        let (is_part, guard) = match &cond.kind {
+            ExprKind::Is(..) => (Some(cond), None),
+            ExprKind::Binary(BinOp::And, l, r) if matches!(l.kind, ExprKind::Is(..)) => (Some(&**l), Some(&**r)),
+            _ => (None, None),
+        };
+        let want = want && !(els.is_none() && expected.is_none());
+        if let Some(Expr { kind: ExprKind::Is(scrut, pat), .. }) = is_part {
+            if pattern_binds(pat) || guard.is_some() || is_type_test(pat) {
+                let s = self.expr(scrut, None);
+                let sty = s.ty.clone();
+                self.fcx().scopes.push(HashMap::new());
+                let p = self.pattern_narrow(pat, &sty, scrut);
+                let g = guard.map(|g| self.expr_coerce(g, &Ty::Bool));
+                let tb = self.block(then, want, expected);
+                self.fcx().scopes.pop();
+                let then_e = TExpr { ty: tb.ty.clone(), kind: TK::Block(tb), span: then.span };
+                if !want {
+                    self.fcx().stmt_pos = true;
+                }
+                let els_e = match els {
+                    Some(e) => self.expr(e, expected),
+                    None => TExpr { kind: TK::Unit, ty: Ty::Unit, span },
+                };
+                self.fcx().stmt_pos = false;
+                let ty = self.join_types(&then_e, &els_e, els.is_some(), want, span, expected);
+                let then_e = self.coerce_branch(then_e, &ty);
+                let els_e = self.coerce_branch(els_e, &ty);
+                let arms = vec![
+                    TArm { pat: p, guard: g, body: then_e },
+                    TArm { pat: TPat::Wild, guard: None, body: els_e },
+                ];
+                return TExpr { kind: TK::Match { scrut: Box::new(s), arms }, ty, span };
+            }
+        }
+        let c = self.expr_coerce(cond, &Ty::Bool);
+        let tb = self.block(then, want, expected);
+        let then_ty = tb.ty.clone();
+        if !want {
+            self.fcx().stmt_pos = true;
+        }
+        let els_e = els.map(|e| self.expr(e, expected));
+        self.fcx().stmt_pos = false;
+        let then_e = TExpr { kind: TK::Unit, ty: then_ty, span: then.span };
+        let unit = TExpr { kind: TK::Unit, ty: Ty::Unit, span };
+        let ty = self.join_types(&then_e, els_e.as_ref().unwrap_or(&unit), els.is_some(), want, span, expected);
+        let mut tb = tb;
+        if let Some(t) = tb.tail.take() {
+            tb.tail = Some(Box::new(self.coerce_branch(*t, &ty)));
+        }
+        let els_e = els_e.map(|e| Box::new(self.coerce_branch(e, &ty)));
+        TExpr { kind: TK::If { cond: Box::new(c), then: tb, els: els_e }, ty, span }
+    }
+
+    fn coerce_branch(&mut self, e: TExpr, ty: &Ty) -> TExpr {
+        if *ty == Ty::Unit || e.ty == Ty::Never {
+            return e;
+        }
+        self.coerce(e, ty)
+    }
+
+    fn join_types(&mut self, a: &TExpr, b: &TExpr, has_else: bool, want: bool, span: Span, expected: Option<&Ty>) -> Ty {
+        if !want {
+            return Ty::Unit;
+        }
+        if !has_else {
+            if a.ty != Ty::Unit && a.ty != Ty::Never {
+                self.err_help(span, "an `if` used as a value needs an `else`", "add `else { ... }`");
+            }
+            return Ty::Unit;
+        }
+        let (at, bt) = (self.resolve(&a.ty), self.resolve(&b.ty));
+        if at == Ty::Never {
+            return expected.map(|t| self.resolve(t)).filter(|t| !matches!(t, Ty::Var(_))).unwrap_or(bt);
+        }
+        if bt == Ty::Never {
+            return expected.map(|t| self.resolve(t)).filter(|t| !matches!(t, Ty::Var(_))).unwrap_or(at);
+        }
+        if let Some(e) = expected {
+            let e = self.resolve(e);
+            if !matches!(e, Ty::Var(_)) {
+                return e;
+            }
+        }
+        if !self.try_unify(&at, &bt) {
+            // T and T? join to T?
+            match (&at, &bt) {
+                (Ty::Opt(x), y) | (y, Ty::Opt(x)) if **x == *y => return Ty::opt(y.clone()),
+                _ => {}
+            }
+            let (x, y) = (self.prog.show(&at), self.prog.show(&bt));
+            self.err(span, format!("the branches have different types: `{}` and `{}`", x, y));
+            return Ty::Err;
+        }
+        self.resolve(&at)
+    }
+
+    fn match_expr(&mut self, scrut: &Expr, arms: &[ast::MatchArm], span: Span, expected: Option<&Ty>, want: bool) -> TExpr {
+        let s = self.expr(scrut, None);
+        let sty = self.resolve(&s.ty);
+        let mut tarms = vec![];
+        let mut result: Option<Ty> = expected.map(|t| self.resolve(t)).filter(|t| !matches!(t, Ty::Var(_)));
+        for a in arms {
+            self.fcx().scopes.push(HashMap::new());
+            let p = self.pattern(&a.pat, &sty);
+            let g = a.guard.as_ref().map(|g| self.expr_coerce(g, &Ty::Bool));
+            if !want {
+                self.fcx().stmt_pos = true;
+            }
+            let body = self.expr(&a.body, if want { result.as_ref().or(expected) } else { None });
+            self.fcx().stmt_pos = false;
+            self.fcx().scopes.pop();
+            let bt = self.resolve(&body.ty);
+            if want && bt != Ty::Never {
+                match &result {
+                    None => result = Some(bt),
+                    Some(r) => {
+                        let r = r.clone();
+                        if !self.try_unify(&r, &bt) {
+                            match (&r, &bt) {
+                                (Ty::Opt(x), y) if **x == *y => {}
+                                (y, Ty::Opt(x)) if **x == *y => result = Some(Ty::opt(y.clone())),
+                                (Ty::Iface(_), _) => {}
+                                _ => {
+                                    let (x, y) = (self.prog.show(&r), self.prog.show(&bt));
+                                    self.err(a.body.span, format!("the arms have different types: `{}` and `{}`", x, y));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            tarms.push(TArm { pat: p, guard: g, body });
+        }
+        let ty = if want { result.unwrap_or(Ty::Never) } else { Ty::Unit };
+        if want {
+            for a in tarms.iter_mut() {
+                let b = std::mem::replace(&mut a.body, TExpr { kind: TK::Unit, ty: Ty::Unit, span });
+                a.body = self.coerce_branch(b, &ty);
+            }
+        }
+        self.exhaustive(&sty, &tarms, span);
+        let ty = if !want && tarms.iter().all(|a| a.body.ty == Ty::Never) && !tarms.is_empty() { Ty::Never } else { ty };
+        TExpr { kind: TK::Match { scrut: Box::new(s), arms: tarms }, ty, span }
+    }
+
+    fn exhaustive(&mut self, ty: &Ty, arms: &[TArm], span: Span) {
+        let total = |p: &TPat| matches!(p, TPat::Wild | TPat::Bind(_)) || matches!(p, TPat::Record { args } if args.iter().all(|a| matches!(a, TPat::Wild | TPat::Bind(_))));
+        if arms.iter().any(|a| a.guard.is_none() && total(&a.pat)) {
+            return;
+        }
+        match ty {
+            Ty::Adt(d, _) => {
+                if let TypeKind::Enum { variants } = &self.prog.defs[*d].kind {
+                    let mut covered = vec![false; variants.len()];
+                    for a in arms {
+                        if a.guard.is_some() {
+                            continue;
+                        }
+                        if let TPat::Variant { idx, args } = &a.pat {
+                            if args.iter().all(|x| matches!(x, TPat::Wild | TPat::Bind(_))) {
+                                covered[*idx] = true;
+                            }
+                        }
+                    }
+                    let missing: Vec<String> = variants.iter().zip(&covered).filter(|(_, c)| !**c).map(|(v, _)| v.name.clone()).collect();
+                    if !missing.is_empty() {
+                        self.err_help(span, format!("`match` doesn't cover: {}", missing.join(", ")), "add the missing cases, or `_ => ...`");
+                    }
+                    return;
+                }
+                self.err_help(span, "`match` doesn't cover every value", "add `_ => ...`");
+            }
+            Ty::Bool => {
+                let t = arms.iter().any(|a| a.guard.is_none() && matches!(a.pat, TPat::Bool(true)));
+                let f = arms.iter().any(|a| a.guard.is_none() && matches!(a.pat, TPat::Bool(false)));
+                if !(t && f) {
+                    self.err_help(span, "`match` doesn't cover every value", "add `_ => ...`");
+                }
+            }
+            Ty::Opt(_) => {
+                let s = arms.iter().any(|a| a.guard.is_none() && matches!(&a.pat, TPat::Some(p) if total(p)));
+                let n = arms.iter().any(|a| a.guard.is_none() && matches!(a.pat, TPat::None));
+                if !(s && n) {
+                    self.err_help(span, "`match` doesn't cover every value", if !n { "add `none => ...`" } else { "add `some(v) => ...`" });
+                }
+            }
+            Ty::Err | Ty::Never => {}
+            _ => self.err_help(span, "`match` doesn't cover every value", "add `_ => ...`"),
+        }
+    }
+
+    // Like `pattern`, but `if err is NotFound { ... }` rebinds `err` as the
+    // record inside the block (flow typing).
+    fn pattern_narrow(&mut self, pat: &Pattern, ty: &Ty, scrut: &Expr) -> TPat {
+        if let (Pattern::Ctor { path, args: None, span }, ExprKind::Ident(name)) = (pat, &scrut.kind) {
+            if let Ty::Iface(_) = self.resolve(ty) {
+                let p = self.pattern(pat, ty);
+                if let TPat::Type { def, targs, args, .. } = p {
+                    let rt = Ty::Adt(def, targs.clone());
+                    let _ = (path, span);
+                    let id = self.rebind(name, rt);
+                    return TPat::Type { def, targs, args, bind: Some(id) };
+                }
+                return p;
+            }
+        }
+        self.pattern(pat, ty)
+    }
+
+    fn pattern(&mut self, pat: &Pattern, ty: &Ty) -> TPat {
+        let ty = self.resolve(ty);
+        match pat {
+            Pattern::Wild(_) => TPat::Wild,
+            Pattern::Bind(name, sp) => TPat::Bind(self.declare(*sp, name, ty, false)),
+            Pattern::Int(v, sp) => {
+                if !matches!(ty, Ty::Int | Ty::Err) {
+                    if ty == Ty::Float {
+                        return TPat::Float(*v as f64);
+                    }
+                    let s = self.prog.show(&ty);
+                    self.err(*sp, format!("a number pattern can't match a `{}`", s));
+                }
+                TPat::Int(*v)
+            }
+            Pattern::Float(v, sp) => {
+                if !matches!(ty, Ty::Float | Ty::Err) {
+                    let s = self.prog.show(&ty);
+                    self.err(*sp, format!("a number pattern can't match a `{}`", s));
+                }
+                TPat::Float(*v)
+            }
+            Pattern::Str(s, sp) => {
+                if !matches!(ty, Ty::Text | Ty::Err) {
+                    let t = self.prog.show(&ty);
+                    self.err(*sp, format!("a text pattern can't match a `{}`", t));
+                }
+                TPat::Text(s.clone())
+            }
+            Pattern::Bool(b, sp) => {
+                if !matches!(ty, Ty::Bool | Ty::Err) {
+                    let t = self.prog.show(&ty);
+                    self.err(*sp, format!("`{}` can't match a `{}`", b, t));
+                }
+                TPat::Bool(*b)
+            }
+            Pattern::None(sp) => {
+                if !matches!(ty, Ty::Opt(_) | Ty::Err) {
+                    let t = self.prog.show(&ty);
+                    self.err(*sp, format!("`none` can't match a `{}`: it's never missing", t));
+                }
+                TPat::None
+            }
+            Pattern::Some(inner, sp) => match &ty {
+                Ty::Opt(t) => {
+                    let t = (**t).clone();
+                    TPat::Some(Box::new(self.pattern(inner, &t)))
+                }
+                Ty::Err => TPat::Wild,
+                t => {
+                    let s = self.prog.show(t);
+                    self.err(*sp, format!("`some(...)` can't match a `{}`: it's never missing", s));
+                    TPat::Wild
+                }
+            },
+            Pattern::Ctor { path, args, span } => {
+                let name = path.last().unwrap();
+                match &ty {
+                    Ty::Adt(d, targs) => {
+                        let def = self.prog.defs[*d].clone();
+                        match &def.kind {
+                            TypeKind::Enum { variants } => {
+                                if path.len() == 2 && path[0] != def.name {
+                                    self.err(*span, format!("expected a variant of `{}`", def.name));
+                                }
+                                let idx = match variants.iter().position(|v| v.name == *name) {
+                                    Some(i) => i,
+                                    None => {
+                                        let names: Vec<String> = variants.iter().map(|v| v.name.clone()).collect();
+                                        let help = suggest(name, names.iter()).map(|s| format!("did you mean `{}`?", s)).unwrap_or_else(|| format!("variants: {}", names.join(", ")));
+                                        self.err_help(*span, format!("`{}` has no variant `{}`", def.name, name), help);
+                                        return TPat::Wild;
+                                    }
+                                };
+                                let ftys: Vec<Ty> = variants[idx].fields.iter().map(|f| f.ty.subst(targs)).collect();
+                                let args = self.ctor_args(args.as_deref(), &ftys, name, *span);
+                                TPat::Variant { idx, args }
+                            }
+                            TypeKind::Record { fields } => {
+                                if def.name != *name {
+                                    self.err(*span, format!("expected `{}`", def.name));
+                                }
+                                let ftys: Vec<Ty> = fields.iter().map(|f| f.ty.subst(targs)).collect();
+                                let args = self.ctor_args(args.as_deref(), &ftys, name, *span);
+                                TPat::Record { args }
+                            }
+                            _ => {
+                                self.err(*span, format!("`{}` can't be matched by a pattern", def.name));
+                                TPat::Wild
+                            }
+                        }
+                    }
+                    Ty::Iface(ids) => {
+                        let prelude = self.fc().prelude;
+                        let d = match self.lookup_global(name, prelude) {
+                            Some(Global::Type(d)) => d,
+                            _ => {
+                                self.err(*span, format!("unknown type `{}`", name));
+                                return TPat::Wild;
+                            }
+                        };
+                        if !self.implements(d, ids) {
+                            let (a, b) = (self.prog.defs[d].name.clone(), self.prog.show(&ty));
+                            self.err(*span, format!("`{}` doesn't implement `{}`, so it can never match", a, b));
+                        }
+                        let fields = match &self.prog.defs[d].kind {
+                            TypeKind::Record { fields } => fields.clone(),
+                            _ => vec![],
+                        };
+                        let ftys: Vec<Ty> = fields.iter().map(|f| f.ty.clone()).collect();
+                        let args = match args {
+                            None => vec![],
+                            Some(_) => self.ctor_args(args.as_deref(), &ftys, name, *span),
+                        };
+                        TPat::Type { def: d, targs: vec![], args, bind: None }
+                    }
+                    Ty::Err => TPat::Wild,
+                    t => {
+                        let s = self.prog.show(t);
+                        self.err(*span, format!("`{}` can't match a `{}`", name, s));
+                        TPat::Wild
+                    }
+                }
+            }
+        }
+    }
+
+    fn ctor_args(&mut self, args: Option<&[Pattern]>, ftys: &[Ty], name: &str, span: Span) -> Vec<TPat> {
+        match args {
+            None => ftys.iter().map(|_| TPat::Wild).collect(),
+            Some(ps) => {
+                if ps.len() == 1 && matches!(ps[0], Pattern::Wild(_)) {
+                    return ftys.iter().map(|_| TPat::Wild).collect();
+                }
+                if ps.len() != ftys.len() {
+                    self.err_help(span, format!("`{}` has {} field(s), but the pattern has {}", name, ftys.len(), ps.len()), "bind every field by position, or write `(_)` to ignore them all");
+                }
+                ps.iter().zip(ftys).map(|(p, t)| self.pattern(p, t)).collect()
+            }
+        }
+    }
+
+    // ================= resolving inference variables =================
+
+    fn zonk_ty(&self, t: &Ty, unresolved: &mut Option<bool>) -> Ty {
+        let r = self.resolve(t);
+        if has_var(&r) {
+            if let Some(u) = unresolved {
+                *u = true;
+            }
+            return subst_vars_err(&r);
+        }
+        r
+    }
+
+    fn zonk_block(&self, b: &mut TBlock, un: &mut Option<Span>) {
+        for s in &mut b.stmts {
+            self.zonk_stmt(s, un);
+        }
+        if let Some(t) = &mut b.tail {
+            self.zonk_expr(t, un);
+        }
+        b.ty = self.zonk_ty(&b.ty, &mut None);
+    }
+
+    fn zonk_stmt(&self, s: &mut TStmt, un: &mut Option<Span>) {
+        match s {
+            TStmt::Let(_, e) | TStmt::Discard(e) | TStmt::Expr(e) | TStmt::Throw(e) => self.zonk_expr(e, un),
+            TStmt::Assign(p, e) => {
+                self.zonk_place(p, un);
+                self.zonk_expr(e, un);
+            }
+            TStmt::Return(e) => {
+                if let Some(e) = e {
+                    self.zonk_expr(e, un)
+                }
+            }
+            TStmt::Break | TStmt::Continue => {}
+            TStmt::While(c, b) => {
+                self.zonk_expr(c, un);
+                self.zonk_block(b, un);
+            }
+            TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } => {
+                self.zonk_expr(e, un);
+                self.zonk_block(body, un);
+            }
+            TStmt::ForRange { lo, hi, body, .. } => {
+                self.zonk_expr(lo, un);
+                self.zonk_expr(hi, un);
+                self.zonk_block(body, un);
+            }
+            TStmt::Expect { cond, .. } => self.zonk_expr(cond, un),
+        }
+    }
+
+    fn zonk_place(&self, p: &mut TPlace, un: &mut Option<Span>) {
+        p.ty = self.zonk_ty(&p.ty, &mut None);
+        for el in &mut p.path {
+            match el {
+                PlaceElem::Index(e) | PlaceElem::MapKey(e) => self.zonk_expr(e, un),
+                PlaceElem::Field(_) => {}
+            }
+        }
+    }
+
+    fn zonk_expr(&self, e: &mut TExpr, un: &mut Option<Span>) {
+        let mut u = Some(false);
+        e.ty = self.zonk_ty(&e.ty, &mut u);
+        if u == Some(true) && un.is_none() {
+            *un = Some(e.span);
+        }
+        let zl = |c: &Checker, v: &mut Vec<Ty>| {
+            for t in v.iter_mut() {
+                *t = c.zonk_ty(t, &mut None);
+            }
+        };
+        match &mut e.kind {
+            TK::FnRef(_, targs) => zl(self, targs),
+            TK::Call { callee, args, .. } => {
+                match callee {
+                    Callee::Fn(_, targs) => zl(self, targs),
+                    Callee::Value(f) => self.zonk_expr(f, un),
+                    Callee::Iface { .. } => {}
+                }
+                for a in args {
+                    self.zonk_expr(a, un);
+                }
+            }
+            TK::MutCall { type_args, place, args, .. } => {
+                zl(self, type_args);
+                self.zonk_place(place, un);
+                for a in args {
+                    self.zonk_expr(a, un);
+                }
+            }
+            TK::IfaceMutCall { place, args, .. } => {
+                self.zonk_place(place, un);
+                for a in args {
+                    self.zonk_expr(a, un);
+                }
+            }
+            TK::Record { fields, .. } | TK::Variant { fields, .. } | TK::Interp(fields) | TK::List(fields) => {
+                for f in fields {
+                    self.zonk_expr(f, un);
+                }
+            }
+            TK::Map(entries) => {
+                for (k, v) in entries {
+                    self.zonk_expr(k, un);
+                    self.zonk_expr(v, un);
+                }
+            }
+            TK::Wrap(x) | TK::Unwrap(x) | TK::Field(x, _) | TK::Prop(x, _) | TK::Unary(_, x) | TK::Some(x) | TK::ToIface(x) | TK::ToText(x) | TK::ExpectThrows(x) => {
+                self.zonk_expr(x, un)
+            }
+            TK::Index(a, b) | TK::MapGet(a, b) | TK::Binary(_, a, b) | TK::Coalesce(a, b) => {
+                self.zonk_expr(a, un);
+                self.zonk_expr(b, un);
+            }
+            TK::Lambda { body, .. } => self.zonk_expr(body, un),
+            TK::Block(b) => self.zonk_block(b, un),
+            TK::If { cond, then, els } => {
+                self.zonk_expr(cond, un);
+                self.zonk_block(then, un);
+                if let Some(x) = els {
+                    self.zonk_expr(x, un);
+                }
+            }
+            TK::Match { scrut, arms } => {
+                self.zonk_expr(scrut, un);
+                for a in arms {
+                    self.zonk_pat(&mut a.pat);
+                    if let Some(g) = &mut a.guard {
+                        self.zonk_expr(g, un);
+                    }
+                    self.zonk_expr(&mut a.body, un);
+                }
+            }
+            TK::Is(x, p) => {
+                self.zonk_expr(x, un);
+                self.zonk_pat(p);
+            }
+            TK::Try { call, catch } => {
+                self.zonk_expr(call, un);
+                if let Some((_, b)) = catch {
+                    self.zonk_block(b, un);
+                }
+            }
+            TK::Diverge(s) => self.zonk_stmt(s, un),
+            _ => {}
+        }
+    }
+
+    fn zonk_pat(&self, p: &mut TPat) {
+        match p {
+            TPat::Some(x) => self.zonk_pat(x),
+            TPat::Variant { args, .. } | TPat::Record { args } => {
+                for a in args {
+                    self.zonk_pat(a)
+                }
+            }
+            TPat::Type { targs, args, .. } => {
+                for t in targs.iter_mut() {
+                    *t = self.zonk_ty(t, &mut None);
+                }
+                for a in args {
+                    self.zonk_pat(a)
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn has_var(t: &Ty) -> bool {
+    match t {
+        Ty::Var(_) => true,
+        Ty::Adt(_, a) => a.iter().any(has_var),
+        Ty::Opt(x) => has_var(x),
+        Ty::Func(f) => f.params.iter().any(has_var) || has_var(&f.ret),
+        _ => false,
+    }
+}
+
+fn subst_vars_err(t: &Ty) -> Ty {
+    match t {
+        Ty::Var(_) => Ty::Err,
+        Ty::Adt(d, a) => Ty::Adt(*d, a.iter().map(subst_vars_err).collect()),
+        Ty::Opt(x) => Ty::opt(subst_vars_err(x)),
+        Ty::Func(f) => Ty::func(f.params.iter().map(subst_vars_err).collect(), subst_vars_err(&f.ret), f.throws),
+        t => t.clone(),
+    }
+}
+
+fn contains_fn(t: &Ty, p: &Program) -> bool {
+    match t {
+        Ty::Func(_) => true,
+        Ty::Opt(x) => contains_fn(x, p),
+        Ty::Adt(d, a) => {
+            if a.iter().any(|x| contains_fn(x, p)) {
+                return true;
+            }
+            match &p.defs[*d].kind {
+                TypeKind::Record { fields } => fields.iter().any(|f| matches!(f.ty, Ty::Func(_))),
+                TypeKind::Newtype(Ty::Func(_)) => true,
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+fn is_literal(e: &Expr) -> bool {
+    matches!(e.kind, ExprKind::Int(_) | ExprKind::Float(_))
+}
+
+fn pattern_binds(p: &Pattern) -> bool {
+    match p {
+        Pattern::Bind(..) => true,
+        Pattern::Some(x, _) => pattern_binds(x),
+        Pattern::Ctor { args: Some(a), .. } => a.iter().any(pattern_binds),
+        _ => false,
+    }
+}
+
+fn is_type_test(p: &Pattern) -> bool {
+    matches!(p, Pattern::Ctor { args: None, .. })
+}
+
+fn stmt_span(s: &Stmt) -> Span {
+    match s {
+        Stmt::Let { span, .. } | Stmt::Assign { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::With { span, .. } | Stmt::Expect { span, .. } => *span,
+        Stmt::Return(_, s) | Stmt::Break(s) | Stmt::Continue(s) | Stmt::Throw(_, s) => *s,
+        Stmt::Expr(e) => e.span,
+    }
+}
+
+fn stmt_diverges(s: &TStmt) -> bool {
+    match s {
+        TStmt::Return(_) | TStmt::Break | TStmt::Continue | TStmt::Throw(_) => true,
+        TStmt::Expr(e) => e.ty == Ty::Never,
+        TStmt::Let(_, e) => e.ty == Ty::Never,
+        _ => false,
+    }
+}

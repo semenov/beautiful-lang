@@ -1,0 +1,60 @@
+type Product {
+  name: Text
+  price: Float
+  stock: Int
+}
+
+fn restock(products: List<Product>, name: Text, amount: Int) -> List<Product> {
+  var result = products
+  for i in 0..<result.length {
+    if result[i].name == name {
+      result[i].stock += amount
+    }
+  }
+  return result
+}
+
+fn low_stock_names(products: List<Product>) -> List<Text> {
+  return products
+    .filter(p => p.stock < 5)
+    .sorted_by(p => p.stock)
+    .map(p => p.name)
+}
+
+fn average_stock(products: List<Product>) -> Float {
+  if products.is_empty() {
+    return 0.0
+  }
+  let total = products.map(p => p.stock).sum()
+  return total.to_float() / products.length.to_float()
+}
+
+test "restock adds to the named product" {
+  var products = [
+    Product(name: "Widget", price: 9.99, stock: 3),
+    Product(name: "Gadget", price: 19.99, stock: 12)
+  ]
+  products = restock(products, name: "Widget", amount: 10)
+  expect products[0].stock == 13
+  expect products[1].stock == 12
+}
+
+test "low stock names are sorted" {
+  let products = [
+    Product(name: "A", price: 1.0, stock: 4),
+    Product(name: "B", price: 1.0, stock: 1),
+    Product(name: "C", price: 1.0, stock: 10)
+  ]
+  expect low_stock_names(products) == ["B", "A"]
+}
+
+fn main() {
+  var products = [
+    Product(name: "Widget", price: 9.99, stock: 3),
+    Product(name: "Gadget", price: 19.99, stock: 12),
+    Product(name: "Gizmo", price: 4.50, stock: 1)
+  ]
+  products = restock(products, name: "Widget", amount: 10)
+  print("low stock: ${low_stock_names(products).join(", ")}")
+  print("average stock: ${average_stock(products)}")
+}

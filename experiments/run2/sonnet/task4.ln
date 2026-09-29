@@ -1,0 +1,42 @@
+# Bank transfer: move money between two accounts.
+
+type Account
+  id: Text
+  balance: Decimal
+
+fn transfer(from: Account, to: Account, amount: Decimal) throws -> (Account, Account)
+  require amount > 0
+  if amount > from.balance
+    throw Error("insufficient funds in account {from.id}")
+  return (
+    from.with(balance: from.balance - amount),
+    to.with(balance: to.balance + amount),
+  )
+
+# A call site that handles the failure instead of propagating it.
+fn move_funds(from: Account, to: Account, amount: Decimal) -> (Account, Account)
+  try
+    return try transfer(from, to: to, amount: amount)
+  catch err
+    print("transfer failed: {err.message}")
+    return (from, to)
+
+test "transfer moves money between accounts"
+  let alice = Account(id: "alice", balance: 100)
+  let bob = Account(id: "bob", balance: 20)
+  let (new_alice, new_bob) = try transfer(alice, to: bob, amount: 30)
+  expect new_alice.balance == 70
+  expect new_bob.balance == 50
+
+test "transfer fails with a clear error when there isn't enough money"
+  let alice = Account(id: "alice", balance: 10)
+  let bob = Account(id: "bob", balance: 0)
+  let err = expect throws transfer(alice, to: bob, amount: 30)
+  expect err.message.contains("insufficient")
+
+test "move_funds recovers from a failed transfer"
+  let alice = Account(id: "alice", balance: 10)
+  let bob = Account(id: "bob", balance: 0)
+  let (still_alice, still_bob) = move_funds(alice, to: bob, amount: 30)
+  expect still_alice.balance == 10
+  expect still_bob.balance == 0

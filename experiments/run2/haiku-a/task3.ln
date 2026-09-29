@@ -1,0 +1,54 @@
+# Task 3: Shapes
+
+enum Shape
+  Circle(radius: Float)
+  Rectangle(width: Float, height: Float)
+  Triangle(base: Float, height: Float)
+
+fn area(shape: Shape) -> Float
+  return match shape
+    case Circle(r) => PI * r ^ 2
+    case Rectangle(w, h) => w * h
+    case Triangle(b, h) => b * h / 2
+
+fn total_area(shapes: List<Shape>) -> Float
+  return shapes.map(area).sum()
+
+fn size_category(shape: Shape) -> Text
+  let a = area(shape)
+  if a < 10
+    return "small"
+  else if a < 100
+    return "medium"
+  else
+    return "large"
+
+fn describe_shapes(shapes: List<Shape>) -> List<Text>
+  return shapes.map(s => "{size_category(s)}: {area(s)}")
+
+test "area of circle"
+  let circle = Circle(radius: 2)
+  expect area(circle) == PI * 4
+
+test "area of rectangle"
+  let rect = Rectangle(width: 3, height: 4)
+  expect area(rect) == 12
+
+test "area of triangle"
+  let tri = Triangle(base: 3, height: 4)
+  expect area(tri) == 6
+
+test "total area"
+  let shapes = [
+    Circle(radius: 2),
+    Rectangle(width: 3, height: 4),
+  ]
+  expect total_area(shapes) == PI * 4 + 12
+
+test "size categories"
+  let small = Circle(radius: 1)
+  let medium = Circle(radius: 4)
+  let large = Circle(radius: 8)
+  expect size_category(small) == "small"
+  expect size_category(medium) == "medium"
+  expect size_category(large) == "large"

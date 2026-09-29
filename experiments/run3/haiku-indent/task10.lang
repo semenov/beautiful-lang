@@ -1,0 +1,94 @@
+type Rule = fn(Decimal) -> Decimal
+
+fn percent_off(percent: Int) -> Rule
+  return amount => amount * (100 - percent).to_decimal() / 100
+
+fn cap_at(max_amount: Decimal) -> Rule
+  return amount => min(amount, max_amount)
+
+fn combine_rules(rules: List<Rule>) -> Rule
+  return amount =>
+    var result = amount
+    for rule in rules
+      result = rule(result)
+    result
+
+interface Describable
+  fn describe(self) -> Text
+
+type Product implements Describable
+  name: Text
+  price: Decimal
+
+  fn describe(self) -> Text
+    return "Product: ${self.name} (${self.price})"
+
+type Service implements Describable
+  name: Text
+  hourly_rate: Decimal
+  hours: Int
+
+  fn describe(self) -> Text
+    let total = self.hourly_rate * self.hours.to_decimal()
+    return "Service: ${self.name} (${total} for ${self.hours} hours)"
+
+fn print_report(items: List<Describable>)
+  for item in items
+    print(item.describe())
+
+fn main()
+  let rules = [
+    percent_off(10),
+    cap_at(50),
+  ]
+
+  let combined = combine_rules(rules)
+
+  let original: Decimal = 100
+  let discounted = combined(original)
+
+  print("Original price: ${original}")
+  print("After rules: ${discounted}")
+
+  let items: List<Describable> = [
+    Product(name: "Widget", price: 29.99),
+    Service(name: "Consulting", hourly_rate: 150, hours: 5),
+    Product(name: "Gadget", price: 49.99),
+  ]
+
+  print("Items in order:")
+  print_report(items)
+
+test "percent_off rule"
+  let rule = percent_off(20)
+  let price: Decimal = 100
+  let result = rule(price)
+  expect result == 80
+
+test "cap_at rule"
+  let rule = cap_at(50)
+  let price: Decimal = 100
+  let result = rule(price)
+  expect result == 50
+
+test "combine rules"
+  let rules = [
+    percent_off(10),
+    cap_at(50),
+  ]
+  let combined = combine_rules(rules)
+  let price: Decimal = 100
+  let result = combined(price)
+  expect result == 50
+
+test "product describe"
+  let product = Product(name: "Widget", price: 29.99)
+  let description = product.describe()
+  expect description.contains("Widget")
+  expect description.contains("29.99")
+
+test "service describe"
+  let service = Service(name: "Dev", hourly_rate: 100, hours: 8)
+  let description = service.describe()
+  expect description.contains("Dev")
+  expect description.contains("8 hours")

@@ -1,0 +1,43 @@
+# Task 8: Stack
+
+type Stack<T>
+  items: List<T> = []
+
+fn push<T>(stack: var Stack<T>, item: T)
+  stack.items.append(item)
+
+fn pop<T>(stack: var Stack<T>) -> T?
+  if stack.items.is_empty()
+    return none
+  return stack.items.pop()
+
+fn peek<T>(stack: Stack<T>) -> T?
+  if stack.items.is_empty()
+    return none
+  return stack.items.last()
+
+test "stack with numbers"
+  var stack = Stack<Int>()
+  push(stack, item: 1)
+  push(stack, item: 2)
+  push(stack, item: 3)
+  expect peek(stack) == some(3)
+  expect pop(stack) == some(3)
+  expect pop(stack) == some(2)
+  expect pop(stack) == some(1)
+  expect pop(stack) == none
+
+test "stack with text"
+  var stack = Stack<Text>()
+  push(stack, item: "hello")
+  push(stack, item: "world")
+  expect peek(stack) == some("world")
+  expect pop(stack) == some("world")
+  expect peek(stack) == some("hello")
+
+test "peek does not modify stack"
+  var stack = Stack<Int>()
+  push(stack, item: 42)
+  expect peek(stack) == some(42)
+  expect peek(stack) == some(42)
+  expect stack.items.length == 1

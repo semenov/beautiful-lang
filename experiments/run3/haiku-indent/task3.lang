@@ -1,0 +1,80 @@
+type AccountId = Int
+type CustomerId = Int
+
+type Account
+  id: AccountId
+  balance: Decimal
+
+type InsufficientFunds implements Error
+  message: Text
+
+  fn message(self) -> Text
+    return self.message
+
+type AccountNotFound implements Error
+  message: Text
+
+  fn message(self) -> Text
+    return self.message
+
+fn transfer(var accounts: Map<AccountId, Account>, from_id: AccountId, to_id: AccountId, amount: Decimal) throws
+  if amount <= 0
+    throw InsufficientFunds(message: "Transfer amount must be positive")
+
+  if not accounts.contains_key(from_id)
+    throw AccountNotFound(message: "Account ${from_id.value} not found")
+
+  if not accounts.contains_key(to_id)
+    throw AccountNotFound(message: "Account ${to_id.value} not found")
+
+  if accounts[from_id].balance < amount
+    throw InsufficientFunds(message: "Account ${from_id.value} has insufficient funds")
+
+  accounts[from_id].balance -= amount
+  accounts[to_id].balance += amount
+
+fn main() throws
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), balance: 1000),
+    AccountId(2): Account(id: AccountId(2), balance: 500),
+    AccountId(3): Account(id: AccountId(3), balance: 100),
+  }
+
+  let from = AccountId(1)
+  let to = AccountId(2)
+  let amount: Decimal = 100
+
+  try transfer(&accounts, from: from, to: to, amount: amount) catch err
+    if err is InsufficientFunds(_)
+      print("Error: insufficient funds")
+    else if err is AccountNotFound(e)
+      print("Error: ${e.message}")
+    throw err
+
+  print("Transfer successful")
+  print("Account 1 balance: ${accounts[from].balance}")
+  print("Account 2 balance: ${accounts[to].balance}")
+
+test "transfer succeeds with sufficient funds"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), balance: 1000),
+    AccountId(2): Account(id: AccountId(2), balance: 500),
+  }
+  try transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 100)
+  expect accounts[AccountId(1)].balance == 900
+  expect accounts[AccountId(2)].balance == 600
+
+test "transfer fails with insufficient funds"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), balance: 50),
+    AccountId(2): Account(id: AccountId(2), balance: 500),
+  }
+  let err = expect throws transfer(&accounts, from: AccountId(1), to: AccountId(2), amount: 100)
+  expect err is InsufficientFunds(_)
+
+test "transfer fails with missing account"
+  var accounts: Map<AccountId, Account> = {
+    AccountId(1): Account(id: AccountId(1), balance: 1000),
+  }
+  let err = expect throws transfer(&accounts, from: AccountId(1), to: AccountId(99), amount: 100)
+  expect err is AccountNotFound(_)

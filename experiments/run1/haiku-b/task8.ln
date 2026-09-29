@@ -1,0 +1,57 @@
+# Task 8: Generic Stack
+
+type Stack<T>
+  items: List<T>
+
+fn empty<T>() -> Stack<T>
+  return Stack(items: [])
+
+fn push<T>(stack: Stack<T>, value: T) -> Stack<T>
+  let new_items = stack.items
+  new_items.push(value)
+  return Stack(items: new_items)
+
+fn pop<T>(stack: Stack<T>) -> (Stack<T>, T?)
+  if stack.items.is_empty()
+    return (stack, none)
+
+  let last_idx = stack.items.length - 1
+  let popped = stack.items[last_idx]
+  let remaining = stack.items.take(last_idx)
+  return (Stack(items: remaining), some(popped))
+
+fn peek<T>(stack: Stack<T>) -> T?
+  if stack.items.is_empty()
+    return none
+
+  let last_idx = stack.items.length - 1
+  return some(stack.items[last_idx])
+
+test "stack with integers"
+  let s = empty<Int>()
+  let s2 = push(s, value: 1)
+  let s3 = push(s2, value: 2)
+  let s4 = push(s3, value: 3)
+
+  expect peek(s4) == some(3)
+
+  let (s5, popped) = pop(s4)
+  expect popped == some(3)
+  expect peek(s5) == some(2)
+
+test "stack with text"
+  let s = empty<Text>()
+  let s2 = push(s, value: "hello")
+  let s3 = push(s2, value: "world")
+
+  expect peek(s3) == some("world")
+
+  let (s4, popped) = pop(s3)
+  expect popped == some("world")
+  expect peek(s4) == some("hello")
+
+test "pop from empty stack"
+  let s = empty<Int>()
+  let (s2, popped) = pop(s)
+  expect popped == none
+  expect peek(s2) == none

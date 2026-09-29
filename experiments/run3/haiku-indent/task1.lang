@@ -1,0 +1,61 @@
+import files
+import json
+
+pub type Product
+  name: Text
+  price: Decimal
+  stock: Int
+
+fn restock(var products: List<Product>, product_name: Text, amount: Int)
+  for i in 0..<products.length
+    if products[i].name == product_name
+      products[i].stock += amount
+      return
+
+fn low_stock_products(products: List<Product>) -> List<Text>
+  let low = products.filter(p => p.stock < 5)
+  let sorted = low.sorted_by(p => p.stock)
+  return sorted.map(p => p.name)
+
+fn average_stock(products: List<Product>) -> Float
+  if products.is_empty()
+    return 0.0
+  let total = products.fold(start: 0, step: (sum, p) => sum + p.stock)
+  return total.to_float() / products.length.to_float()
+
+fn main()
+  var products: List<Product> = [
+    Product(name: "Widget", price: 19.99, stock: 2),
+    Product(name: "Gadget", price: 29.99, stock: 8),
+    Product(name: "Doohickey", price: 9.99, stock: 1),
+    Product(name: "Thingamajig", price: 39.99, stock: 15),
+  ]
+
+  restock(&products, "Widget", 3)
+
+  let low = low_stock_products(products)
+  print("Low stock items: ${low}")
+
+  let avg = average_stock(products)
+  print("Average stock: ${avg}")
+
+test "restock increases stock"
+  var products: List<Product> = [
+    Product(name: "Widget", price: 19.99, stock: 2),
+  ]
+  restock(&products, "Widget", 5)
+  expect products[0].stock == 7
+
+test "low_stock_products returns sorted list"
+  let products: List<Product> = [
+    Product(name: "A", price: 1.0, stock: 2),
+    Product(name: "B", price: 1.0, stock: 1),
+    Product(name: "C", price: 1.0, stock: 4),
+  ]
+  let low = low_stock_products(products)
+  expect low == ["B", "A", "C"]
+
+test "average_stock with empty list"
+  let products: List<Product> = []
+  let avg = average_stock(products)
+  expect avg == 0.0

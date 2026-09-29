@@ -1,0 +1,50 @@
+# CSV: parse "name,age" rows into people, skipping malformed lines.
+
+type Person
+  name: Text
+  age: Int
+
+# Parses a single data line, or none if it isn't a well-formed "name,age" row.
+fn parse_line(line: Text) -> Person?
+  let fields = line.split(",")
+  if fields.length != 2
+    return none
+  try
+    let age = try parse_int(fields[1])
+    return Person(name: fields[0], age: age)
+  catch err
+    return none
+
+fn parse_people(text: Text) throws -> List<Person>
+  let lines = text.split("\n")
+  if lines.length == 0 or lines[0] != "name,age"
+    throw Error("missing or invalid header line, expected \"name,age\"")
+  var people: List<Person> = []
+  for line in lines.skip(1)
+    let parsed = parse_line(line)
+    if parsed is some(person)
+      people += [person]
+  return people
+
+test "parses valid rows and skips malformed ones"
+  let text = "name,age\nAda,36\nAlan,41\nbroken\nBob,notanumber"
+  let people = try parse_people(text)
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+  expect people[1].name == "Alan"
+  expect people[1].age == 41
+
+test "fails when the header line is missing"
+  try
+    let people = try parse_people("Ada,36\nAlan,41")
+    expect false
+  catch err
+    expect err.message.length > 0
+
+test "fails when the header line is wrong"
+  try
+    let people = try parse_people("first,years\nAda,36")
+    expect false
+  catch err
+    expect err.message.length > 0

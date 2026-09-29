@@ -1,0 +1,73 @@
+import files
+import tasks
+import cli
+
+type Options
+  args: List<Text>
+
+type LogLine
+  service: Text
+  is_error: Bool
+
+fn parse_log_line(line: Text) -> LogLine?
+  let parts = line.split(" ")
+
+  if parts.length < 2
+    return none
+
+  let service = parts[1]
+  let is_error = line.contains("ERROR")
+
+  return LogLine(service: service, is_error: is_error)
+
+fn process_worker(var jobs: Channel<Text>, var results: Shared<Map<Text, Int>>) throws
+  for line in jobs
+    if line.is_empty()
+      continue
+
+    if line.contains("ERROR")
+      let parts = line.split(" ")
+      if parts.length >= 2
+        let service = parts[1]
+        results.update(counts =>
+          let current = counts[service] ?? 0
+          counts[service] = current + 1
+          counts
+        )
+
+fn main() throws
+  let opts = try cli.decode<Options>()
+
+  if opts.args.is_empty()
+    throw Failure(message: "Usage: task8 <log_file>")
+
+  let log_file = opts.args[0]
+
+  let jobs = Channel<Text>(capacity: 100)
+  let results = Shared<Map<Text, Int>>({})
+
+  with group = try tasks.group()
+    for i in 0..<4
+      group.start(() =>
+        try process_worker(&jobs, results)
+      )
+
+    with file = try files.open(log_file)
+      for line in file.lines()
+        try jobs.send(line)
+
+    jobs.close()
+
+test "parse_log_line with error"
+  let line = "2024-01-01 auth ERROR something happened"
+  let parsed = parse_log_line(line)
+  expect parsed is some(l)
+  if parsed is some(l)
+    expect l.service == "auth"
+    expect l.is_error == true
+
+test "parse_log_line without error"
+  let line = "2024-01-01 api INFO request processed"
+  let parsed = parse_log_line(line)
+  if parsed is some(l)
+    expect l.is_error == false

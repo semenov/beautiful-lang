@@ -1,0 +1,46 @@
+// Task 7: Seed a SQLite database and print users older than a given age.
+
+import cli
+import db
+import env
+
+pub type Config
+  database_url: Text
+
+pub type Options
+  args: List<Text> = []
+
+pub type User
+  id: Int
+  name: Text
+  age: Int
+
+fn main() throws
+  let config = try env.decode<Config>()
+  let options = try cli.decode<Options>()
+  let min_age_text = options.args.first() ?? "0"
+  let min_age = try min_age_text.to_int()
+  with conn = try db.open(config.database_url)
+    let _ = try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [1, "Ada", 36])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [2, "Alan", 41])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [3, "Grace", 29])
+    let users = try conn.query<User>("select * from users where age > ?", [min_age])
+    for user in users
+      print("${user.name} (${user.age})")
+
+test "returns only users older than the given age"
+  with conn = try db.open("sqlite::memory:")
+    let _ = try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [1, "Ada", 36])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [2, "Alan", 41])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [3, "Grace", 29])
+    let users = try conn.query<User>("select * from users where age > ?", [30])
+    expect users.length == 2
+
+test "an age nobody exceeds returns an empty list"
+  with conn = try db.open("sqlite::memory:")
+    let _ = try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+    let _ = try conn.execute("insert into users (id, name, age) values (?, ?, ?)", [1, "Ada", 36])
+    let users = try conn.query<User>("select * from users where age > ?", [100])
+    expect users.length == 0

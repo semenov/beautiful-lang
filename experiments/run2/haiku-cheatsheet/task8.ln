@@ -1,0 +1,33 @@
+resource Stack<T>
+  var items: List<T> = []
+
+fn push<T>(stack: Stack<T>, item: T)
+  stack.items.append(item)
+
+fn pop<T>(stack: Stack<T>) -> T?
+  return stack.items.pop()
+
+fn peek<T>(stack: Stack<T>) -> T?
+  return stack.items.last()
+
+test "stack_with_numbers"
+  let stack = Stack<Int>()
+  push(stack, item: 1)
+  push(stack, item: 2)
+  push(stack, item: 3)
+
+  expect peek(stack) is some(3)
+  expect pop(stack) is some(3)
+  expect pop(stack) is some(2)
+  expect pop(stack) is some(1)
+  expect pop(stack) is none
+
+test "stack_with_text"
+  let stack = Stack<Text>()
+  push(stack, item: "hello")
+  push(stack, item: "world")
+
+  expect peek(stack) is some("world")
+  expect pop(stack) is some("world")
+  expect pop(stack) is some("hello")
+  expect pop(stack) is none

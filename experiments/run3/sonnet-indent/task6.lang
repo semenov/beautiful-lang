@@ -1,0 +1,91 @@
+// Task 6: Fetch three GitHub users concurrently, with an overall timeout
+// and per-user fallback if a fetch fails.
+
+import http
+import json
+import tasks
+import time
+
+pub type GithubUser
+  login: Text
+  name: Text? = none
+  bio: Text? = none
+
+// The fetch is behind an interface so tests can substitute a fake client
+// instead of hitting the network.
+pub interface GithubClient
+  fn fetch(self, username: Text) throws -> GithubUser
+
+pub type HttpGithubClient implements GithubClient
+  fn fetch(self, username: Text) throws -> GithubUser
+    let response = try http.get("https://api.github.com/users/${username}")
+    return try json.decode<GithubUser>(response.body)
+
+pub type FetchOutcome
+  username: Text
+  user: GithubUser? = none
+
+fn fetch_outcome(client: GithubClient, username: Text) -> FetchOutcome
+  let user = try client.fetch(username) catch err
+    none
+  return FetchOutcome(username: username, user: user)
+
+// Fetches every username at the same time, giving up after 5 seconds
+// total. A single failed fetch doesn't stop the others.
+fn fetch_all(client: GithubClient, usernames: List<Text>) throws -> List<FetchOutcome>
+  return try time.timeout(time.seconds(5), () =>
+    with group = try tasks.group()
+      let running = usernames.map(name => group.run(() => fetch_outcome(client, name)))
+      var outcomes: List<FetchOutcome> = []
+      for running_task in running
+        outcomes.append(try running_task.wait())
+      outcomes
+  )
+
+fn print_outcomes(outcomes: List<FetchOutcome>)
+  for outcome in outcomes
+    match outcome.user
+      some(user) =>
+        let display_name = user.name ?? user.login
+        let bio_line = user.bio ?? "no bio"
+        print("${outcome.username}: ${display_name} - ${bio_line}")
+      none =>
+        print("${outcome.username}: could not fetch profile")
+
+fn main() throws
+  let usernames = ["octocat", "torvalds", "gvanrossum"]
+  let client = HttpGithubClient()
+  let outcomes = try fetch_all(client, usernames)
+  print_outcomes(outcomes)
+
+pub type FakeGithubClient implements GithubClient
+  users: Map<Text, GithubUser> = {}
+  failing: Set<Text> = Set<Text>()
+
+  fn fetch(self, username: Text) throws -> GithubUser
+    if self.failing.contains(username)
+      throw Failure(message: "simulated failure for ${username}")
+    match self.users[username]
+      some(user) => return user
+      none => throw Failure(message: "unknown test user ${username}")
+
+test "fetch_all keeps going when one user fails"
+  var client = FakeGithubClient()
+  client.users["ada"] = GithubUser(login: "ada", name: "Ada Lovelace")
+  client.failing.add("broken")
+  let outcomes = try fetch_all(client, ["ada", "broken"])
+  let ada_outcome = outcomes.find(o => o.username == "ada")
+  let broken_outcome = outcomes.find(o => o.username == "broken")
+  match ada_outcome
+    some(outcome) => expect outcome.user != none
+    none => panic("missing ada outcome")
+  match broken_outcome
+    some(outcome) => expect outcome.user == none
+    none => panic("missing broken outcome")
+
+test "fetch_all succeeds when every user is reachable"
+  var client = FakeGithubClient()
+  client.users["ada"] = GithubUser(login: "ada", name: "Ada Lovelace")
+  client.users["alan"] = GithubUser(login: "alan", name: "Alan Turing")
+  let outcomes = try fetch_all(client, ["ada", "alan"])
+  expect outcomes.count(o => o.user == none) == 0

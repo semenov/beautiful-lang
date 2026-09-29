@@ -1,0 +1,44 @@
+# Bank transfer: move money between two accounts, failing clearly when short.
+
+type Account
+  id: Text
+  balance: Decimal
+
+type Transfer
+  from: Account
+  to: Account
+
+fn transfer(amount: Decimal, from: Account, to: Account) throws -> Transfer
+  require amount > 0
+  if amount > from.balance
+    throw Error("insufficient funds: {from.id} has {from.balance}, needs {amount}")
+  return Transfer(
+    from: from.with(balance: from.balance - amount),
+    to: to.with(balance: to.balance + amount),
+  )
+
+test "transfer moves money between accounts"
+  let alice = Account(id: "alice", balance: 100)
+  let bob = Account(id: "bob", balance: 20)
+  let result = try transfer(50, from: alice, to: bob)
+  expect result.from.balance == 50
+  expect result.to.balance == 70
+
+test "transfer fails with insufficient funds"
+  let alice = Account(id: "alice", balance: 10)
+  let bob = Account(id: "bob", balance: 0)
+  try
+    let result = try transfer(50, from: alice, to: bob)
+    expect false
+  catch err
+    expect err.message.length > 0
+
+# A call site that handles the failure.
+let alice = Account(id: "alice", balance: 100)
+let bob = Account(id: "bob", balance: 20)
+
+try
+  let result = try transfer(500, from: alice, to: bob)
+  print("transferred: alice={result.from.balance}, bob={result.to.balance}")
+catch err
+  print("transfer failed: {err.message}")

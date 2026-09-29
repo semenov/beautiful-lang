@@ -1,0 +1,87 @@
+// 2. CSV
+
+import files
+
+type Person {
+  name: Text
+  age: Int
+}
+
+type MissingHeader implements Error {
+  fn message(self) -> Text {
+    return "the CSV is missing its header line"
+  }
+}
+
+type BadHeader implements Error {
+  actual: Text
+
+  fn message(self) -> Text {
+    return "expected header \"name,age\", got \"${self.actual}\""
+  }
+}
+
+fn parse_people(text: Text) throws -> List<Person> {
+  let lines = text.lines()
+
+  if lines.is_empty() {
+    throw MissingHeader()
+  }
+
+  let header = lines[0]
+  if header != "name,age" {
+    throw BadHeader(actual: header)
+  }
+
+  var people: List<Person> = []
+  let rows = lines.drop(1)
+
+  for line in rows {
+    if line.trim().is_empty() {
+      continue
+    }
+
+    let columns = line.split(",")
+    if columns.length != 2 {
+      continue
+    }
+
+    let age = try columns[1].to_int() catch err {
+      continue
+    }
+
+    people.append(Person(name: columns[0], age: age))
+  }
+
+  return people
+}
+
+test "parses valid rows and skips malformed ones" {
+  let text = "name,age\nAda,36\nAlan,41\nBad,row,extra\nEve,notanumber"
+  let people = try parse_people(text)
+
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+  expect people[1].name == "Alan"
+  expect people[1].age == 41
+}
+
+test "fails with a distinct error when the header is wrong" {
+  let text = "id,age\nAda,36"
+  let err = expect throws parse_people(text)
+  expect err is BadHeader(_)
+}
+
+test "fails with a distinct error when the header is missing entirely" {
+  let err = expect throws parse_people("")
+  expect err is MissingHeader()
+}
+
+fn main() throws {
+  let text = try files.read("people.csv")
+  let people = try parse_people(text)
+  for person in people {
+    print("${person.name} is ${person.age}")
+  }
+}

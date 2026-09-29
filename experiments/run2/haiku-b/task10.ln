@@ -1,0 +1,58 @@
+type PricingRule = fn(Decimal) -> Decimal
+
+fn percent_off(percent: Decimal) -> PricingRule
+  return price => price - price * percent / 100
+
+fn cap_at(max_price: Decimal) -> PricingRule
+  return price => if price > max_price then max_price else price
+
+fn apply_rules(price: Decimal, rules: List<PricingRule>) -> Decimal
+  var result = price
+  for rule in rules
+    result = rule(result)
+  return result
+
+interface Describable
+  fn describe(self) -> Text
+
+type Product
+  name: Text
+  price: Decimal
+
+fn describe(product: Product) -> Text
+  return "Product: {product.name} at {product.price}"
+
+type Discount
+  rate: Decimal
+
+fn describe(discount: Discount) -> Text
+  return "Discount: {discount.rate}% off"
+
+fn print_descriptions<T: Describable>(items: List<T>)
+  for item in items
+    print(item.describe())
+
+test "percent_off rule"
+  let rule = percent_off(10)
+  expect rule(100) == 90
+
+test "cap_at rule"
+  let rule = cap_at(50)
+  expect rule(100) == 50
+  expect rule(30) == 30
+
+test "apply_multiple_rules"
+  let rules = [percent_off(10), cap_at(50)]
+  let result = apply_rules(100, rules)
+  expect result == 50
+
+test "apply_rules in order"
+  let rules = [cap_at(80), percent_off(10)]
+  let result = apply_rules(100, rules)
+  expect result == 72
+
+test "product and discount describe"
+  let product = Product(name: "widget", price: 19.99)
+  let discount = Discount(rate: 10)
+  expect product.describe().contains("widget")
+  expect discount.describe().contains("Discount")

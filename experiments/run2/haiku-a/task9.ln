@@ -1,0 +1,88 @@
+# Task 9: Storage
+
+import files
+
+enum StorageError
+  NotFound(key: Text)
+  Unavailable(reason: Text)
+
+interface Storage
+  fn get(self, key: Text) throws StorageError -> Bytes?
+  fn put(self, key: Text, value: Bytes) throws StorageError
+  fn delete(self, key: Text) throws StorageError
+
+interface Listable
+  fn keys(self, prefix: Text) throws StorageError -> List<Text>
+
+resource MemoryStore
+  var data: Map<Text, Bytes> = {}
+
+fn get(store: MemoryStore, key: Text) throws StorageError -> Bytes?
+  return store.data[key]
+
+fn put(store: MemoryStore, key: Text, value: Bytes) throws StorageError
+  store.data[key] = value
+
+fn delete(store: MemoryStore, key: Text) throws StorageError
+  store.data.remove(key)
+
+fn keys(store: MemoryStore, prefix: Text) throws StorageError -> List<Text>
+  return store.data.keys().filter(k => k.starts_with(prefix))
+
+resource FileStore
+  dir: Text
+
+fn get(store: FileStore, key: Text) throws StorageError -> Bytes?
+  let path = "{store.dir}/{key}"
+  try
+    let bytes = try files.read_bytes(path)
+    return some(bytes)
+  catch err
+    if files.exists(path)
+      throw Unavailable(reason: err.message)
+    return none
+
+fn put(store: FileStore, key: Text, value: Bytes) throws StorageError
+  let path = "{store.dir}/{key}"
+  try files.write_bytes(path, value) catch err
+    throw Unavailable(reason: err.message)
+
+fn delete(store: FileStore, key: Text) throws StorageError
+  let path = "{store.dir}/{key}"
+  try files.delete(path) catch err
+    throw Unavailable(reason: err.message)
+
+fn keys(store: FileStore, prefix: Text) throws StorageError -> List<Text>
+  try
+    let all_keys = try files.list(store.dir)
+    return all_keys.filter(k => k.starts_with(prefix))
+  catch err
+    throw Unavailable(reason: err.message)
+
+fn copy_prefix<S: Storage + Listable>(from: S, to: S, prefix: Text) throws StorageError
+  let keys_to_copy = try keys(from, prefix: prefix)
+  for key in keys_to_copy
+    let value = try get(from, key: key)
+    if value is some(v)
+      try put(to, key: key, value: v)
+
+test "memory store get and put"
+  let store = MemoryStore()
+  try put(store, key: "key1", value: "hello".bytes())
+  let value = try get(store, key: "key1")
+  expect value == some("hello".bytes())
+
+test "memory store delete"
+  let store = MemoryStore()
+  try put(store, key: "key1", value: "value".bytes())
+  try delete(store, key: "key1")
+  let value = try get(store, key: "key1")
+  expect value == none
+
+test "memory store list with prefix"
+  let store = MemoryStore()
+  try put(store, key: "prefix:one", value: "v1".bytes())
+  try put(store, key: "prefix:two", value: "v2".bytes())
+  try put(store, key: "other", value: "v3".bytes())
+  let matching = try keys(store, prefix: "prefix:")
+  expect matching.length == 2

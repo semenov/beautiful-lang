@@ -1,0 +1,18 @@
+-- The classic, read aloud.
+
+to label for n Number gives Text
+  if n mod 15 is 0
+    give "FizzBuzz"
+  else if n mod 3 is 0
+    give "Fizz"
+  else if n mod 5 is 0
+    give "Buzz"
+  else
+    give "{n}"
+
+check label for 9 is "Fizz"
+check label for 30 is "FizzBuzz"
+check label for 7 is "7"
+
+for n from 1 to 100
+  say label for n

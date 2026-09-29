@@ -1,0 +1,310 @@
+// The prelude: available in every file without `import`.
+// Functions without a body are implemented by the compiler and the runtime.
+// `rethrows` (prelude only): the call throws exactly when a function passed
+// to it throws.
+
+builtin type Int {
+  fn to_float(self) -> Float
+  fn to_text(self) -> Text
+  fn div(self, by: Int) -> Int
+  fn abs(self) -> Int
+  fn pow(self, exponent: Int) -> Int
+  fn bit_and(self, other: Int) -> Int
+  fn bit_or(self, other: Int) -> Int
+  fn bit_xor(self, other: Int) -> Int
+  fn shift_left(self, bits: Int) -> Int
+  fn shift_right(self, bits: Int) -> Int
+}
+
+builtin type Float {
+  fn round(self) -> Int
+  fn floor(self) -> Int
+  fn ceil(self) -> Int
+  fn to_text(self) -> Text
+  fn abs(self) -> Float
+  fn pow(self, exponent: Float) -> Float
+  fn sqrt(self) -> Float
+}
+
+builtin type Bool {
+  fn to_text(self) -> Text
+}
+
+builtin type Text {
+  length: Int
+  fn is_empty(self) -> Bool {
+    return self.byte_length() == 0
+  }
+  fn byte_length(self) -> Int
+  fn lower(self) -> Text
+  fn upper(self) -> Text
+  fn trim(self) -> Text
+  fn split(self, separator: Text) -> List<Text>
+  fn lines(self) -> List<Text>
+  fn words(self) -> List<Text>
+  fn chars(self) -> List<Text>
+  fn contains(self, part: Text) -> Bool
+  fn starts_with(self, prefix: Text) -> Bool
+  fn ends_with(self, suffix: Text) -> Bool
+  fn replace(self, old: Text, new: Text) -> Text
+  fn slice(self, from: Int, to: Int) -> Text
+  fn repeat(self, times: Int) -> Text
+  fn pad_start(self, width: Int, fill: Text) -> Text
+  fn pad_end(self, width: Int, fill: Text) -> Text
+  fn to_int(self) throws -> Int
+  fn to_float(self) throws -> Float
+  fn to_text(self) -> Text {
+    return self
+  }
+}
+
+builtin type List<T> {
+  length: Int
+
+  fn is_empty(self) -> Bool {
+    return self.length == 0
+  }
+  fn first(self) -> T? {
+    if self.length == 0 {
+      return none
+    }
+    return self[0]
+  }
+  fn last(self) -> T? {
+    if self.length == 0 {
+      return none
+    }
+    return self[self.length - 1]
+  }
+  fn contains(self, item: T) -> Bool {
+    for x in self {
+      if x == item {
+        return true
+      }
+    }
+    return false
+  }
+  fn find(self, test: fn(T) throws -> Bool) rethrows -> T? {
+    for x in self {
+      if try test(x) {
+        return x
+      }
+    }
+    return none
+  }
+  fn any(self, test: fn(T) throws -> Bool) rethrows -> Bool {
+    for x in self {
+      if try test(x) {
+        return true
+      }
+    }
+    return false
+  }
+  fn all(self, test: fn(T) throws -> Bool) rethrows -> Bool {
+    for x in self {
+      if not (try test(x)) {
+        return false
+      }
+    }
+    return true
+  }
+  fn count(self, test: fn(T) throws -> Bool) rethrows -> Int {
+    var n = 0
+    for x in self {
+      if try test(x) {
+        n += 1
+      }
+    }
+    return n
+  }
+  fn map<R>(self, transform: fn(T) throws -> R) rethrows -> List<R> {
+    var out: List<R> = __list_with_capacity(self.length)
+    for x in self {
+      out.append(try transform(x))
+    }
+    return out
+  }
+  fn filter(self, test: fn(T) throws -> Bool) rethrows -> List<T> {
+    var out: List<T> = []
+    for x in self {
+      if try test(x) {
+        out.append(x)
+      }
+    }
+    return out
+  }
+  fn fold<A>(self, start: A, step: fn(A, T) throws -> A) rethrows -> A {
+    var acc = start
+    for x in self {
+      acc = try step(acc, x)
+    }
+    return acc
+  }
+  fn sorted(self) -> List<T> {
+    var out = self
+    out.sort()
+    return out
+  }
+  fn sorted_by<K>(self, key: fn(T) throws -> K) rethrows -> List<T> {
+    var out = self
+    try out.sort_by(key)
+    return out
+  }
+  fn reversed(self) -> List<T> {
+    var out = self
+    out.reverse()
+    return out
+  }
+  fn take(self, n: Int) -> List<T>
+  fn drop(self, n: Int) -> List<T>
+  fn concat(self, other: List<T>) -> List<T> {
+    var out = self
+    out.append_all(other)
+    return out
+  }
+  fn indexed(self) -> List<Indexed<T>> {
+    var out: List<Indexed<T>> = __list_with_capacity(self.length)
+    var i = 0
+    for x in self {
+      out.append(Indexed(index: i, value: x))
+      i += 1
+    }
+    return out
+  }
+  fn zip<U>(self, other: List<U>) -> List<Pair<T, U>> {
+    var out: List<Pair<T, U>> = []
+    var i = 0
+    while i < self.length and i < other.length {
+      out.append(Pair(first: self[i], second: other[i]))
+      i += 1
+    }
+    return out
+  }
+  fn sum(self) -> T
+  fn min(self) -> T?
+  fn max(self) -> T?
+  fn min_by<K>(self, key: fn(T) throws -> K) rethrows -> T? {
+    if self.length == 0 {
+      return none
+    }
+    var best = self[0]
+    var best_key = try key(best)
+    for x in self.drop(1) {
+      let k = try key(x)
+      if __less(k, best_key) {
+        best = x
+        best_key = k
+      }
+    }
+    return best
+  }
+  fn max_by<K>(self, key: fn(T) throws -> K) rethrows -> T? {
+    if self.length == 0 {
+      return none
+    }
+    var best = self[0]
+    var best_key = try key(best)
+    for x in self.drop(1) {
+      let k = try key(x)
+      if __less(best_key, k) {
+        best = x
+        best_key = k
+      }
+    }
+    return best
+  }
+  fn join(self, separator: Text) -> Text
+  fn group_by<K>(self, key: fn(T) throws -> K) rethrows -> Map<K, List<T>> {
+    var groups: Map<K, List<T>> = {}
+    for x in self {
+      let k = try key(x)
+      if groups.contains_key(k) {
+        groups[k].append(x)
+      } else {
+        groups[k] = [x]
+      }
+    }
+    return groups
+  }
+  fn count_each(self) -> Map<T, Int>
+
+  mutating fn append(item: T)
+  mutating fn append_all(items: List<T>)
+  mutating fn insert(item: T, at: Int)
+  mutating fn remove_at(index: Int)
+  mutating fn pop() -> T?
+  mutating fn sort()
+  mutating fn sort_by<K>(key: fn(T) throws -> K) rethrows
+  mutating fn reverse()
+  mutating fn clear()
+}
+
+builtin type Map<K, V> {
+  length: Int
+
+  fn is_empty(self) -> Bool {
+    return self.length == 0
+  }
+  fn contains_key(self, key: K) -> Bool
+  fn keys(self) -> List<K>
+  fn values(self) -> List<V>
+  fn entries(self) -> List<Entry<K, V>>
+
+  mutating fn remove(key: K)
+  mutating fn take(key: K) -> V?
+  mutating fn clear()
+}
+
+builtin type Set<T> {
+  length: Int
+
+  fn is_empty(self) -> Bool {
+    return self.length == 0
+  }
+  fn contains(self, item: T) -> Bool
+  fn to_list(self) -> List<T>
+
+  mutating fn add(item: T)
+  mutating fn remove(item: T)
+  mutating fn clear()
+}
+
+type Entry<K, V> {
+  key: K
+  value: V
+}
+
+type Indexed<T> {
+  index: Int
+  value: T
+}
+
+type Pair<A, B> {
+  first: A
+  second: B
+}
+
+interface Error {
+  fn message(self) -> Text
+}
+
+type Failure implements Error {
+  message: Text
+  cause: Error? = none
+
+  fn message(self) -> Text {
+    if self.cause is some(c) {
+      return "${self.message}: ${c.message()}"
+    }
+    return self.message
+  }
+}
+
+fn print(text: Text)
+fn min<T>(a: T, b: T) -> T
+fn max<T>(a: T, b: T) -> T
+fn assert(condition: Bool)
+fn panic(message: Text) -> Never
+
+fn __list_with_capacity<T>(capacity: Int) -> List<T>
+fn __less<T>(a: T, b: T) -> Bool

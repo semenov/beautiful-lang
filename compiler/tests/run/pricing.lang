@@ -1,0 +1,44 @@
+type Rule = fn(Float) -> Float
+
+interface Describable {
+  fn describe(self) -> Text
+}
+
+type Order implements Describable {
+  id: Int
+  total: Float
+
+  fn describe(self) -> Text {
+    return "Order #${self.id}: ${self.total}"
+  }
+}
+
+type Customer implements Describable {
+  name: Text
+
+  fn describe(self) -> Text {
+    return "Customer ${self.name}"
+  }
+}
+
+fn percent_off(percent: Float) -> Rule {
+  return total => total * (1.0 - percent / 100.0)
+}
+
+fn cap_at(limit: Float) -> Rule {
+  return total => min(total, limit)
+}
+
+fn combine(rules: List<Rule>) -> Rule {
+  return total => rules.fold(start: total, step: (acc, rule) => rule(acc))
+}
+
+fn main() {
+  let rule = combine([percent_off(10.0), cap_at(100.0)])
+  print("150 -> ${rule(150.0)}")
+  print("50 -> ${rule(50.0)}")
+  let items: List<Describable> = [Order(id: 1, total: 42.5), Customer(name: "Ada")]
+  for item in items {
+    print(item.describe())
+  }
+}

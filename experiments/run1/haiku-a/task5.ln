@@ -1,0 +1,48 @@
+# Task 5: GitHub users
+# Fetch and decode GitHub user info from API, handle failures gracefully
+
+import js "node-fetch"
+import json
+
+type GitHubUser
+  login: Text
+  name: Text?
+  bio: Text?
+
+fn fetch_github_user(username: Text) throws -> GitHubUser
+  let url = "https://api.github.com/users/{username}"
+  let response = try fetch(url)
+  let json_data = try response.json()
+  return try json.decode<GitHubUser>(json_data)
+
+fn print_user(user: GitHubUser)
+  let name = user.name ?? user.login
+  let bio = user.bio ?? "no bio"
+  print("{name} (@{user.login}) - {bio}")
+
+fn print_user_fallback(username: Text)
+  print("{username} (fallback, could not fetch)")
+
+fn fetch_multiple_users()
+  parallel
+    let user1 = try fetch_github_user("torvalds") catch
+      print_user_fallback("torvalds")
+    let user2 = try fetch_github_user("gvanrossum") catch
+      print_user_fallback("gvanrossum")
+    let user3 = try fetch_github_user("brendaneich") catch
+      print_user_fallback("brendaneich")
+
+  if user1 is some(u)
+    print_user(u)
+  if user2 is some(u)
+    print_user(u)
+  if user3 is some(u)
+    print_user(u)
+
+test "github user type"
+  let user = GitHubUser(
+    login: "torvalds",
+    name: "Linus Torvalds",
+    bio: none
+  )
+  expect user.login == "torvalds"

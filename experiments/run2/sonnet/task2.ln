@@ -1,0 +1,37 @@
+# CSV: parse "name,age" rows into a list of people.
+
+type Person
+  name: Text
+  age: Int
+
+fn parse_people(text: Text) throws -> List<Person>
+  let lines = text.lines()
+  if lines.is_empty() or lines[0] != "name,age"
+    throw Error("missing or invalid header, expected \"name,age\"")
+  var people: List<Person> = []
+  for line in lines.drop(1)
+    let parts = line.split(",")
+    if parts.length == 2
+      let age = parse_int(parts[1]) catch continue
+      people.append(Person(name: parts[0], age: age))
+  return people
+
+test "parses valid csv rows"
+  let people = try parse_people("name,age\nAda,36\nAlan,41")
+  expect people.length == 2
+  expect people[0].name == "Ada"
+  expect people[0].age == 36
+  expect people[1].name == "Alan"
+  expect people[1].age == 41
+
+test "skips malformed lines"
+  let people = try parse_people("name,age\nAda,36\nnot,a,valid,row\nAlan,41\nbroken_age,oops")
+  expect people.length == 2
+
+test "fails when the header line is missing"
+  let err = expect throws parse_people("Ada,36\nAlan,41")
+  expect err.message.contains("header")
+
+test "fails when the header line is wrong"
+  let err = expect throws parse_people("first_name,years\nAda,36")
+  expect err.message.contains("header")

@@ -1,0 +1,42 @@
+# Task 7: Word Statistics
+
+type WordStat
+  word: Text
+  count: Int
+
+fn word_stats(text: Text) -> (List<WordStat>, Float)
+  let words = text.lower().split(" ")
+    .filter(w => w.length > 3)
+
+  let total_length = words.map(w => w.length).sum()
+  let avg_length = if words.is_empty()
+    then 0
+    else total_length / words.length
+
+  let word_counts = words.group_by(w => w)
+  let stats = word_counts
+    .map(entry => WordStat(word: entry.key, count: entry.value.length))
+    .sort_by(s => s.count)
+    .reverse()
+    .take(3)
+
+  return (stats, avg_length)
+
+test "word_stats finds common words"
+  let text = "hello world hello test testing hello"
+  let (stats, avg) = word_stats(text)
+  expect stats.length == 3
+  expect stats[0].word == "hello"
+  expect stats[0].count == 3
+
+test "word_stats filters short words"
+  let text = "a bb ccc dddd eeee dddd"
+  let (stats, avg) = word_stats(text)
+  let words = stats.map(s => s.word)
+  expect words.contains("dddd")
+  expect not words.contains("ccc")
+
+test "word_stats calculates average length"
+  let text = "test hello world"
+  let (stats, avg) = word_stats(text)
+  expect avg > 4 and avg < 6

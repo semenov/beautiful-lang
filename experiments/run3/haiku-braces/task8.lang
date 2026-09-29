@@ -1,0 +1,58 @@
+import files
+import cli
+import tasks
+
+type Options {
+  file: Text
+}
+
+fn process_lines(var counts: Map<Text, Int>, lines: List<Text>) {
+  for line in lines {
+    if line.contains("ERROR") {
+      let parts = line.split(" ")
+      if parts.length >= 2 {
+        let service = parts[1]
+        let current = counts[service] ?? 0
+        counts[service] = current + 1
+      }
+    }
+  }
+}
+
+fn main() throws {
+  let options = try cli.decode<Options>()
+  let text = try files.read(options.file)
+  let all_lines = text.lines()
+
+  let lines_per_worker = (all_lines.length + 3) / 4
+
+  var counts: Map<Text, Int> = {}
+
+  with group = try tasks.group() {
+    let batch1 = all_lines.take(lines_per_worker)
+    let batch2 = all_lines.drop(lines_per_worker).take(lines_per_worker)
+    let batch3 = all_lines.drop(lines_per_worker * 2).take(lines_per_worker)
+    let batch4 = all_lines.drop(lines_per_worker * 3)
+
+    group.start(() => {
+      process_lines(&counts, batch1)
+    })
+    group.start(() => {
+      process_lines(&counts, batch2)
+    })
+    group.start(() => {
+      process_lines(&counts, batch3)
+    })
+    group.start(() => {
+      process_lines(&counts, batch4)
+    })
+  }
+
+  let entries = counts.entries()
+  let sorted = entries.sorted_by(e => e.value)
+  let reversed = sorted.reversed()
+
+  for entry in reversed {
+    print("${entry.key}: ${entry.value}")
+  }
+}

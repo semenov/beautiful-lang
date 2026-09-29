@@ -1,0 +1,52 @@
+// 7. Users in SQLite
+
+import cli
+import db
+import env
+
+type User {
+  id: Int
+  name: Text
+  age: Int
+}
+
+type Config {
+  database_url: Text
+}
+
+type Options {
+  args: List<Text> = []
+}
+
+fn seed_users(conn: db.Connection) throws {
+  let _ = try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+  let _ = try conn.execute("insert into users (name, age) values (?, ?)", ["Ada", 36])
+  let _ = try conn.execute("insert into users (name, age) values (?, ?)", ["Alan", 41])
+  let _ = try conn.execute("insert into users (name, age) values (?, ?)", ["Grace", 29])
+}
+
+fn users_older_than(conn: db.Connection, min_age: Int) throws -> List<User> {
+  return try conn.query<User>("select id, name, age from users where age > ?", [min_age])
+}
+
+test "creates the table, seeds users, and filters by age" {
+  with conn = try db.open("sqlite::memory:") {
+    try seed_users(conn)
+    let older = try users_older_than(conn, 35)
+    expect older.length == 2
+  }
+}
+
+fn main() throws {
+  let config = try env.decode<Config>()
+  let options = try cli.decode<Options>()
+  let min_age = try options.args[0].to_int()
+
+  with conn = try db.open(config.database_url) {
+    try seed_users(conn)
+    let older = try users_older_than(conn, min_age)
+    for user in older {
+      print("${user.name} (${user.age})")
+    }
+  }
+}

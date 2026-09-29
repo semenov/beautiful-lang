@@ -1,0 +1,47 @@
+# Task 4: Bank transfer
+
+type Account
+  id: Text
+  balance: Decimal
+
+fn transfer(from: var Account, to: var Account, amount: Decimal) throws
+  require amount > 0
+  if from.balance < amount
+    throw Error("insufficient funds in account {from.id}: {from.balance} < {amount}")
+  from = from.with(balance: from.balance - amount)
+  to = to.with(balance: to.balance + amount)
+
+# Example call site handling the failure
+fn process_transfer(from: var Account, to: var Account, amount: Decimal) -> Bool
+  try
+    transfer(from: from, to: to, amount: amount)
+    print("transfer succeeded")
+    return true
+  catch err
+    print("transfer failed: {err.message}")
+    return false
+
+test "transfer moves money"
+  var alice = Account(id: "alice", balance: 100)
+  var bob = Account(id: "bob", balance: 50)
+  transfer(from: alice, to: bob, amount: 30)
+  expect alice.balance == 70
+  expect bob.balance == 80
+
+test "transfer fails on insufficient funds"
+  var alice = Account(id: "alice", balance: 20)
+  var bob = Account(id: "bob", balance: 50)
+  let err = expect throws transfer(from: alice, to: bob, amount: 30)
+  expect err.message.contains("insufficient")
+
+test "transfer requires positive amount"
+  var alice = Account(id: "alice", balance: 100)
+  var bob = Account(id: "bob", balance: 50)
+  let err = expect throws transfer(from: alice, to: bob, amount: 0)
+  expect err.message.contains("amount")
+
+test "process_transfer handles failure gracefully"
+  var alice = Account(id: "alice", balance: 20)
+  var bob = Account(id: "bob", balance: 50)
+  let success = process_transfer(from: alice, to: bob, amount: 30)
+  expect success == false
