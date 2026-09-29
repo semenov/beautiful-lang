@@ -14,7 +14,27 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         (its -O1 compile is 0.38 s of the 0.62); smaller generated C
         (stdlib code such as Router.route is compiled into every program);
         `build` with the cached runtime too, if it doesn't cost speed
-- [ ] **A critic's review of the language**: write the complaints, then
+- [ ] **A critic's review of the language** (research/critique.md, the
+      answers in research/critique-response.md; Vlad's choices in DESIGN.md
+      "After the critic's review"):
+  - [ ] new errors: optional in text; `m[k] op=`; lambda + later-assigned
+        var; unused let/import
+  - [ ] generic bounds (`<T: Ordered>`, interface bounds)
+  - [ ] fields private unless `pub`
+  - [ ] `is` through `cause`
+  - [ ] SQL from literal pieces; list parameters
+  - [ ] name every argument after the first (2+ parameters)
+  - [ ] `.reversed()` / `.step(n)` on ranges in `for`
+  - [ ] fixes: changed-a-copy error, pattern names, flow typing through
+        `or`, `with` captured by an escaping lambda, Shared-in-Shared,
+        Duration ordered, newtypes ordered, `is` crash, `plumb test` for
+        the project, hints, docs (div, Decimal, deadlocks, background jobs)
+  - [ ] runtime/stdlib: string index cache, `Shared.read()`, strict
+        number parsing, duplicate JSON keys, regex groups[0] + literal
+        check, `chunks(0)`, in-place `s = "${s}..."`
+  - [ ] README: "Choices that surprise people"
+  - [ ] later: stack traces, mutating through interface elements,
+        Decimal 38 digits: write the complaints, then
       fix the language or explain in the README why it's right; keep it
       simple and fast (Vlad, 2026-09-29)
 - [x] **A String is always valid UTF-8** (Vlad chose A, 2026-09-29):

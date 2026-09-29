@@ -528,6 +528,38 @@ cgen (C) → clang`.
 
 **Not implemented yet:** the items in `TODO.md`.
 
+### After the critic's review (Vlad, 2026-09-29)
+
+`research/critique.md` found places where the language silently does the
+wrong thing; Vlad chose (see `research/critique-response.md`):
+
+- **New compile errors:** an optional value inside text (`"${x}"` with
+  `x: String?`: write `${x ?? ""}`); `m[k] op= v` on a map of plain values
+  (write `m[k] = (m[k] ?? 0) + v`); a lambda using a `var` that is
+  assigned after the lambda is made (it would see the old value); an
+  unused `let` or import (as in Go: they hide forgotten results).
+- **Generic bounds:** `fn largest<T: Ordered>(xs: List<T>)` and an
+  interface as a bound (`fn total<T: Shape>(xs: List<T>)`), monomorphized.
+  The prelude's `max`, `sum`, `sorted` use them too: no powers users
+  don't have.
+- **Fields are private unless `pub`**, like functions: a field without
+  `pub` is visible only in its file, so a type can guard its values
+  (`email.parse` is the only way to make an `Email`).
+- **`is` looks through `cause`:** `err is files.NotFound` is true when the
+  error or any error in its `cause` chain is one (Go's `errors.Is`).
+- **SQL from literal pieces:** a query may be chosen or joined from
+  literals (`if`/`match` over literals, a top-level `let` of a literal),
+  and a `List` parameter expands `in (?)` to `in (?, ?, ?)`. Still no
+  injection: every piece is a literal.
+- **Name every argument after the first**, whenever there are two or more
+  parameters (the 3+ rule for all): one way to call, and calls explain
+  themselves; stdlib parameter names are chosen to read well
+  (`max(a, or: b)`).
+- **No nested functions**: functions live at the top level; the error for
+  `fn` inside a function shows a typed lambda for small local helpers.
+- **Ranges** stay only in `for`, with `.reversed()` and `.step(n)`:
+  `for i in (0..<n).reversed()`.
+
 ## Open questions
 
 - **Changing a value behind an interface** without `var` parameters: a
