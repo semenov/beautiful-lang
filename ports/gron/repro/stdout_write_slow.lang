@@ -1,0 +1,14 @@
+// Writing to io.stdout() line by line is ~10x slower than print():
+// 1M lines: print 75 ms, write_text 800 ms (unbuffered?).
+import io
+import time
+fn main() throws {
+  var t0 = time.now()
+  for i in 0..<1000000 { print("json.a[${i}] = \"x\";") }
+  eprint("print ${time.now().since(t0).millis()}ms")
+  t0 = time.now()
+  with out = io.stdout() {
+    for i in 0..<1000000 { try out.write_text("json.a[${i}] = \"x\";\n") }
+  }
+  eprint("write_text ${time.now().since(t0).millis()}ms")
+}

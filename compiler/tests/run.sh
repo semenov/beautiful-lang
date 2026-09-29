@@ -44,9 +44,12 @@ for d in ../../../ports/*/; do
       echo "FAIL port $f: doesn't compile"; head -5 /tmp/lang-port-err; fail=1
     fi
   done
-  if [ -f "$d"tests.lang ] && ! (cd "$d" && $LANG_BIN test tests.lang >/tmp/lang-port-err 2>&1); then
-    echo "FAIL port ${d}tests.lang"; grep -A3 FAIL /tmp/lang-port-err | head -8; fail=1
-  fi
+  for f in "$d"*.lang; do
+    grep -q '^test "' "$f" || continue
+    if ! (cd "$d" && $LANG_BIN test "$(basename "$f")" >/tmp/lang-port-err 2>&1); then
+      echo "FAIL port $f: tests"; grep -A3 FAIL /tmp/lang-port-err | head -8; fail=1
+    fi
+  done
 done
 # the language's own code is laid out the standard way
 if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then

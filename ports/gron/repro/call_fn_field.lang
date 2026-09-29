@@ -1,0 +1,21 @@
+// FIXED by the compiler update (2026-09-29): this now runs correctly. Kept as a
+// regression check.
+// A function stored in a record field can't be called directly:
+// "`read_line` is a field, not a method". Needs `let f = input.read_line`
+// then `f()`. Also the failed `while ... is some(line)` makes `line`
+// unknown on the next line (a cascaded error).
+type Input {
+  read_line: fn() -> String?
+}
+
+fn count(input: Input) -> Int {
+  var n = 0
+  while input.read_line() is some(line) {
+    n += line.length
+  }
+  return n
+}
+
+fn main() {
+  print("${count(Input(read_line: () => none))}")
+}

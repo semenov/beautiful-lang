@@ -20,28 +20,29 @@ short version: what's in flight, what waits for Vlad, and what to do next.
   (see `git log`).
 - `lang fmt` must pass: the test suite checks it.
 
-## In flight
+## Next, in this order
 
-- **The gron port** (tomnomnom/gron, source in `/tmp/port-src/gron`). A
-  background agent was finishing it in `/tmp/port-gron`.
-  - Its gap log is `/tmp/port-gron/GAPS.md`, with repros in
-    `/tmp/port-gron/repro/`.
-  - If the port isn't finished, start an agent to finish it. It must learn
-    the language only through `lang help`, `lang guide` and `lang doc`.
-  - Then fix what it found. Already fixed from its log:
-    - the list capacity bug;
-    - O(n) `String.slice`;
-    - slow `io.stdout()`;
-    - Float text;
-    - or-patterns;
-    - list sort keys;
-    - building a variant named `String`;
-    - the guide example.
-- When gron is finished, copy it into `ports/gron` without binaries, the
-  way `ports/hey` and `ports/httpbin` were copied. Update the table in
-  `ports/README.md`. `tests/run.sh` checks that ports compile.
-- The go-httpbin port is done: see the TODO section "mccutchen/go-httpbin".
-  Its code is in `/tmp/port-httpbin`, with `GAPS.md` there.
+The three ports are done and live in `ports/` (hey, httpbin, gron):
+sources, `GAPS.md` gap logs, `repro/` programs, and comparison scripts
+against the Go originals. `tests/run.sh` keeps them compiling and runs
+their tests. What they left open is in `TODO.md` under each port. The most
+important:
+
+1. **Stack overflow kills the program silently** (SIGBUS/SIGSEGV, exit 138
+   or 139, no message). Programs that use http or spawn get a much smaller
+   stack (task stacks). Give a clear "stack overflow" panic with a guard
+   page and an alternate signal stack, and give tasks bigger stacks.
+   Repro: `ports/gron/repro/stack_overflow_silent/`.
+2. **Using http, spawn or net anywhere makes the whole program 1.7–2.4x
+   slower.** It's probably the multi-threaded runtime (atomic refcounts
+   everywhere?). Measure it, and pay the cost only where values are shared.
+   Repro: `ports/gron/repro/http_slows_program/`.
+3. **A top-level `let` holding a list, map or interpolated text is rebuilt
+   on every use.** Build it once, as a static value.
+4. **`json.parse` changes numbers:** `-0` becomes `0`, and `1e400` becomes
+   Infinity and then null. Also: Unicode `is_letter` isn't the letter
+   category, and there's no conversion between code points and characters.
+5. The rest of the ports' open items in `TODO.md`.
 
 ## Waiting for Vlad's decision (language-model changes)
 

@@ -1,0 +1,23 @@
+// PERF: a program that merely contains an http call (or a spawn, or
+// net.connect), even one that never runs, is ~1.7x slower in code that
+// allocates (here: split + interpolation + append per line), and up to
+// 2.4x in gron. Compare: lang build each file, then
+//   ./without_http < big.txt; ./with_http < big.txt; ./with_spawn < big.txt
+// (thread-safe reference counting or allocator switched on for the whole
+// program?)
+import io
+import process
+import time
+
+fn main() throws {
+  let t0 = time.now()
+  var n = 0
+  while try io.read_line() is some(line) {
+    var parts: List<String> = []
+    for w in line.split(".") {
+      parts.append("${w}!")
+    }
+    n += parts.length
+  }
+  eprint("read+print ${time.now().since(t0).millis()} ms (${n})")
+}

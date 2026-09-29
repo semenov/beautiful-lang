@@ -1,0 +1,208 @@
+// Tokens: the pieces of a statement like `json.city = "Leeds";`, and how
+// they are printed, with or without color.
+
+import jsonraw
+
+// What kind of token something is.
+pub enum TokenType {
+  // A bare word is an unquoted key; like 'foo' in json.foo = 1;
+  Bare
+  // Numeric key; like '2' in json[2] = "foo";
+  NumericKey
+  // A quoted key; like 'foo bar' in json["foo bar"] = 2;
+  QuotedKey
+
+  // Punctuation
+  Dot
+  LBrace
+  RBrace
+  Equals
+  Semi
+  Comma
+
+  // Values
+  Str
+  Number
+  True
+  False
+  Null
+  EmptyArray
+  EmptyObject
+
+  // Ignored token (a `--` line from grep -A)
+  Ignored
+
+  // Error token
+  Invalid
+}
+
+// A chunk of text from a statement, with its type.
+pub type Token {
+  text: String
+  typ: TokenType
+
+  // Whether the token is a value.
+  pub fn is_value(self) -> Bool {
+    return match self.typ {
+      Str => true
+      Number => true
+      True => true
+      False => true
+      Null => true
+      EmptyArray => true
+      EmptyObject => true
+      _ => false
+    }
+  }
+
+  // Whether the token is punctuation.
+  pub fn is_punct(self) -> Bool {
+    return match self.typ {
+      Dot => true
+      LBrace => true
+      RBrace => true
+      Equals => true
+      Semi => true
+      Comma => true
+      _ => false
+    }
+  }
+
+  // The text as printed.
+  pub fn format(self) -> String {
+    if self.typ == Equals {
+      return " ${self.text} "
+    }
+    return self.text
+  }
+
+  // The text as printed, with terminal colors.
+  pub fn format_color(self) -> String {
+    let text = self.format()
+    return match self.typ {
+      Bare => bare_color.paint(text)
+      NumericKey => num_color.paint(text)
+      QuotedKey => str_color.paint(text)
+      LBrace => brace_color.paint(text)
+      RBrace => brace_color.paint(text)
+      Str => str_color.paint(text)
+      Number => num_color.paint(text)
+      True => bool_color.paint(text)
+      False => bool_color.paint(text)
+      Null => bool_color.paint(text)
+      EmptyArray => brace_color.paint(text)
+      EmptyObject => brace_color.paint(text)
+      _ => text
+    }
+  }
+}
+
+// A terminal color, written the way github.com/fatih/color writes it: the
+// SGR codes to turn it on, the text, the codes to turn it off.
+pub type Color {
+  on: String
+  off: String
+
+  pub fn paint(self, text: String) -> String {
+    return "\u{1b}[${self.on}m${text}\u{1b}[${self.off}m"
+  }
+}
+
+// Output colors
+pub let str_color = Color(on: "33", off: "0")
+pub let brace_color = Color(on: "35", off: "0")
+pub let bare_color = Color(on: "34;1", off: "0;22")
+pub let num_color = Color(on: "31", off: "0")
+pub let bool_color = Color(on: "36", off: "0")
+// commas and colons, and the quotes around strings, in colored JSON
+pub let bold = Color(on: "1", off: "22")
+pub let green = Color(on: "32", off: "0")
+
+// The token for a JSON value.
+pub fn value_token(v: jsonraw.Value) -> Token {
+  return match v {
+    Object(_) => Token(text: "{}", typ: EmptyObject)
+    Array(_) => Token(text: "[]", typ: EmptyArray)
+    Number(text) => Token(text: text, typ: Number)
+    String(value) => Token(text: quote_string(value), typ: Str)
+    Bool(value) => if value { Token(text: "true", typ: True) } else { Token(text: "false", typ: False) }
+    Null => Token(text: "null", typ: Null)
+  }
+}
+
+// A string quoted and escaped for gron output: \\ \" \b \f \n \r \t,
+// U+2028 and U+2029 (not allowed in JavaScript strings), and any other
+// control character as \u00XX.
+pub fn quote_string(s: String) -> String {
+  let b = s.bytes()
+  let n = b.length
+  // Most strings need no escaping: check that first.
+  var i = 0
+  while i < n {
+    let c = b[i]
+    if c < 32 or c == 34 or c == 92 or c == 0x7F {
+      break
+    }
+    // C1 control characters (U+0080 to U+009F) are C2 80 to C2 9F.
+    if c == 0xC2 and i + 1 < n and b[i + 1] < 0xA0 {
+      break
+    }
+    // U+2028 and U+2029 are E2 80 A8 and E2 80 A9.
+    if c == 0xE2 and i + 2 < n and b[i + 1] == 0x80 and b[i + 2] >= 0xA8 and b[i + 2] <= 0xA9 {
+      break
+    }
+    i += 1
+  }
+  if i == n {
+    return "\"${s}\""
+  }
+  var out = Bytes()
+  out.append(34)
+  out.append_all(b.slice(from: 0, to: i))
+  while i < n {
+    let c = b[i]
+    if c == 92 {
+      out.append_text("\\\\")
+    } else if c == 34 {
+      out.append_text("\\\"")
+    } else if c == 8 {
+      out.append_text("\\b")
+    } else if c == 12 {
+      out.append_text("\\f")
+    } else if c == 10 {
+      out.append_text("\\n")
+    } else if c == 13 {
+      out.append_text("\\r")
+    } else if c == 9 {
+      out.append_text("\\t")
+    } else if c < 32 or c == 0x7F {
+      out.append_text("\\u00${Bytes([c]).hex().upper()}")
+    } else if c == 0xC2 and i + 1 < n and b[i + 1] < 0xA0 {
+      out.append_text("\\u00${Bytes([b[i + 1]]).hex().upper()}")
+      i += 1
+    } else if c == 0xE2 and i + 2 < n and b[i + 1] == 0x80 and b[i + 2] >= 0xA8 and b[i + 2] <= 0xA9 {
+      out.append_text(if b[i + 2] == 0xA8 { "\\u2028" } else { "\\u2029" })
+      i += 2
+    } else {
+      out.append(c)
+    }
+    i += 1
+  }
+  out.append(34)
+  return jsonraw.utf8_lossy(out)
+}
+
+test "quote_string" {
+  expect quote_string("foo") == "\"foo\""
+  expect quote_string("a \"b\"") == "\"a \\\"b\\\"\""
+  expect quote_string("tab\there\nline") == "\"tab\\there\\nline\""
+  expect quote_string("back\\slash") == "\"back\\\\slash\""
+  expect quote_string("a\u{1}\u{7f}\u{85}\u{2028}") == "\"a\\u0001\\u007F\\u0085\\u2028\""
+  expect quote_string("héllo ಠ_ಠ") == "\"héllo ಠ_ಠ\""
+}
+
+test "value tokens" {
+  expect value_token(jsonraw.Value.Number(text: "1.50e3")) == Token(text: "1.50e3", typ: Number)
+  expect value_token(jsonraw.Value.Null).typ == Null
+  expect value_token(jsonraw.Value.Array(items: [])).text == "[]"
+}

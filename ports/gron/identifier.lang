@@ -1,0 +1,80 @@
+// Which object keys can be printed bare (json.foo) rather than quoted
+// (json["foo bar"]): valid JavaScript identifiers.
+
+import jsonraw
+import unicode
+
+// The JavaScript reserved words can't be used as unquoted keys.
+fn is_reserved(s: String) -> Bool {
+  let words = [
+    "break", "case", "catch", "class", "const", "continue", "debugger",
+    "default", "delete", "do", "else", "export", "extends", "false",
+    "finally", "for", "function", "if", "import", "in", "instanceof",
+    "new", "null", "return", "super", "switch", "this", "throw",
+    "true", "try", "typeof", "var", "void", "while", "with", "yield",
+  ]
+  return words.contains(s)
+}
+
+// Whether a string is a valid JavaScript identifier:
+//   justLettersAndNumbers1 -> true
+//   a key with spaces      -> false
+//   1startsWithANumber     -> false
+pub fn valid_identifier(s: String) -> Bool {
+  if s.is_empty() or is_reserved(s) {
+    return false
+  }
+  let b = s.bytes()
+  var i = 0
+  while i < b.length {
+    let r = jsonraw.decode_rune(b, i)
+    let ok = if i == 0 { valid_first_rune(r.value) } else { valid_secondary_rune(r.value) }
+    if not ok {
+      return false
+    }
+    i += r.width
+  }
+  return true
+}
+
+// Runes that may start an identifier: letters (but not title case, as in
+// the Go version), letter numbers, '$' and '_'.
+//   'r' -> true
+//   '7' -> false
+pub fn valid_first_rune(r: Int) -> Bool {
+  // ASCII first: the Unicode tables are slow to reach (see unicode.lang)
+  if r < 0x80 {
+    return (r >= 0x61 and r <= 0x7A) or (r >= 0x41 and r <= 0x5A) or r == 0x24 or r == 0x5F
+  }
+  return unicode.is_first(r)
+}
+
+// Runes that may follow the first one: also marks, digits and connectors.
+pub fn valid_secondary_rune(r: Int) -> Bool {
+  if r < 0x80 {
+    return valid_first_rune(r) or (r >= 0x30 and r <= 0x39)
+  }
+  return unicode.is_first(r) or unicode.is_secondary(r)
+}
+
+test "valid identifiers" {
+  expect valid_identifier("dotted")
+  expect valid_identifier("dotted123")
+  expect valid_identifier("_under_scores")
+  expect valid_identifier("ಠ_ಠ")
+  expect valid_identifier("$dollar")
+  expect not valid_identifier("dotted-123")
+  expect not valid_identifier("")
+  expect not valid_identifier("1startsWithANumber")
+  expect not valid_identifier("a key with spaces")
+  expect not valid_identifier("var")
+  expect not valid_identifier("true")
+  // Unicode categories: letter numbers may start, digits and marks follow
+  expect valid_identifier("Ⅻ")
+  expect not valid_identifier("١")
+  expect valid_identifier("a١")
+  expect valid_identifier("é")
+  expect not valid_identifier("\u{301}a")
+  expect valid_identifier("a\u{301}")
+  expect valid_identifier("a‿b")
+}

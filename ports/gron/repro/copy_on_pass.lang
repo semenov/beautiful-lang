@@ -1,0 +1,60 @@
+// NOT A GAP (checked): passing a list through a function and appending
+// does not copy it; both loops are linear.
+// The guide recommends `items = add_item(items, item: x)` ("a function never
+// changes its arguments"). Is the list copied each time? Time 20k vs 40k
+// appends through a function: if each call copies, doubling n quadruples
+// the time.
+import time
+
+fn add_item(items: List<Int>, item: Int) -> List<Int> {
+  var out = items
+  out.append(item)
+  return out
+}
+
+fn run(n: Int) -> Int {
+  var xs: List<Int> = []
+  for i in 0..<n {
+    xs = add_item(xs, item: i)
+  }
+  return xs.length
+}
+
+enum Value {
+  Null
+  Array(items: List<Value>)
+}
+
+// The same through an enum payload (as in a JSON tree merge).
+fn add_value(v: Value, item: Value) -> Value {
+  return match v {
+    Array(items) => {
+      var out = items
+      out.append(item)
+      Array(items: out)
+    }
+    Null => Array(items: [item])
+  }
+}
+
+fn run_enum(n: Int) -> Int {
+  var v = Null
+  for _ in 0..<n {
+    v = add_value(v, item: Null)
+  }
+  return match v {
+    Array(items) => items.length
+    Null => 0
+  }
+}
+
+fn main() {
+  for n in [20000, 40000] {
+    let t0 = time.now()
+    let len = run(n)
+    let t1 = time.now()
+    let len2 = run_enum(n)
+    let t2 = time.now()
+    print("n=${n}: list ${t1.since(t0).millis()} ms (${len}), enum payload ${t2.since(t1).millis()} ms (${len2})")
+  }
+}

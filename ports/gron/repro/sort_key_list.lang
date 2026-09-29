@@ -1,0 +1,7 @@
+// No sort with a comparator, and sorted_by only takes a number or text key:
+// a list (or record) key, which would give lexicographic order, is rejected.
+fn main() {
+  let rows = [["a", "10"], ["a", "9"], ["b", "1"]]
+  let sorted = rows.sorted_by(r => r)
+  print(sorted.length)
+}

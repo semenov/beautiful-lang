@@ -1,0 +1,7 @@
+// A Duration in interpolation prints as a record: "Duration(nanos: 1234000)".
+// There is `.text()`, but interpolation doesn't use it.
+import time
+fn main() {
+  let t0 = time.now()
+  print("took ${time.now().since(t0)}")
+}

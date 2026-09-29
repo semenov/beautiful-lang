@@ -1,0 +1,31 @@
+// Read-modify-write of a big value stored in a map copies it:
+// `if m[k] is some(v) { m[k] = grow(v) }` is O(size) per step (quadratic
+// overall), while `if m.take(k) is some(v) { m[k] = grow(v) }` is O(1).
+// Nothing in the docs says reading `m[k]` copies, or that `take` avoids it.
+import time
+
+fn grow(items: List<Int>, n: Int) -> List<Int> {
+  var out = items
+  out.append(n)
+  return out
+}
+
+fn main() {
+  let n = 20000
+  var a: Map<String, List<Int>> = {"k": []}
+  let t0 = time.now()
+  for i in 0..<n {
+    if a["k"] is some(v) {
+      a["k"] = grow(v, n: i)
+    }
+  }
+  let t1 = time.now()
+  var b: Map<String, List<Int>> = {"k": []}
+  for i in 0..<n {
+    if b.take("k") is some(v) {
+      b["k"] = grow(v, n: i)
+    }
+  }
+  let t2 = time.now()
+  print("m[k] read: ${t1.since(t0).millis()} ms, take: ${t2.since(t1).millis()} ms")
+}

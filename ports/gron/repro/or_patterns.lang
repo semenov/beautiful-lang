@@ -1,0 +1,12 @@
+// No or-patterns in `match` (and `lang guide` doesn't list which patterns
+// exist). Wanted: "break" | "case" => true.
+fn is_reserved(s: String) -> Bool {
+  return match s {
+    "break" | "case" | "catch" => true
+    _ => false
+  }
+}
+
+fn main() {
+  print("${is_reserved("case")}")
+}

@@ -1,0 +1,18 @@
+// PARTLY FIXED: eprint exists now; but a `with` on a standard stream still
+// makes the function `throws` (closing can fail), and there is still no
+// way to print without a line break except through io.stderr()/stdout().
+// Writing text without a line break to standard error needs io.stderr(),
+// which must be opened with `with`, whose closing can fail, so a helper
+// that only prints must be `throws` (or wrap everything in try/catch).
+// There's no eprint/print without "\n".
+import io
+
+fn say(text: String) {
+  with e = io.stderr() {
+    try e.write_text(text)
+  }
+}
+
+fn main() {
+  say("no newline")
+}

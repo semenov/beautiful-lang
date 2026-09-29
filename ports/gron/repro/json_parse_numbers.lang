@@ -1,0 +1,14 @@
+// json.parse turns -0 into 0 and 1e400 into Infinity without an error, and
+// json.encode then writes Infinity as null: data silently changes.
+import json
+fn main() throws {
+  let v = try json.parse("[-0, 1e400, -1e400]")
+  if v is json.Value.Array(items) {
+    for it in items {
+      if it is json.Value.Number(n) {
+        print("${n}")
+      }
+    }
+  }
+  print(json.encode(v))
+}

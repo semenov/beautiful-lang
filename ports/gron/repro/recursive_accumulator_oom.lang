@@ -1,0 +1,18 @@
+// FIXED by the compiler update (2026-09-29): this now runs correctly. Kept as a
+// regression check.
+// BUG: threading an accumulator list through recursion (`out = fill(out, ...)`,
+// the style the guide recommends: "return the new value and assign it")
+// runs out of memory at depth ~40 when the elements are lists or records:
+// every copy-on-write doubles the capacity. With List<Int> or List<String>
+// elements it works. gron crashed on 80-level-deep JSON because of this.
+fn fill(ss: List<List<Int>>, prefix: List<Int>, depth: Int) -> List<List<Int>> {
+  var out = ss
+  out.append(prefix)
+  if depth > 0 {
+    out = fill(out, prefix: prefix.concat([1]), depth: depth - 1)
+  }
+  return out
+}
+fn main() {
+  print("${fill([], prefix: [], depth: 100).length}")
+}

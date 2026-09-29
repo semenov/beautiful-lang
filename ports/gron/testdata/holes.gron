@@ -1,0 +1,6 @@
+json.x[3] = "c";
+json.x[1] = "a";
+json.x[1] = null;
+--
+json.y["q \"k\""] = {};
+json.z = 1.50e3;

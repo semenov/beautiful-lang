@@ -10,7 +10,7 @@ was fixed.
 |---|---|---|---|
 | [`hey`](hey) | [rakyll/hey](https://github.com/rakyll/hey), an HTTP load generator (Go, 1038 lines) | the HTTP client, concurrency, flags, timing | 730 lines; same numbers as the Go tool |
 | [`httpbin`](httpbin) | [mccutchen/go-httpbin](https://github.com/mccutchen/go-httpbin), an HTTP testing service (Go, 4099 lines) | the HTTP server end to end: routing, streaming, cookies, auth, gzip, WebSockets | 2552 lines; 108 of 146 answers identical to Go's; 61k req/s vs Go's 66k, half the memory |
-| [`gron`](gron) | [tomnomnom/gron](https://github.com/tomnomnom/gron), JSON to greppable lines and back (Go, 1800 lines) | JSON of any shape, text building, sorting, streams, speed | in progress |
+| [`gron`](gron) | [tomnomnom/gron](https://github.com/tomnomnom/gron), JSON to greppable lines and back (Go, 1800 lines) | JSON of any shape, text building, sorting, streams, speed | 2690 lines (715 of them its own exact-number JSON, 261 Unicode tables); 280/280 test cases and 3595/3600 fuzz cases identical to Go; faster than Go on big files except `-v` |
 
 `compiler/tests/run.sh` checks that every port still compiles (and runs the
 httpbin tests), so they keep up with the language.
@@ -20,4 +20,5 @@ How to run them:
 ```
 cd ports/hey && lang run hey.lang -n 1000 -c 50 http://localhost:8080/
 cd ports/httpbin && lang run main.lang -- --port 8080     # lang test tests.lang: its tests
+cd ports/gron && lang run main.lang testdata/edge.json    # scripts/compare.sh: against Go's gron
 ```

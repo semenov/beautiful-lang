@@ -1,0 +1,19 @@
+// String.slice is O(n) per call (character indexing from the start):
+// 10000 slices of a 2 MB string take ~4 s. Bytes.slice is fast.
+import time
+fn main() {
+  let parts = "abcdefghij".repeat(200000)
+  let t0 = time.now()
+  var n = 0
+  for i in 0..<10000 {
+    n += parts.slice(from: i * 100, to: i * 100 + 5).length
+  }
+  print("${n} slices took ${time.now().since(t0).millis()} ms")
+  let b = parts.bytes()
+  let t1 = time.now()
+  var m = 0
+  for i in 0..<10000 {
+    m += b.slice(from: i * 100, to: i * 100 + 5).length
+  }
+  print("${m} byte slices took ${time.now().since(t1).millis()} ms")
+}

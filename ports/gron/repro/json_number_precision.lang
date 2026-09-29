@@ -1,0 +1,9 @@
+// json.Value.Number is a Float: 1.0, 1e5 and 12345678901234567890 can't be
+// printed back as written (gron keeps numbers verbatim). Also the Float
+// formatting differs from Go/JS: 1.2345678901234567e+19 instead of
+// 12345678901234567000.
+import json
+fn main() throws {
+  let v = try json.parse("[1.0, 1e5, 12345678901234567890, 0.1]")
+  print(json.encode(v))
+}

@@ -1,0 +1,752 @@
+// JSON of unknown shape, keeping numbers exactly as written.
+//
+// The standard `json.Value` stores numbers as `Float`, so `1.0`, `1e5` and
+// `12345678901234567890` would come out as `1`, `100000` and
+// `1.2345678901234567e+19`. gron (Go, `json.Decoder.UseNumber`) prints
+// numbers exactly as they were written, so this module is a small JSON
+// reader and writer of its own, following Go's `encoding/json`.
+
+pub enum Value {
+  Null
+  Bool(value: Bool)
+  Number(text: String)
+  String(value: String)
+  Array(items: List<Value>)
+  Object(fields: Map<String, Value>)
+}
+
+// A JSON syntax error, worded like Go's.
+pub type SyntaxError implements Error {
+  text: String
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+// Reads the first JSON value of `data`, like Go's `json.Decoder.Decode`:
+// whatever follows a complete object or array is not looked at.
+pub fn decode_first(data: Bytes) throws -> Value {
+  var p = Parser(data: data, size: data.length)
+  p.skip_space()
+  if p.pos >= p.size {
+    throw SyntaxError(text: "EOF")
+  }
+  let v = try p.parse_value()
+  // A scalar at the top level needs a delimiter after it (Go looks at the
+  // next byte to know that a number has ended).
+  let scalar = match v {
+    Array(_) => false
+    Object(_) => false
+    _ => true
+  }
+  if scalar and p.pos < p.size {
+    let c = p.byte(p.pos)
+    if not is_space(c) {
+      throw p.invalid(c, context: "after top-level value")
+    }
+  }
+  return v
+}
+
+// Reads a whole text that must be exactly one JSON value, like Go's
+// `json.Unmarshal`.
+pub fn decode_all(data: Bytes) throws -> Value {
+  var p = Parser(data: data, size: data.length)
+  p.skip_space()
+  if p.pos >= p.size {
+    throw SyntaxError(text: "unexpected end of JSON input")
+  }
+  let v = try p.parse_value() catch err {
+    if err.message() == "unexpected EOF" {
+      throw SyntaxError(text: "unexpected end of JSON input")
+    }
+    throw err
+  }
+  p.skip_space()
+  if p.pos < p.size {
+    throw p.invalid(p.byte(p.pos), context: "after top-level value")
+  }
+  return v
+}
+
+fn is_space(c: Int) -> Bool {
+  return c == 32 or c == 9 or c == 10 or c == 13
+}
+
+fn is_digit(c: Int) -> Bool {
+  return c >= 48 and c <= 57
+}
+
+// How deeply arrays and objects may nest, as in Go's encoding/json.
+let max_depth = 10000
+
+// An array or object that is being read.
+type Open {
+  is_object: Bool
+  items: List<Value> = []
+  fields: Map<String, Value> = {}
+  // the key of the value being read, in an object
+  key: String = ""
+}
+
+type Parser {
+  data: Bytes
+  size: Int
+  pos: Int = 0
+
+  fn byte(self, i: Int) -> Int {
+    return self.data[i]
+  }
+
+  fn eof(self) -> SyntaxError {
+    return SyntaxError(text: "unexpected EOF")
+  }
+
+  fn invalid(self, c: Int, context: String) -> SyntaxError {
+    return SyntaxError(text: "invalid character ${quote_char(c)} ${context}")
+  }
+
+  mutating fn skip_space() {
+    while self.pos < self.size and is_space(self.byte(self.pos)) {
+      self.pos += 1
+    }
+  }
+
+  // Reads one value. Arrays and objects are read with a stack of the open
+  // ones rather than by recursion: Go allows 10000 levels, and recursing
+  // that deep overflows the stack, which is small in a program that uses
+  // http (see repro/stack_overflow_silent).
+  mutating fn parse_value() throws -> Value {
+    var open: List<Open> = []
+    while true {
+      // At the start of a value
+      self.skip_space()
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      let c = self.byte(self.pos)
+      var value = Value.Null
+      if c == 91 or c == 123 {
+        if open.length >= max_depth {
+          throw SyntaxError(text: "exceeded max depth")
+        }
+        self.pos += 1
+        self.skip_space()
+        if self.pos >= self.size {
+          throw self.eof()
+        }
+        let next = self.byte(self.pos)
+        if c == 91 and next == 93 {
+          self.pos += 1
+          value = Array(items: [])
+        } else if c == 123 and next == 125 {
+          self.pos += 1
+          value = Object(fields: {})
+        } else if c == 91 {
+          open.append(Open(is_object: false))
+          continue
+        } else {
+          open.append(Open(is_object: true, key: try self.object_key()))
+          continue
+        }
+      } else {
+        value = try self.parse_scalar(c)
+      }
+      // A value is complete: add it to the innermost open array or object,
+      // and close the ones that end here.
+      while true {
+        if open.is_empty() {
+          return value
+        }
+        let i = open.length - 1
+        if open[i].is_object {
+          let key = open[i].key
+          open[i].fields[key] = value
+        } else {
+          open[i].items.append(value)
+        }
+        self.skip_space()
+        if self.pos >= self.size {
+          throw self.eof()
+        }
+        let next = self.byte(self.pos)
+        self.pos += 1
+        if open[i].is_object {
+          if next == 125 {
+            if open.pop() is some(done) {
+              value = Object(fields: done.fields)
+            }
+            continue
+          }
+          if next != 44 {
+            throw self.invalid(next, context: "after object key:value pair")
+          }
+          open[i].key = try self.object_key()
+        } else {
+          if next == 93 {
+            if open.pop() is some(done) {
+              value = Array(items: done.items)
+            }
+            continue
+          }
+          if next != 44 {
+            throw self.invalid(next, context: "after array element")
+          }
+        }
+        break
+      }
+    }
+    panic("unreachable")
+  }
+
+  // A string, number, true, false or null, starting with `c`.
+  mutating fn parse_scalar(c: Int) throws -> Value {
+    if c == 34 {
+      return Value.String(value: try self.parse_string())
+    }
+    if c == 45 or is_digit(c) {
+      return Number(text: try self.parse_number())
+    }
+    if c == 116 {
+      try self.literal("true")
+      return Value.Bool(value: true)
+    }
+    if c == 102 {
+      try self.literal("false")
+      return Value.Bool(value: false)
+    }
+    if c == 110 {
+      try self.literal("null")
+      return Null
+    }
+    throw self.invalid(c, context: "looking for beginning of value")
+  }
+
+  // An object's key and the colon after it.
+  mutating fn object_key() throws -> String {
+    self.skip_space()
+    if self.pos >= self.size {
+      throw self.eof()
+    }
+    let c = self.byte(self.pos)
+    if c != 34 {
+      throw self.invalid(c, context: "looking for beginning of object key string")
+    }
+    let key = try self.parse_string()
+    self.skip_space()
+    if self.pos >= self.size {
+      throw self.eof()
+    }
+    let colon = self.byte(self.pos)
+    if colon != 58 {
+      throw self.invalid(colon, context: "after object key")
+    }
+    self.pos += 1
+    return key
+  }
+
+  mutating fn literal(word: String) throws {
+    let expected = word.bytes()
+    for i in 0..<expected.length {
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      let c = self.byte(self.pos)
+      let want = expected[i]
+      if c != want {
+        throw self.invalid(c, context: "in literal ${word} (expecting ${quote_char(want)})")
+      }
+      self.pos += 1
+    }
+  }
+
+  mutating fn parse_number() throws -> String {
+    let start = self.pos
+    if self.byte(self.pos) == 45 {
+      self.pos += 1
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      if not is_digit(self.byte(self.pos)) {
+        throw self.invalid(self.byte(self.pos), context: "in numeric literal")
+      }
+    }
+    if self.byte(self.pos) == 48 {
+      self.pos += 1
+    } else {
+      self.digits()
+    }
+    if self.pos < self.size and self.byte(self.pos) == 46 {
+      self.pos += 1
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      if not is_digit(self.byte(self.pos)) {
+        throw self.invalid(self.byte(self.pos), context: "after decimal point in numeric literal")
+      }
+      self.digits()
+    }
+    if self.pos < self.size and (self.byte(self.pos) == 101 or self.byte(self.pos) == 69) {
+      self.pos += 1
+      if self.pos < self.size and (self.byte(self.pos) == 43 or self.byte(self.pos) == 45) {
+        self.pos += 1
+      }
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      if not is_digit(self.byte(self.pos)) {
+        throw self.invalid(self.byte(self.pos), context: "in exponent of numeric literal")
+      }
+      self.digits()
+    }
+    return try self.data.slice(from: start, to: self.pos).text()
+  }
+
+  mutating fn digits() {
+    while self.pos < self.size and is_digit(self.byte(self.pos)) {
+      self.pos += 1
+    }
+  }
+
+  // At the opening quote; returns the unescaped text.
+  mutating fn parse_string() throws -> String {
+    self.pos += 1
+    let start = self.pos
+    // The common case: no escapes and nothing to replace.
+    while self.pos < self.size {
+      let c = self.byte(self.pos)
+      if c == 34 {
+        let raw = self.data.slice(from: start, to: self.pos)
+        self.pos += 1
+        return utf8_lossy(raw)
+      }
+      if c == 92 or c < 32 {
+        break
+      }
+      self.pos += 1
+    }
+    var out = self.data.slice(from: start, to: self.pos)
+    while true {
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      let c = self.byte(self.pos)
+      if c == 34 {
+        self.pos += 1
+        return utf8_lossy(out)
+      }
+      if c < 32 {
+        throw self.invalid(c, context: "in string literal")
+      }
+      if c != 92 {
+        out.append(c)
+        self.pos += 1
+        continue
+      }
+      self.pos += 1
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      let e = self.byte(self.pos)
+      self.pos += 1
+      if e == 34 or e == 92 or e == 47 {
+        out.append(e)
+      } else if e == 98 {
+        out.append(8)
+      } else if e == 102 {
+        out.append(12)
+      } else if e == 110 {
+        out.append(10)
+      } else if e == 114 {
+        out.append(13)
+      } else if e == 116 {
+        out.append(9)
+      } else if e == 117 {
+        var r = try self.hex4()
+        if r >= 0xD800 and r < 0xE000 {
+          // A surrogate: a pair makes one character, anything else U+FFFD.
+          var combined = 0xFFFD
+          if r < 0xDC00 and self.pos + 1 < self.size and self.byte(self.pos) == 92 and self.byte(self.pos + 1) == 117 {
+            let save = self.pos
+            self.pos += 2
+            let low = try self.hex4()
+            if low >= 0xDC00 and low < 0xE000 {
+              combined = 0x10000 + (r - 0xD800) * 0x400 + (low - 0xDC00)
+            } else {
+              self.pos = save
+            }
+          }
+          r = combined
+        }
+        out = append_rune(out, r)
+      } else {
+        throw self.invalid(e, context: "in string escape code")
+      }
+    }
+    panic("unreachable")
+  }
+
+  mutating fn hex4() throws -> Int {
+    var r = 0
+    for _ in 0..<4 {
+      if self.pos >= self.size {
+        throw self.eof()
+      }
+      let c = self.byte(self.pos)
+      let d = hex_value(c)
+      if d < 0 {
+        throw self.invalid(c, context: "in \\u hexadecimal character escape")
+      }
+      r = r * 16 + d
+      self.pos += 1
+    }
+    return r
+  }
+}
+
+fn hex_value(c: Int) -> Int {
+  if c >= 48 and c <= 57 {
+    return c - 48
+  }
+  if c >= 97 and c <= 102 {
+    return c - 87
+  }
+  if c >= 65 and c <= 70 {
+    return c - 55
+  }
+  return -1
+}
+
+// How Go shows a byte in an error: 'x', '\n', '\x01'.
+fn quote_char(c: Int) -> String {
+  if c == 39 {
+    return "'\\''"
+  }
+  if c == 34 {
+    return "'\"'"
+  }
+  if c == 10 {
+    return "'\\n'"
+  }
+  if c == 9 {
+    return "'\\t'"
+  }
+  if c == 13 {
+    return "'\\r'"
+  }
+  if c < 32 or c >= 127 {
+    return "'\\x${Bytes([c]).hex()}'"
+  }
+  return "'${utf8_lossy(Bytes([c]))}'"
+}
+
+// Adds the UTF-8 encoding of the character with code point `r`.
+pub fn append_rune(b: Bytes, r: Int) -> Bytes {
+  var out = b
+  if r < 0x80 {
+    out.append(r)
+  } else if r < 0x800 {
+    out.append(0xC0 + r.shift_right(6))
+    out.append(0x80 + r.bit_and(0x3F))
+  } else if r < 0x10000 {
+    out.append(0xE0 + r.shift_right(12))
+    out.append(0x80 + r.shift_right(6).bit_and(0x3F))
+    out.append(0x80 + r.bit_and(0x3F))
+  } else {
+    out.append(0xF0 + r.shift_right(18))
+    out.append(0x80 + r.shift_right(12).bit_and(0x3F))
+    out.append(0x80 + r.shift_right(6).bit_and(0x3F))
+    out.append(0x80 + r.bit_and(0x3F))
+  }
+  return out
+}
+
+// A decoded character: its code point and how many bytes it took.
+pub type Rune {
+  value: Int
+  width: Int
+}
+
+// U+FFFD, the replacement character
+pub let rune_error = 0xFFFD
+
+// The character at byte `i`, like Go's utf8.DecodeRune: U+FFFD with width 1
+// for a bad byte, and U+FFFD with width 0 at the end.
+pub fn decode_rune(b: Bytes, i: Int) -> Rune {
+  let n = b.length
+  if i >= n {
+    return Rune(value: rune_error, width: 0)
+  }
+  let c0 = b[i]
+  if c0 < 0x80 {
+    return Rune(value: c0, width: 1)
+  }
+  var need = 0
+  var r = 0
+  var min = 0
+  if c0 >= 0xC2 and c0 < 0xE0 {
+    need = 1
+    r = c0.bit_and(0x1F)
+    min = 0x80
+  } else if c0 >= 0xE0 and c0 < 0xF0 {
+    need = 2
+    r = c0.bit_and(0x0F)
+    min = 0x800
+  } else if c0 >= 0xF0 and c0 < 0xF5 {
+    need = 3
+    r = c0.bit_and(7)
+    min = 0x10000
+  } else {
+    return Rune(value: rune_error, width: 1)
+  }
+  if i + need >= n {
+    return Rune(value: rune_error, width: 1)
+  }
+  for k in 1..=need {
+    let c = b[i + k]
+    if c < 0x80 or c >= 0xC0 {
+      return Rune(value: rune_error, width: 1)
+    }
+    r = r * 64 + c.bit_and(0x3F)
+  }
+  if r < min or r > 0x10FFFF or (r >= 0xD800 and r < 0xE000) {
+    return Rune(value: rune_error, width: 1)
+  }
+  return Rune(value: r, width: need + 1)
+}
+
+// The text of UTF-8 bytes, with each bad byte replaced by U+FFFD (as Go
+// does when it decodes JSON strings).
+pub fn utf8_lossy(b: Bytes) -> String {
+  let text = try b.text() catch _ {
+    var out = Bytes()
+    var i = 0
+    while i < b.length {
+      let r = decode_rune(b, i)
+      if r.value == rune_error and r.width == 1 {
+        out = append_rune(out, rune_error)
+      } else {
+        out.append_all(b.slice(from: i, to: i + r.width))
+      }
+      i += r.width
+    }
+    // Valid now, by construction.
+    return try out.text() catch _ { "" }
+  }
+  return text
+}
+
+// The value as Go's `json.Encoder` writes it with `SetIndent("", "  ")`
+// and `SetEscapeHTML(false)`: object keys sorted, two-space indent.
+pub fn encode_pretty(v: Value) -> String {
+  return write(v, style: Style(
+    indent: true,
+    bracket: b => b,
+    key: k => k,
+    colon: ": ",
+    comma: ",",
+    scalar: encode_scalar,
+  ))
+}
+
+// How `write` lays out and decorates JSON.
+pub type Style {
+  // a line per item, indented by two spaces a level (else all on one line)
+  indent: Bool
+  // for {, }, [ and ]
+  bracket: fn(String) -> String
+  // for a key, quoted
+  key: fn(String) -> String
+  colon: String
+  comma: String
+  // for a string, number, true, false or null
+  scalar: fn(Value) -> String
+}
+
+// The value as JSON text in a style, object keys sorted.
+pub fn write(v: Value, style: Style) -> String {
+  var out: List<String> = []
+  // The arrays and objects being written, innermost last (a list rather
+  // than recursion, which overflows the stack on deep JSON)
+  var open: List<Level> = []
+  var next = v
+  while true {
+    // Write `next`: whole if it is a scalar or empty, else its opening
+    if next is Array(items) {
+      out.append(style.bracket("["))
+      if items.is_empty() {
+        out.append(style.bracket("]"))
+      } else {
+        open.append(Level(values: items, closing: "]"))
+      }
+    } else if next is Object(fields) {
+      out.append(style.bracket("{"))
+      if fields.is_empty() {
+        out.append(style.bracket("}"))
+      } else {
+        let keys = fields.keys().sorted()
+        open.append(Level(values: keys.map(k => fields[k] ?? Null), keys: keys, closing: "}"))
+      }
+    } else {
+      out.append(style.scalar(next))
+    }
+    // Close what is complete, then go on with the next item
+    var more = false
+    while open.length > 0 {
+      let i = open.length - 1
+      let at = open[i].next
+      if at < open[i].values.length {
+        if at > 0 {
+          out.append(style.comma)
+        }
+        if style.indent {
+          out.append("\n${"  ".repeat(open.length)}")
+        }
+        if open[i].keys.length > 0 {
+          out.append(style.key(encode_string(open[i].keys[at])))
+          out.append(style.colon)
+        }
+        next = open[i].values[at]
+        open[i].next = at + 1
+        more = true
+        break
+      }
+      let closing = open[i].closing
+      let _ = open.pop()
+      if style.indent {
+        out.append("\n${"  ".repeat(open.length)}")
+      }
+      out.append(style.bracket(closing))
+    }
+    if not more {
+      break
+    }
+  }
+  return out.join("")
+}
+
+// An array's items or an object's values (with their keys), being written.
+type Level {
+  values: List<Value>
+  // an object's keys, sorted; empty for an array
+  keys: List<String> = []
+  closing: String
+  // the position of the next item
+  next: Int = 0
+}
+
+// A string, number, true, false or null as JSON text.
+pub fn encode_scalar(v: Value) -> String {
+  return match v {
+    Null => "null"
+    Bool(value) => if value { "true" } else { "false" }
+    Number(text) => text
+    String(value) => encode_string(value)
+    Array(items) => if items.is_empty() { "[]" } else { "[...]" }
+    Object(fields) => if fields.is_empty() { "{}" } else { "{...}" }
+  }
+}
+
+// A string in quotes, escaped as Go's encoder does without HTML escaping:
+// \" \\ \b \f \n \r \t, other control characters as \u00xx, and U+2028,
+// U+2029 as  ,  .
+pub fn encode_string(s: String) -> String {
+  let b = s.bytes()
+  let n = b.length
+  var i = 0
+  while i < n {
+    let c = b[i]
+    if c < 32 or c == 34 or c == 92 {
+      break
+    }
+    if c == 0xE2 and i + 2 < n and b[i + 1] == 0x80 {
+      let c2 = b[i + 2]
+      if c2 == 0xA8 or c2 == 0xA9 {
+        break
+      }
+    }
+    i += 1
+  }
+  if i == n {
+    return "\"${s}\""
+  }
+  var out = Bytes()
+  out.append(34)
+  out.append_all(b.slice(from: 0, to: i))
+  while i < n {
+    let c = b[i]
+    if c == 34 {
+      out.append_text("\\\"")
+    } else if c == 92 {
+      out.append_text("\\\\")
+    } else if c == 8 {
+      out.append_text("\\b")
+    } else if c == 12 {
+      out.append_text("\\f")
+    } else if c == 10 {
+      out.append_text("\\n")
+    } else if c == 13 {
+      out.append_text("\\r")
+    } else if c == 9 {
+      out.append_text("\\t")
+    } else if c < 32 {
+      out.append_text("\\u00${Bytes([c]).hex()}")
+    } else if c == 0xE2 and i + 2 < n and b[i + 1] == 0x80 and (b[i + 2] == 0xA8 or b[i + 2] == 0xA9) {
+      out.append_text(if b[i + 2] == 0xA8 { "\\u2028" } else { "\\u2029" })
+      i += 2
+    } else {
+      out.append(c)
+    }
+    i += 1
+  }
+  out.append(34)
+  return utf8_lossy(out)
+}
+
+test "numbers are kept as written" {
+  let v = try decode_all("[1.0, 1e5, -0, 12345678901234567890, 1.5E-10]".bytes())
+  expect encode_pretty(v) == "[\n  1.0,\n  1e5,\n  -0,\n  12345678901234567890,\n  1.5E-10\n]"
+}
+
+test "strings: escapes, surrogates and bad UTF-8" {
+  expect (try decode_all("\"a\\n\\u00e9\\ud83d\\ude00\"".bytes())) == Value.String(value: "a\né😀")
+  // a lone surrogate becomes U+FFFD, as in Go
+  expect (try decode_all("\"\\ud800x\"".bytes())) == Value.String(value: "\u{fffd}x")
+  // so does a byte that isn't UTF-8
+  expect (try decode_all(Bytes([34, 97, 0xFF, 34]))) == Value.String(value: "a\u{fffd}")
+  expect encode_string("q\"\\\u{1}\u{2028}é") == "\"q\\\"\\\\\\u0001\\u2028é\""
+}
+
+// The error decode_all gives for `text`, or "ok".
+fn decode_error(text: String) -> String {
+  let _ = try decode_all(text.bytes()) catch err { return err.message() }
+  return "ok"
+}
+
+test "syntax errors are worded as Go's" {
+  let messages = ["{\"a\" 1}", "[1,]", "tru", "[1", "01", "\"\\x\"", ""].map(text => decode_error(text))
+  expect messages == [
+    "invalid character '1' after object key",
+    "invalid character ']' looking for beginning of value",
+    "unexpected end of JSON input",
+    "unexpected end of JSON input",
+    "invalid character '1' after top-level value",
+    "invalid character 'x' in string escape code",
+    "unexpected end of JSON input",
+  ]
+}
+
+test "decode_first stops after the first value" {
+  expect (try decode_first("{\"a\":1} trailing".bytes())) == Value.Object(fields: {"a": Number(text: "1")})
+  let scalar = try decode_first("1x".bytes()) catch err { Value.String(value: err.message()) }
+  expect scalar == Value.String(value: "invalid character 'x' after top-level value")
+}
+
+test "UTF-8 by hand" {
+  let b = append_rune(append_rune(Bytes(), 0xE9), 0x1F600)
+  expect b.hex() == "c3a9f09f9880"
+  expect decode_rune(b, 0) == Rune(value: 0xE9, width: 2)
+  expect decode_rune(b, 2) == Rune(value: 0x1F600, width: 4)
+  expect decode_rune(b, 6) == Rune(value: rune_error, width: 0)
+  expect decode_rune(Bytes([0xC0, 0x80]), 0) == Rune(value: rune_error, width: 1)
+}

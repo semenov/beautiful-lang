@@ -1,0 +1,18 @@
+// A variant named like a built-in type can't be built with its bare name,
+// and the error does not say how to build it (Value.String(...) works).
+enum Value {
+  Null
+  String(value: String)
+}
+
+fn make() -> Value {
+  return String(value: "x")
+}
+
+fn main() {
+  let v = make()
+  match v {
+    String(value) => print(value)
+    Null => print("null")
+  }
+}

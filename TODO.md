@@ -29,22 +29,39 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Port a small open-source project** to the language; note what's
       missing in the language and libraries and add it as I go
   - [x] rakyll/hey (load generator): section below
-  - [ ] tomnomnom/gron (JSON of any shape, streams, colors): being finished
-    - [x] bug: appending to a shared list doubled its capacity (OOM on deep JSON)
-    - [x] `String.slice` / `index_of` were O(n) per call: ASCII strings now O(1)
-    - [x] `io.stdout().write_text` was 10x slower than `print`: now shares its buffer
-    - [x] reading `m[k]` then writing `m[k]` copies the value: documented (in-place paths, `take`); optimizing it: later
-    - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
-    - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
-    - [x] sorting by a list key (lexicographic); `<` on lists. A comparator: not needed so far
-    - [x] or-patterns in `match`: `"a" | "b" => ...`
-    - [ ] `Duration` in interpolation shows its fields: needs types to choose their text (a `to_string` method used by `${}`): to raise with Vlad
+  - [x] tomnomnom/gron (ports/gron): 280/280 test cases and 3595/3600 fuzz
+        cases identical to Go, faster than Go on big files except `-v`.
+        Fixed from it: list capacity bug, O(n) `String.slice`, slow
+        `io.stdout()`, Float text, or-patterns, list sort keys.
+        Still open (ports/gron/GAPS.md, repros in ports/gron/repro):
+    - [ ] **stack overflow kills the program silently** (SIGBUS/SIGSEGV, no
+          message); programs with http/spawn get a much smaller stack (task
+          stacks): give a clear "stack overflow" panic, and bigger stacks
+    - [ ] **using http, spawn or net anywhere makes the whole program 1.7-2.4x
+          slower** (the multi-threaded runtime: atomic refcounts?): measure,
+          pay only where values are shared
+    - [ ] top-level `let` list rebuilt on every use (230 ns per read of a
+          2000-element table): make them static, built once
+    - [ ] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null
+    - [ ] JSON numbers as written (`json.Value.Number` is a Float; gron wrote
+          a 700-line JSON of its own) -- waits for Vlad
+    - [ ] Unicode: `is_letter` is not the letter category (digits of other
+          scripts, marks, Ⅻ); code point <-> character conversion
+    - [ ] `http.ResponseStream` isn't an `io.Stream`
+    - [ ] file errors have no kinds (NotFound, ...); `files.read` of a
+          directory gives empty text instead of an error
+    - [ ] `read_line` can return non-UTF-8 text that `Bytes.text()` refuses
+    - [ ] HTTP client: proxy and "insecure" options
+    - [ ] print without a line break without a `with` stream
+    - [ ] errors: misplaced `catch` inside a lambda says "expected `)`"; a
+          file named like a stdlib module gets an unclear error
+    - [ ] docs: `b[i]` on Bytes, `is_letter`, the stack and speed notes
     - [x] a variant named `String` can't be built by its bare name: now it can where the enum is expected, else the error names `Value.String(...)`
     - [x] guide: a one-line record example doesn't parse
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
         on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).
-        Gaps found (/tmp/port-httpbin/GAPS.md):
+        Gaps found (ports/httpbin/GAPS.md):
     - [x] bug: chunked request bodies arrive empty (and `Expect: 100-continue`)
     - [x] bug: `+` in a path is decoded as a space; routes match raw parts
     - [x] bug: response header names are case-sensitive (two content types)

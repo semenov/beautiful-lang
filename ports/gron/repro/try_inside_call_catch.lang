@@ -1,0 +1,16 @@
+// Inside a lambda, `h(try g(x)) catch err { ... }` gives "expected `)` to
+// close the call, found `catch`", which doesn't say what is wrong. Outside a
+// lambda the same mistake gets the good message "`catch` needs `try`
+// before the call it handles". (Fix: a helper function, or bind first.)
+fn g(x: Int) throws -> Int {
+  throw Failure(message: "no ${x}")
+}
+
+fn h(x: Int) -> String {
+  return "${x}"
+}
+
+fn main() {
+  let texts = [1, 2].map(x => h(try g(x)) catch err { err.message() })
+  print(texts.join(", "))
+}

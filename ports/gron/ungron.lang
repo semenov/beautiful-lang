@@ -1,0 +1,576 @@
+// Ungronning is the reverse of gronning: turn statements
+// back into JSON. The expected input grammar is:
+//
+//   Input ::= '--'* Statement (Statement | '--')*
+//   Statement ::= Path Space* "=" Space* Value ";" "\n"
+//   Path ::= (BareWord) ("." BareWord | ("[" Key "]"))*
+//   Value ::= String | Number | "true" | "false" | "null" | "[]" | "{}"
+//   BareWord ::= (UnicodeLu | UnicodeLl | UnicodeLm | UnicodeLo | UnicodeNl | '$' | '_') (UnicodeLu | UnicodeLl | UnicodeLm | UnicodeLo | UnicodeNl | UnicodeMn | UnicodeMc | UnicodeNd | UnicodePc | '$' | '_')*
+//   Key ::= [0-9]+ | String
+//   String ::= '"' (UnescapedRune | ("\" (["\/bfnrt] | ('u' Hex))))* '"'
+//   UnescapedRune ::= [^#x0-#x1f"\]
+
+import identifier
+import jsonraw
+import token
+import unicode
+
+// An error that can be recovered from; e.g. an empty line in the input.
+pub type Recoverable implements Error {
+  msg: String
+  fn message(self) -> String {
+    return self.msg
+  }
+}
+
+// What the lexer does next. Go's version has state functions that change
+// the lexer through a pointer and return the next state function; lang
+// functions can't change their arguments, so the states are an enum and
+// the lexer's mutating methods return the next one.
+enum State {
+  Statement
+  BareWord
+  Braces
+  NumericKey
+  QuotedKey
+  Value
+  Ignore
+  Done
+}
+
+// The state for lexing a statement.
+pub type Lexer {
+  // the raw input, as bytes: positions are byte offsets
+  text: Bytes
+  // the current byte offset in the text
+  pos: Int = 0
+  // the width of the current rune in bytes
+  width: Int = 0
+  // the rune at the current position
+  cur: Int = 0
+  // the rune at the previous position
+  prev: Int = 0
+  // the tokens that have been emitted
+  tokens: List<token.Token> = []
+  // the starting position of the current token
+  token_start: Int = 0
+
+  // Runs the lexer and returns the tokens.
+  pub mutating fn lex() -> List<token.Token> {
+    var state = Statement
+    while state != Done {
+      state = match state {
+        Statement => self.lex_statement()
+        BareWord => self.lex_bare_word()
+        Braces => self.lex_braces()
+        NumericKey => self.lex_numeric_key()
+        QuotedKey => self.lex_quoted_key()
+        Value => self.lex_value()
+        Ignore => self.lex_ignore()
+        Done => Done
+      }
+    }
+    return self.tokens
+  }
+
+  // Gets the next rune and updates the lexer state.
+  mutating fn next() -> Int {
+    let r = jsonraw.decode_rune(self.text, self.pos)
+    self.pos += r.width
+    self.width = r.width
+    self.prev = self.cur
+    self.cur = r.value
+    return r.value
+  }
+
+  // Moves back one rune; only once per call of next().
+  mutating fn backup() {
+    self.pos -= self.width
+  }
+
+  // The next rune, without moving.
+  mutating fn peek() -> Int {
+    let r = self.next()
+    self.backup()
+    return r
+  }
+
+  // Skips the current token.
+  mutating fn ignore() {
+    self.token_start = self.pos
+  }
+
+  // Adds the current token and moves the token start to the current position.
+  mutating fn emit(typ: token.TokenType) {
+    let text = jsonraw.utf8_lossy(self.text.slice(from: self.token_start, to: self.pos))
+    self.token_start = self.pos
+    self.tokens.append(token.Token(text: text, typ: typ))
+  }
+
+  // Moves on if the next rune is one of `valid` (ASCII).
+  mutating fn accept(valid: String) -> Bool {
+    if contains_rune(valid, r: self.next()) {
+      return true
+    }
+    self.backup()
+    return false
+  }
+
+  // Accepts runes for as long as they are in `valid` (ASCII).
+  mutating fn accept_run(valid: String) {
+    while contains_rune(valid, r: self.next()) {
+    }
+    self.backup()
+  }
+
+  // Accepts runes until one of the delimiters (ASCII).
+  mutating fn accept_until(delims: String) {
+    while not contains_rune(delims, r: self.next()) {
+      if self.cur == jsonraw.rune_error {
+        return
+      }
+    }
+    self.backup()
+  }
+
+  // Accepts runes until a delimiter that isn't escaped with a backslash.
+  mutating fn accept_until_unescaped(delims: String) {
+    var in_escape = false
+    while true {
+      let r = self.next()
+      if r == 92 and not in_escape {
+        in_escape = true
+        continue
+      }
+      if contains_rune(delims, r: r) and not in_escape {
+        self.backup()
+        return
+      }
+      if self.cur == jsonraw.rune_error {
+        return
+      }
+      in_escape = false
+    }
+  }
+
+  // Decides which more specific state comes next.
+  mutating fn lex_statement() -> State {
+    let r = self.peek()
+    if r == 46 or identifier.valid_first_rune(r) {
+      return BareWord
+    }
+    if r == 91 {
+      return Braces
+    }
+    if r == 32 or r == 61 {
+      return Value
+    }
+    if r == 45 {
+      // grep -A etc can add '--' lines to the output: kept but not used
+      return Ignore
+    }
+    if r == jsonraw.rune_error {
+      return Done
+    }
+    self.emit(Invalid)
+    return Done
+  }
+
+  // Bare identifiers: the 'foo' in 'foo.bar' or 'foo[0]'.
+  mutating fn lex_bare_word() -> State {
+    if self.accept(".") {
+      self.emit(Dot)
+    }
+    if not identifier.valid_first_rune(self.next()) {
+      self.backup()
+      self.emit(Invalid)
+      return Done
+    }
+    while identifier.valid_secondary_rune(self.next()) {
+    }
+    self.backup()
+    self.emit(Bare)
+    return Statement
+  }
+
+  // Keys in square braces.
+  mutating fn lex_braces() -> State {
+    let _ = self.accept("[")
+    self.emit(LBrace)
+    let r = self.peek()
+    if is_number(r) {
+      return NumericKey
+    }
+    if r == 34 {
+      return QuotedKey
+    }
+    self.emit(Invalid)
+    return Done
+  }
+
+  // Numeric keys in square braces.
+  mutating fn lex_numeric_key() -> State {
+    let _ = self.accept("[")
+    self.ignore()
+    while is_number(self.next()) {
+    }
+    self.backup()
+    self.emit(NumericKey)
+    if self.accept("]") {
+      self.emit(RBrace)
+    } else {
+      self.emit(Invalid)
+      return Done
+    }
+    self.ignore()
+    return Statement
+  }
+
+  // Quoted keys in square braces.
+  mutating fn lex_quoted_key() -> State {
+    let _ = self.accept("[")
+    self.ignore()
+    let _ = self.accept("\"")
+    self.accept_until_unescaped("\"")
+    let _ = self.accept("\"")
+    self.emit(QuotedKey)
+    if self.accept("]") {
+      self.emit(RBrace)
+    } else {
+      self.emit(Invalid)
+      return Done
+    }
+    self.ignore()
+    return Statement
+  }
+
+  // The value at the end of a statement.
+  mutating fn lex_value() -> State {
+    self.accept_run(" ")
+    self.ignore()
+    if self.accept("=") {
+      self.emit(Equals)
+    } else {
+      return Done
+    }
+    self.accept_run(" ")
+    self.ignore()
+
+    if self.accept("\"") {
+      self.accept_until_unescaped("\"")
+      let _ = self.accept("\"")
+      self.emit(Str)
+    } else if self.accept("t") {
+      self.accept_run("rue")
+      self.emit(True)
+    } else if self.accept("f") {
+      self.accept_run("alse")
+      self.emit(False)
+    } else if self.accept("n") {
+      self.accept_run("ul")
+      self.emit(Null)
+    } else if self.accept("[") {
+      let _ = self.accept("]")
+      self.emit(EmptyArray)
+    } else if self.accept("{") {
+      let _ = self.accept("}")
+      self.emit(EmptyObject)
+    } else {
+      // Assume a number
+      self.accept_until(";")
+      self.emit(Number)
+    }
+
+    self.accept_run(" ")
+    self.ignore()
+    if self.accept(";") {
+      self.emit(Semi)
+    }
+    // The value is always the last thing in the statement
+    return Done
+  }
+
+  // Accepts everything to the end and emits it as an Ignored token.
+  mutating fn lex_ignore() -> State {
+    while self.next() != jsonraw.rune_error {
+    }
+    self.backup()
+    self.emit(Ignored)
+    return Done
+  }
+}
+
+// Whether the ASCII text `set` contains the rune `r`.
+fn contains_rune(set: String, r: Int) -> Bool {
+  if r >= 128 {
+    return false
+  }
+  let b = set.bytes()
+  for i in 0..<b.length {
+    if b[i] == r {
+      return true
+    }
+  }
+  return false
+}
+
+// Go's unicode.IsNumber, with ASCII first.
+fn is_number(r: Int) -> Bool {
+  if r < 0x80 {
+    return r >= 0x30 and r <= 0x39
+  }
+  return unicode.is_number(r)
+}
+
+// Lexes one line of gron output into tokens.
+pub fn lex(line: String) -> List<token.Token> {
+  var l = Lexer(text: line.bytes())
+  return l.lex()
+}
+
+// Turns the tokens of one statement into a value: `json.a[1] = 2;` becomes
+// {"json": {"a": [null, 2]}}.
+//
+// Go's version calls itself once per token. That is too deep for lang's
+// stack on JSON thousands of levels deep (see repro/stack_overflow_silent),
+// so this walks forward to the value, then wraps it in its keys from the
+// inside out. The errors come in the same order as Go's: those found on
+// the way down (numeric keys, unexpected tokens), then the value's, then
+// quoted keys' from the innermost out.
+pub fn ungron_tokens(ts: List<token.Token>) throws -> jsonraw.Value {
+  if ts.is_empty() {
+    throw Recoverable(msg: "empty input")
+  }
+  if ts[0].typ == token.TokenType.Ignored {
+    throw Recoverable(msg: "ignored token")
+  }
+  if ts[ts.length - 1].typ == token.TokenType.Invalid {
+    throw Failure(message: "invalid statement")
+  }
+  // The last token should be a semicolon, so the one before it must be a
+  // value.
+  if ts.length > 1 and not ts[ts.length - 2].is_value() {
+    throw Failure(message: "statement has no value")
+  }
+
+  var keys: List<token.Token> = []
+  var found: jsonraw.Value? = none
+  for t in ts {
+    if t.typ == token.TokenType.Ignored {
+      throw Recoverable(msg: "ignored token")
+    }
+    if t.is_punct() {
+      continue
+    }
+    if t.is_value() {
+      found = try jsonraw.decode_first(t.text.bytes()) catch _ {
+        throw Failure(message: "invalid value `${t.text}`")
+      }
+      break
+    }
+    if t.typ == token.TokenType.NumericKey {
+      let _ = try t.text.to_int() catch _ {
+        throw Failure(message: "invalid integer key `${t.text}`")
+      }
+    } else if t.typ != token.TokenType.Bare and t.typ != token.TokenType.QuotedKey {
+      throw Failure(message: "unexpected token `${t.text}`")
+    }
+    keys.append(t)
+  }
+  var val = found ?? throw Recoverable(msg: "empty input")
+  keys.reverse()
+  for t in keys {
+    if t.typ == token.TokenType.Bare {
+      val = jsonraw.Value.Object(fields: {t.text: val})
+    } else if t.typ == token.TokenType.QuotedKey {
+      let key = try jsonraw.decode_all(t.text.bytes()) catch _ {
+        throw Failure(message: "invalid quoted key `${t.text}`")
+      }
+      if key is jsonraw.Value.String(k) {
+        val = jsonraw.Value.Object(fields: {k: val})
+      } else {
+        throw Failure(message: "invalid quoted key `${t.text}`")
+      }
+    } else {
+      // There needs to be at least key + 1 space in the array
+      let index = try t.text.to_int() catch _ { 0 }
+      var items: List<jsonraw.Value> = []
+      for _ in 0..<index {
+        items.append(jsonraw.Value.Null)
+      }
+      items.append(val)
+      val = jsonraw.Value.Array(items: items)
+    }
+  }
+  return val
+}
+
+// Where a value was taken out of its parent while merging, to be put back.
+enum Hole {
+  InObject(fields: Map<String, jsonraw.Value>, key: String)
+  InArray(items: List<jsonraw.Value>, index: Int)
+}
+
+// Merges objects and arrays, or returns b for scalars.
+//
+// Go's version recurses; this one walks down with a list of the parents
+// left behind (each with a hole where the child was taken out, so the
+// child isn't copied), then fills the holes on the way back up. Only one
+// child per level is walked down into; b from ungron_tokens never has more
+// (any other is merged with a call of its own).
+pub fn recursive_merge(a: jsonraw.Value, b: jsonraw.Value) throws -> jsonraw.Value {
+  var holes: List<Hole> = []
+  var x = a
+  var y = b
+  var done = jsonraw.Value.Null
+  while true {
+    var down = false
+    var next_a = jsonraw.Value.Null
+    var next_b = jsonraw.Value.Null
+    match x {
+      Object(a_fields) => {
+        let b_fields = match y {
+          Object(fields) => fields
+          _ => throw Failure(message: "cannot merge object with non-object")
+        }
+        var out = a_fields
+        var down_key = ""
+        for entry in b_fields {
+          // take() rather than out[key]: reading would copy the value (the
+          // whole tree below it) while the map still holds it
+          if out.take(entry.key) is some(existing) {
+            if down {
+              out[entry.key] = try recursive_merge(existing, b: entry.value)
+            } else {
+              down = true
+              down_key = entry.key
+              next_a = existing
+              next_b = entry.value
+            }
+          } else {
+            out[entry.key] = entry.value
+          }
+        }
+        if down {
+          holes.append(InObject(fields: out, key: down_key))
+        } else {
+          done = jsonraw.Value.Object(fields: out)
+        }
+      }
+      Array(a_items) => {
+        let b_items = match y {
+          Array(items) => items
+          _ => throw Failure(message: "cannot merge array with non-array")
+        }
+        var out = a_items
+        var down_index = 0
+        while out.length < b_items.length {
+          out.append(jsonraw.Value.Null)
+        }
+        for k in 0..<b_items.length {
+          // Go keeps null and "missing" apart only by nil, so a JSON null is
+          // replaced too
+          if b_items[k] is jsonraw.Value.Null {
+            continue
+          }
+          if out[k] is jsonraw.Value.Null {
+            out[k] = b_items[k]
+            continue
+          }
+          // Leave Null in the slot while merging, so the value isn't shared
+          // (and copied)
+          let current = out[k]
+          out[k] = jsonraw.Value.Null
+          if down {
+            out[k] = try recursive_merge(current, b: b_items[k])
+          } else {
+            down = true
+            down_index = k
+            next_a = current
+            next_b = b_items[k]
+          }
+        }
+        if down {
+          holes.append(InArray(items: out, index: down_index))
+        } else {
+          done = jsonraw.Value.Array(items: out)
+        }
+      }
+      // Can't merge them, the second one wins
+      _ => {
+        done = y
+      }
+    }
+    if not down {
+      break
+    }
+    x = next_a
+    y = next_b
+  }
+  while holes.pop() is some(hole) {
+    done = match hole {
+      InObject(fields, key) => {
+        var out = fields
+        out[key] = done
+        jsonraw.Value.Object(fields: out)
+      }
+      InArray(items, index) => {
+        var out = items
+        out[index] = done
+        jsonraw.Value.Array(items: out)
+      }
+    }
+  }
+  return done
+}
+
+test "lexing statements" {
+  let ts = lex("json.foo[0][\"bar\"] = \"baz\";")
+  expect ts.map(t => t.text) == ["json", ".", "foo", "[", "0", "]", "[", "\"bar\"", "]", "=", "\"baz\"", ";"]
+  expect ts[4].typ == token.TokenType.NumericKey
+  expect ts[7].typ == token.TokenType.QuotedKey
+  expect lex("json = {};").map(t => t.typ) == [token.TokenType.Bare, token.TokenType.Equals, token.TokenType.EmptyObject, token.TokenType.Semi]
+  expect lex("--")[0].typ == token.TokenType.Ignored
+  expect lex("json.a = 1.5e3 ;")[4].text == "1.5e3 "
+  expect lex("json.ಠ_ಠ = true;")[2].text == "ಠ_ಠ"
+  expect lex("json.1 = 1;").last() == token.Token(text: "", typ: token.TokenType.Invalid)
+}
+
+test "ungronning tokens" {
+  let v = try ungron_tokens(lex("json.a[1] = \"x\";"))
+  expect jsonraw.encode_pretty(v) == "{\n  \"json\": {\n    \"a\": [\n      null,\n      \"x\"\n    ]\n  }\n}"
+}
+
+test "merging" {
+  let a = try ungron_tokens(lex("json.a[0] = 1;"))
+  let b = try ungron_tokens(lex("json.a[2] = 3;"))
+  let c = try ungron_tokens(lex("json.b = true;"))
+  let m = try recursive_merge(try recursive_merge(a, b: b), b: c)
+  expect jsonraw.encode_pretty(m) == "{\n  \"json\": {\n    \"a\": [\n      1,\n      null,\n      3\n    ],\n    \"b\": true\n  }\n}"
+  let bad = try ungron_tokens(lex("json.a = 1;"))
+  let err = try recursive_merge(m, b: try ungron_tokens(lex("json[0] = 1;"))) catch e { jsonraw.Value.String(value: e.message()) }
+  expect err == jsonraw.Value.String(value: "cannot merge object with non-object")
+  expect bad != m
+}
+
+test "errors come in Go's order" {
+  // a bad numeric key is found before a bad quoted key
+  let order = try ungron_tokens([
+    token.Token(text: "json", typ: token.TokenType.Bare),
+    token.Token(text: "\"bad", typ: token.TokenType.QuotedKey),
+    token.Token(text: "99999999999999999999", typ: token.TokenType.NumericKey),
+    token.Token(text: "1", typ: token.TokenType.Number),
+    token.Token(text: ";", typ: token.TokenType.Semi),
+  ]) catch e { jsonraw.Value.String(value: e.message()) }
+  expect order == jsonraw.Value.String(value: "invalid integer key `99999999999999999999`")
+  // the value before quoted keys
+  let value_first = try ungron_tokens([
+    token.Token(text: "\"bad", typ: token.TokenType.QuotedKey),
+    token.Token(text: "tru", typ: token.TokenType.True),
+    token.Token(text: ";", typ: token.TokenType.Semi),
+  ]) catch e { jsonraw.Value.String(value: e.message()) }
+  expect value_first == jsonraw.Value.String(value: "invalid value `tru`")
+  // a lone key is skipped, not an error
+  let lone = try ungron_tokens(lex("json")) catch e { jsonraw.Value.String(value: e.message()) }
+  expect lone == jsonraw.Value.String(value: "empty input")
+}

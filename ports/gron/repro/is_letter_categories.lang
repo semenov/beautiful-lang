@@ -1,0 +1,11 @@
+// String.is_letter says "every character is a letter, of any script", but
+// it is true for digits of other scripts (U+0661 ARABIC-INDIC DIGIT ONE, Nd)
+// and combining marks (U+0301, Mn; U+0903, Mc), and false for letter
+// numbers (U+216B ROMAN NUMERAL TWELVE, U+3007, Nl). There is no way to ask
+// for a character's Unicode category, so gron carries its own tables
+// (unicode.lang, generated from Go's unicode package).
+fn main() {
+  for c in ["\u{661}", "\u{301}", "\u{903}", "\u{216b}", "\u{3007}", "\u{1c5}"] {
+    print("U+${c.bytes().hex()} is_letter=${c.is_letter()}")
+  }
+}

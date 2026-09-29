@@ -1,0 +1,20 @@
+// BUG: a stack overflow kills the program with SIGBUS/SIGSEGV (exit 138/139)
+// and no message at all. And a program that contains an http call gets a
+// much smaller stack: plain.lang handles depth 100000, with_http.lang
+// dies between 10000 and 100000 (gron's recursive JSON reader died at
+// ~2500 levels; Go allows 10000).
+//   lang build plain.lang -o p && ./p 100000; echo $?
+//   lang build with_http.lang -o h && ./h 100000; echo $?
+import process
+
+fn depth(n: Int) -> Int {
+  if n == 0 {
+    return 0
+  }
+  return 1 + depth(n - 1)
+}
+
+fn main() {
+  let n = try process.args()[0].to_int() catch _ { 1000 }
+  print("${depth(n)}")
+}
