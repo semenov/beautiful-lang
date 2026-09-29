@@ -1,0 +1,5 @@
+["logs/2025-12.log", "logs/2026-01.log", "logs/2026-02.gz", "src/a.lang", "src/b.txt", "src/net/deep/x.lang", "src/net/tcp.lang"]
+["src/a.lang", "src/net/deep/x.lang", "src/net/tcp.lang"]
+["logs/2026-01.log", "logs/2026-02.gz"]
+true false true
+gone: true

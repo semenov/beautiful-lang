@@ -27,28 +27,13 @@ pub fn exists(path: Text) -> Bool
 pub fn is_dir(path: Text) -> Bool
 // Names of the entries in a directory, sorted.
 pub fn list(dir: Text) throws -> List<Text>
-// Deletes a file or an empty directory.
-pub fn delete(path: Text) throws
-// Creates a directory and any missing parents.
-pub fn make_dir(path: Text) throws
-pub fn copy(from: Text, to: Text) throws
-pub fn rename(from: Text, to: Text) throws
-
-// A file as a stream (see the `io` module), for reading or writing it
-// piece by piece: `with f = try files.open(path) { ... }`.
-pub fn open(path: Text) throws -> io.Stream
-// Creates (or empties) a file for writing.
-pub fn create(path: Text) throws -> io.Stream
-// Opens a file for writing at its end, creating it if needed.
-pub fn open_append(path: Text) throws -> io.Stream
-
-// A new empty directory, deleted with everything in it at the end of `with`.
-pub builtin type TempDir {
-  path: Text
-  fn close(self) throws
-}
-
-pub fn temp_dir() throws -> TempDir
+// Every file under a directory, at any depth, as paths starting with
+// `dir` ("src/a/b.lang"; for "." just "a/b.lang"), sorted. Symlinked
+// directories aren't followed.
+pub fn walk(dir: Text) throws -> List<Text>
+// The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
+// "logs/2026-*.{log,gz}" (see `path.matches`).
+pub fn glob(pattern: Text) throws -> List<Text>
 ```
 
 ## path
@@ -76,6 +61,12 @@ pub fn parts(path: Text) -> List<Text>
 
 // Removes "." and resolves "..": "a/./b/../c" -> "a/c"
 pub fn clean(path: Text) -> Text
+
+// Whether a path matches a glob pattern: `*` is any text within one part of
+// the path, `?` one character, `**` any number of parts (including none),
+// `[a-z]` / `[!a-z]` one character from a set, `{a,b}` either text.
+//   matches("src/net/tcp.lang", pattern: "src/**/*.lang") == true
+pub fn matches(path: Text, pattern: Text) -> Bool
 ```
 
 ## io

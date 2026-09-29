@@ -52,3 +52,10 @@ pub fn clean(path: Text) -> Text {
   }
   return joined
 }
+
+// Whether a path matches a glob pattern: `*` is any text within one part of
+// the path, `?` one character, `**` any number of parts (including none),
+// `[a-z]` / `[!a-z]` one character from a set, `{a,b}` either text.
+//   matches("src/net/tcp.lang", pattern: "src/**/*.lang") == true
+pub fn matches(path: Text, pattern: Text) -> Bool
+

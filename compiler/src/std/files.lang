@@ -2,6 +2,7 @@
 // which path failed and why.
 
 import io
+import path
 
 // The whole file as text.
 pub fn read(path: Text) throws -> Text
@@ -16,8 +17,41 @@ pub fn exists(path: Text) -> Bool
 pub fn is_dir(path: Text) -> Bool
 // Names of the entries in a directory, sorted.
 pub fn list(dir: Text) throws -> List<Text>
+// Every file under a directory, at any depth, as paths starting with
+// `dir` ("src/a/b.lang"; for "." just "a/b.lang"), sorted. Symlinked
+// directories aren't followed.
+pub fn walk(dir: Text) throws -> List<Text>
+// The files matching a pattern, sorted: "*.txt", "src/**/*.lang",
+// "logs/2026-*.{log,gz}" (see `path.matches`).
+pub fn glob(pattern: Text) throws -> List<Text> {
+  let parts = pattern.split("/")
+  var fixed: List<Text> = []
+  for part in parts {
+    if part.contains("*") or part.contains("?") or part.contains("[") or part.contains("{") {
+      break
+    }
+    fixed.append(part)
+  }
+  if fixed.length == parts.length {
+    if exists(pattern) and not is_dir(pattern) {
+      return [pattern]
+    }
+    return []
+  }
+  var dir = fixed.join("/")
+  if dir.is_empty() {
+    dir = if pattern.starts_with("/") { "/" } else { "." }
+  }
+  if not is_dir(dir) {
+    return []
+  }
+  return (try walk(dir)).filter(f => path.matches(f, pattern: pattern))
+}
 // Deletes a file or an empty directory.
 pub fn delete(path: Text) throws
+// Deletes a file, or a directory with everything in it (like `rm -rf`).
+// Nothing at `path` is fine.
+pub fn delete_all(path: Text) throws
 // Creates a directory and any missing parents.
 pub fn make_dir(path: Text) throws
 pub fn copy(from: Text, to: Text) throws

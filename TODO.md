@@ -60,7 +60,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 ## Stdlib gaps from the npm review (research/npm-top-packages.md), in order
 
-- [ ] `files.walk`, `files.glob`, `path.matches`; recursive `make_dir` / `delete`
+- [x] `files.walk`, `files.glob`, `path.matches`, `files.delete_all`
 - [ ] `term`: colors (off when not a terminal / NO_COLOR), text width, tables,
       questions (yes/no, password), a progress line
 - [ ] `time`: format and parse with a pattern, time zones, `Date`,

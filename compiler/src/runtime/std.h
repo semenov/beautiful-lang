@@ -109,6 +109,198 @@ static lt_err lt_files_list(lt_text *dir, lt_texts **out) {
     return (lt_err){ 0 };
 }
 
+// ---- walking directories and matching globs
+
+// Every file under `dir` (recursively; symlinked directories aren't
+// followed), as paths starting with `dir`, sorted.
+static bool lt_walk_into(char *buf, size_t len, size_t cap, lt_texts **out, lt_text *root, lt_err *err) {
+    DIR *d = opendir(buf);
+    if (!d) {
+        *err = lt_os_error("can't list", root);
+        return false;
+    }
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        size_t n = strlen(e->d_name);
+        if (len + n + 2 >= cap) continue;
+        size_t at = len;
+        if (len > 0 && buf[len - 1] != '/') buf[at++] = '/';
+        memcpy(buf + at, e->d_name, n + 1);
+        struct stat st;
+        if (lstat(buf, &st) == 0) {
+            if (S_ISDIR(st.st_mode)) {
+                if (!lt_walk_into(buf, at + n, cap, out, root, err)) {
+                    closedir(d);
+                    return false;
+                }
+            } else {
+                // "./x" is shown as "x"
+                const char *shown = (buf[0] == '.' && buf[1] == '/') ? buf + 2 : buf;
+                lt_texts_push(out, lt_text_cstr(shown));
+            }
+        }
+        buf[len] = 0;
+    }
+    closedir(d);
+    return true;
+}
+
+static lt_err lt_files_walk(lt_text *dir, lt_texts **out) {
+    char buf[4096];
+    if (dir->len >= 4000) {
+        errno = ENAMETOOLONG;
+        return lt_os_error("can't list", dir);
+    }
+    memcpy(buf, dir->data, (size_t)dir->len + 1);
+    lt_texts *l = lt_texts_new(16);
+    lt_err e = { 0 };
+    if (!lt_walk_into(buf, (size_t)dir->len, sizeof buf, &l, dir, &e)) {
+        for (int64_t i = 0; i < l->len; i++) lt_text_drop(l->items[i]);
+        if (l->cap) lt_free(l, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)l->cap);
+        return e;
+    }
+    qsort(l->items, (size_t)l->len, sizeof(lt_text *), lt_cmp_texts);
+    *out = l;
+    return (lt_err){ 0 };
+}
+
+static bool lt_rm_tree(char *buf, size_t len, size_t cap) {
+    struct stat st;
+    if (lstat(buf, &st) != 0) return errno == ENOENT;
+    if (!S_ISDIR(st.st_mode)) return unlink(buf) == 0;
+    DIR *d = opendir(buf);
+    if (!d) return false;
+    struct dirent *e;
+    bool ok = true;
+    while (ok && (e = readdir(d))) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        size_t n = strlen(e->d_name);
+        if (len + n + 2 >= cap) {
+            errno = ENAMETOOLONG;
+            ok = false;
+            break;
+        }
+        buf[len] = '/';
+        memcpy(buf + len + 1, e->d_name, n + 1);
+        ok = lt_rm_tree(buf, len + 1 + n, cap);
+        buf[len] = 0;
+    }
+    closedir(d);
+    return ok && rmdir(buf) == 0;
+}
+
+// A file, or a directory with everything in it; nothing there is fine.
+static lt_err lt_files_delete_all(lt_text *path) {
+    char buf[4096];
+    if (path->len >= 4000 || path->len == 0) {
+        errno = path->len ? ENAMETOOLONG : EINVAL;
+        return lt_os_error("can't delete", path);
+    }
+    memcpy(buf, path->data, (size_t)path->len + 1);
+    size_t len = (size_t)path->len;
+    while (len > 1 && buf[len - 1] == '/') buf[--len] = 0;
+    if (!lt_rm_tree(buf, len, sizeof buf)) return lt_os_error("can't delete", path);
+    return (lt_err){ 0 };
+}
+
+// Glob matching: `*` (within a path part), `?`, `**` (any number of
+// parts), `[a-z]`, `[!a-z]`, `{a,b}`.
+static bool lt_glob_simple(const char *p, const char *s, const char *start);
+
+static bool lt_glob_class(const char **pp, char c) {
+    const char *p = *pp + 1;
+    bool neg = *p == '!' || *p == '^';
+    if (neg) p++;
+    bool hit = false;
+    bool first = true;
+    while (*p && (*p != ']' || first)) {
+        first = false;
+        char lo = *p, hi = *p;
+        if (p[1] == '-' && p[2] && p[2] != ']') {
+            hi = p[2];
+            p += 2;
+        }
+        if (c >= lo && c <= hi) hit = true;
+        p++;
+    }
+    if (*p == ']') p++;
+    *pp = p;
+    return hit != neg;
+}
+
+static bool lt_glob_simple(const char *p, const char *s, const char *start) {
+    while (*p) {
+        if (p[0] == '*' && p[1] == '*' && (p == start || p[-1] == '/') && (p[2] == '/' || p[2] == 0)) {
+            const char *rest = p[2] == '/' ? p + 3 : p + 2;
+            if (!*rest) return true;
+            for (const char *q = s;;) {
+                if (lt_glob_simple(rest, q, start)) return true;
+                q = strchr(q, '/');
+                if (!q) return false;
+                q++;
+            }
+        }
+        if (*p == '*') {
+            p++;
+            for (const char *q = s;; q++) {
+                if (lt_glob_simple(p, q, start)) return true;
+                if (!*q || *q == '/') return false;
+            }
+        }
+        if (!*s) return false;
+        if (*p == '?') {
+            if (*s == '/') return false;
+        } else if (*p == '[') {
+            if (*s == '/' || !lt_glob_class(&p, *s)) return false;
+            s++;
+            continue;
+        } else if (*p != *s) {
+            return false;
+        }
+        p++;
+        s++;
+    }
+    return !*s;
+}
+
+// `{a,b}`: each alternative in turn
+static bool lt_glob(const char *p, const char *s) {
+    const char *open = strchr(p, '{');
+    if (!open) return lt_glob_simple(p, s, p);
+    int depth = 0;
+    const char *close = NULL;
+    for (const char *q = open; *q; q++) {
+        if (*q == '{') depth++;
+        else if (*q == '}' && --depth == 0) {
+            close = q;
+            break;
+        }
+    }
+    if (!close) return lt_glob_simple(p, s, p);
+    size_t pre = (size_t)(open - p), post = strlen(close + 1);
+    const char *alt = open + 1;
+    for (;;) {
+        const char *end = alt;
+        int dd = 0;
+        while (end < close && !(*end == ',' && dd == 0)) {
+            if (*end == '{') dd++;
+            if (*end == '}') dd--;
+            end++;
+        }
+        size_t n = (size_t)(end - alt);
+        char *buf = (char *)malloc(pre + n + post + 1);
+        memcpy(buf, p, pre);
+        memcpy(buf + pre, alt, n);
+        memcpy(buf + pre + n, close + 1, post + 1);
+        bool hit = lt_glob(buf, s);
+        free(buf);
+        if (hit) return true;
+        if (end >= close) return false;
+        alt = end + 1;
+    }
+}
+
 static lt_err lt_files_delete(lt_text *path) {
     if (remove(path->data) != 0) return lt_os_error("can't delete", path);
     return (lt_err){ 0 };
