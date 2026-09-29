@@ -1,0 +1,3 @@
+pub fn get(xs: List<Int>, i: Int) -> Int {
+  return xs[i]
+}

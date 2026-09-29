@@ -4070,8 +4070,23 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         out += err_msg;
         out += &self.helpers;
         out += &fns;
+        // Plumb names of the program's functions, for the call stack of a panic
+        {
+            let _ = write!(out, "static const struct {{ void *f; const char *name; }} lt_fn_names[] = {{");
+            for f in &self.m.funcs {
+                // (adapters are the compiler's own glue)
+                if f.source_name.is_empty() || f.source_name == "adapter" || !fns.contains(&format!(" {}(", f.name)) {
+                    continue;
+                }
+                let _ = write!(out, " {{ (void *){}, {} }},", f.name, c_str(&f.source_name));
+            }
+            let _ = writeln!(out, " {{ NULL, NULL }} }};");
+            let _ = writeln!(out, "static const char *lt_fn_name(void *f) {{ for (int i = 0; lt_fn_names[i].f; i++) if (lt_fn_names[i].f == f) return lt_fn_names[i].name; return NULL; }}");
+        }
         let _ = writeln!(out, "static const char *lt_file_init = {};", c_str(&self.file));
-        out += &main.replacen("int main(void) {", "int main(int argc, char **argv) {\n  lt_argc = argc;\n  lt_argv = argv;", 1).replacen("lt_init();", "lt_init(); lt_file = lt_file_init;", 1);
+        let names: Vec<String> = self.m.file_names.iter().map(|n| c_str(n)).collect();
+        let _ = writeln!(out, "static const char *lt_files_init[] = {{ {}NULL }};", names.iter().map(|n| format!("{}, ", n)).collect::<String>());
+        out += &main.replacen("int main(void) {", "int main(int argc, char **argv) {\n  lt_argc = argc;\n  lt_argv = argv;", 1).replacen("lt_init();", &format!("lt_init(); lt_file = lt_file_init; lt_files = lt_files_init; lt_nfiles = {};", names.len()), 1);
         out
     }
 }

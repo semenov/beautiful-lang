@@ -207,6 +207,9 @@ type NotFound implements Error {
 }
 ```
 - Bugs (`panic("...")`, `assert`, overflow, a bad index) can't be caught.
+  A panic prints where it happened (`at util.plumb:12`) and the functions
+  that led there (`in load_user`, `in main`); in a server, the request
+  gets a 500 and the server goes on.
 
 ## Functions
 

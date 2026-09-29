@@ -1574,8 +1574,11 @@ static void lt_task_panic_hook(const char *msg, int line) {
     lt_task *t = lt_current();
     if (!t || !t->panic_jmp) return;
     fflush(stdout);
-    if (line > 0) fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);
+    char where[512];
+    lt_where(line, where, sizeof where);
+    if (line > 0) fprintf(stderr, "panic: %s\n  at %s\n", msg, where);
     else fprintf(stderr, "panic: %s\n", msg);
+    lt_print_stack();
     while (t->nheld > 0) lt_lock_release_held(t->held[t->nheld - 1]);
     if (t->ntxs && lt_tx_abort_hook) lt_tx_abort_hook(t);
 #if defined(__has_feature)

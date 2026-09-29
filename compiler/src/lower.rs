@@ -92,6 +92,10 @@ pub struct Lowerer<'a> {
     thunks: HashMap<(FnId, Vec<Ty>), usize>,
     fbs: Vec<Fb<'a>>,
     user_file: u32,
+    // the program's other files, numbered from 1 (the stdlib has none):
+    // their lines carry the number above bit 20 (see `set_line`)
+    other_files: HashMap<u32, u32>,
+    pub file_names: Vec<String>,
     default_fns: Vec<(Ty, usize)>,
     consts: Vec<usize>,
     shows: Vec<(Ty, usize)>,
@@ -111,7 +115,18 @@ pub fn iface_methods(prog: &Program, ids: &[DefId]) -> Vec<FnId> {
 
 impl<'a> Lowerer<'a> {
     pub fn new(prog: &'a Program, src: &'a Sources, user_file: u32) -> Lowerer<'a> {
+        let cwd = std::env::current_dir().map(|d| d.to_string_lossy().to_string() + "/").unwrap_or_default();
+        let mut other_files = HashMap::new();
+        let mut file_names = vec![];
+        for (i, f) in src.files.iter().enumerate() {
+            if i as u32 != user_file && !f.path.starts_with('<') && other_files.len() < 2047 {
+                other_files.insert(i as u32, file_names.len() as u32 + 1);
+                file_names.push(f.path.strip_prefix(&cwd).unwrap_or(&f.path).to_string());
+            }
+        }
         Lowerer {
+            other_files,
+            file_names,
             prog,
             src,
             funcs: vec![],
@@ -172,7 +187,7 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts, shows: self.shows, file_errors }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts, shows: self.shows, file_errors, file_names: self.file_names }
     }
 
     fn drain(&mut self) {
@@ -346,11 +361,16 @@ impl<'a> Lowerer<'a> {
         Op::Local(l)
     }
     fn set_line(&mut self, span: Span) {
-        if span.file != self.user_file {
-            return;
-        }
+        let file = if span.file == self.user_file {
+            0
+        } else {
+            match self.other_files.get(&span.file) {
+                Some(n) => *n,
+                None => return,
+            }
+        };
         let (line, _) = self.src.line_col(span);
-        let line = line as u32;
+        let line = (line as u32 & 0xFFFFF) | (file << 20);
         if self.fbr().line != line {
             self.fb().line = line;
             self.emit(Stmt::Line(line));

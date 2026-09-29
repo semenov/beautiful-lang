@@ -326,7 +326,7 @@ pub fn split(c: &str) -> Option<Units> {
                         runtime += &plain;
                         program += &plain;
                     }
-                } else if w.contains(&"const") && d.contains('=') {
+                } else if w.contains(&"const") && d.contains('=') && d.split('=').next().map(|h| h.contains('[')).unwrap_or(false) {
                     // a table: both units keep a copy (sizeof works)
                     runtime += d;
                     program += d;

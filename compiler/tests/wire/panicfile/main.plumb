@@ -1,0 +1,9 @@
+import util
+
+fn middle(xs: List<Int>) -> Int {
+  return util.get(xs, i: 10)
+}
+
+fn main() {
+  print("${middle([1, 2])}")
+}

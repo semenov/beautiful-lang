@@ -766,12 +766,19 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         cmd.arg("-static");
     }
     cmd.args(["-std=gnu11", "-w", "-fwrapv"]);
+    // frame pointers and exported names: a panic prints its call stack
+    cmd.arg("-fno-omit-frame-pointer");
+    if cfg!(target_os = "linux") && !opts.static_link {
+        cmd.arg("-rdynamic");
+    }
     // the same C with the same compiler and flags gives the same program:
     // take it from the cache instead of compiling again
     let key = {
         let mut h = Fnv(0xcbf29ce484222325);
         h.add(c.as_bytes());
         h.add(cc.as_bytes());
+        // this compiler: how it splits and builds the C is part of the result
+        h.add(compiler_id().as_bytes());
         for a in cmd.get_args().map(|a| a.as_encoded_bytes()).chain(libs.iter().map(|l| l.as_bytes())) {
             h.add(b"\0");
             h.add(a);
@@ -923,6 +930,15 @@ fn runtime_object(cc: &str, flags: &[String], text: &str, cache: &Path) -> Optio
         return None;
     }
     Some(obj)
+}
+
+// The compiler binary's size and time: a new compiler doesn't reuse what
+// an older one built.
+fn compiler_id() -> String {
+    std::env::current_exe()
+        .and_then(std::fs::metadata)
+        .map(|m| format!("{}-{:?}", m.len(), m.modified().ok()))
+        .unwrap_or_default()
 }
 
 struct Fnv(u64);

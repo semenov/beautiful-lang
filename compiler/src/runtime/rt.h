@@ -19,6 +19,7 @@
 #include <math.h>
 #include <errno.h>
 #include <sys/mman.h>
+#include <dlfcn.h>
 #include <sys/resource.h>
 
 #if defined(__has_feature)
@@ -41,6 +42,40 @@ void __tsan_switch_to_fiber(void *fiber, unsigned flags);
 #define LT_UNLIKELY(x) __builtin_expect(!!(x), 0)
 
 static const char *lt_file = "?";
+// the program's other files: a line number's bits above 20 name one
+static const char **lt_files;
+static int lt_nfiles;
+// The Plumb name of a function of the program, from its address (the
+// program defines it; NULL for the runtime's own)
+static const char *lt_fn_name(void *start);
+
+// The Plumb functions on the call stack, innermost first: the frame
+// pointers link the frames, and dladdr gives each return address's
+// function. After the panic's message, so a broken chain costs nothing.
+static void lt_print_stack(void) {
+    void **fp = (void **)__builtin_frame_address(0);
+    const char *last = NULL;
+    for (int i = 0; i < 64 && fp; i++) {
+        void **next = (void **)fp[0];
+        void *ret = fp[1];
+        Dl_info info;
+        if (ret && dladdr(ret, &info) && info.dli_saddr) {
+            // an optimized build may have put `main`'s code into C's main
+            const char *n = info.dli_sname && strcmp(info.dli_sname, "main") == 0 ? "main" : lt_fn_name(info.dli_saddr);
+            if (n && n != last) fprintf(stderr, "  in %s\n", n);
+            if (n) last = n;
+        }
+        if (next <= fp || (char *)next - (char *)fp > (1 << 22) || ((uintptr_t)next & 7)) break;
+        fp = next;
+    }
+}
+
+// "file.plumb:12" for a line number (0: none)
+static void lt_where(int line, char *buf, size_t n) {
+    int f = line >> 20, l = line & 0xFFFFF;
+    const char *name = f == 0 ? lt_file : (f <= lt_nfiles ? lt_files[f - 1] : "?");
+    snprintf(buf, n, "%s:%d", name, l);
+}
 
 // ---------------------------------------------------------------- reference counts
 // In a program that uses tasks, counters change atomically; otherwise with
@@ -451,10 +486,13 @@ LT_NOINLINE _Noreturn void lt_panic_at(const char *msg, int line) {
     if (lt_panic_hook) lt_panic_hook(msg, line); // returns if it can't handle it
     fflush(stdout);
     if (line > 0) {
-        fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);
+        char where[512];
+        lt_where(line, where, sizeof where);
+        fprintf(stderr, "panic: %s\n  at %s\n", msg, where);
     } else {
         fprintf(stderr, "panic: %s\n", msg);
     }
+    lt_print_stack();
     exit(101);
 }
 

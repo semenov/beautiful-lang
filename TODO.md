@@ -34,7 +34,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         number parsing, duplicate JSON keys, regex groups[0] + literal
         check, `chunks(0)`, in-place `s = "${s}..."`
   - [x] README: "Choices that surprise people"
-  - [ ] later: call stacks on panic and locations on errors; changing
+  - [x] call stacks on panic (the Plumb functions, from frame pointers and
+        dladdr; inlined ones don't show) and the right file for a panic in
+        an imported file (it had no location)
+  - [ ] later: locations on thrown errors; changing
         through interface-typed list elements; Decimal with 38 digits;
         `var ys = xs; ys.append(2)` never read (a method call counts as a
         read); a lock wait-for graph for deadlocks in servers
