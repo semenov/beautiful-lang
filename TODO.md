@@ -47,8 +47,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] test helper `http.request` splits off the query
     - [ ] repeated headers; trailers; cookie Domain/Expires
     - [ ] server options: bind address, body size limit, timeouts
-    - [ ] language: hex literals, `\u{...}` escapes, calling a stored
-          function `r.handler(x)`, `if a is some(x) or ...` message
+    - [x] language: hex literals, `\u{...}` escapes, calling a stored
+          function `r.handler(x)`, `if a is some(x) or ...` message, named
+          function types take plain functions
     - [ ] stdlib: seeded random, wall-clock ms, relative `url.parse`,
           JSON field renames/omit-empty, env listing, Duration compare/divide
     - [x] docs: `http.bytes` example, query/path decoding, middleware order

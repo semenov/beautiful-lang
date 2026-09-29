@@ -1191,6 +1191,24 @@ impl Checker {
                     return TExpr { kind: TK::ToIface(Box::new(e)), ty: exp, span: sp };
                 }
             }
+            // a named function type (`type Check = fn(Int) -> Bool`) is only
+            // a name for the signature: any function of that type fits
+            (Ty::Func(_), Ty::Adt(d, _)) if matches!(&self.prog.defs[*d].kind, TypeKind::Newtype(Ty::Func(_))) => {
+                let inner = match &self.prog.defs[*d].kind {
+                    TypeKind::Newtype(t) => t.clone(),
+                    _ => unreachable!(),
+                };
+                let inner = match &exp {
+                    Ty::Adt(_, a) => inner.subst(a),
+                    _ => inner,
+                };
+                let e = self.coerce(e, &inner);
+                if self.try_unify(&e.ty, &inner) {
+                    let sp = e.span;
+                    return TExpr { kind: TK::Wrap(Box::new(e)), ty: exp, span: sp };
+                }
+                return e;
+            }
             (Ty::Func(f), Ty::Func(g)) if !f.throws && g.throws => {
                 let mut f2 = (**f).clone();
                 f2.throws = true;
@@ -2102,7 +2120,7 @@ impl Checker {
                 let p = self.pattern(pat, &ty);
                 self.fcx().scopes.pop();
                 if self.fc().locals.len() != n_before {
-                    self.err_help(pat.span(), "names bound by `is` can only be used in an `if` condition", "write `if x is some(v) { ... }`");
+                    self.err_help(pat.span(), "a name bound by `is` works only in an `if` condition, alone or joined with `and`", "with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`");
                 }
                 mk(TK::Is(Box::new(te), p), Ty::Bool)
             }
@@ -2884,11 +2902,18 @@ impl Checker {
             None => {
                 let d = self.prog.defs[def].clone();
                 let s = self.prog.show(&rt);
-                // a field holding a function
+                // a field holding a function: `rule.check(x)` calls it
                 if let TypeKind::Record { fields } = &d.kind {
-                    if let Some(fd) = fields.iter().find(|f| f.name == name) {
-                        if matches!(fd.ty, Ty::Func(_)) {
-                            return err(self, format!("`{}` is a field, not a method", name), Some(format!("to call a stored function: `let f = x.{}` then `f(...)`; or name the function type: `type Rule = fn(...)`", name)));
+                    if let Some(i) = fields.iter().position(|f| f.name == name) {
+                        let fty = fields[i].ty.subst(&owner_args);
+                        let callable = match self.resolve(&fty) {
+                            Ty::Func(_) => true,
+                            Ty::Adt(nd, _) => matches!(self.prog.defs[nd].kind, TypeKind::Newtype(Ty::Func(_))),
+                            _ => false,
+                        };
+                        if callable {
+                            let field = TExpr { kind: TK::Field(Box::new(r), i), ty: fty, span };
+                            return self.value_call(field, args, span, false);
                         }
                     }
                 }

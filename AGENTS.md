@@ -46,7 +46,8 @@ var total = 0                  // variable
 total += x
 let name: String = "Ada"         // types: Int, Float, Bool, String, Bytes,
                                // List<T>, Map<K, V>, Set<T>, T?
-let greeting = "Hi ${name}!"   // interpolation is ${...}
+let greeting = "Hi ${name}!"   // interpolation is ${...}; escapes: \n \t
+                               // \" \\ \$ \u{1F600}
 let long = """
   Text over several lines
   """                          // multi-line text: triple quotes
@@ -178,6 +179,9 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
   `let _ = f()`. `list.sort()` changes the list in place; `list.sorted()`
   returns a new one.
 - No `return` inside a lambda: its last line is its value.
+- A function kept in a field is called like a method: `rule.test(x)`. A
+  named function type (`type Check = fn(Int) -> Bool`) takes any function
+  or lambda of that type.
 - A function that never comes back is `-> Never`: it must end in
   `process.exit(...)`, `panic(...)`, `throw` or an endless loop. A call to it
   ends a branch like `return` does:
@@ -196,7 +200,8 @@ let n = if args.length > 0 { try args[0].to_int() } else { usage("no count") }
   `n.to_float()`, `f.round()`, `f.floor()`, `f.ceil()`.
 - **`/` on two `Int`s is an error.** Write `a.div(b)` (whole numbers) or
   `a.to_float() / b.to_float()`.
-- Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`.
+- Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`;
+  `0xFF`, `0b1010`, `0o755`, `1_000_000`.
 - String to numbers: `try text.to_int()`, `try text.to_float()`.
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
   `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;

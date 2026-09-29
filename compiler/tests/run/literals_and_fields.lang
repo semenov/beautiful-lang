@@ -1,0 +1,25 @@
+// Hex, binary and octal numbers; `\u{...}` escapes; calling a function kept
+// in a field; named function types accept any function of that type.
+type Check = fn(Int) -> Bool
+
+type Rule {
+  name: String
+  test: fn(Int) throws -> Bool
+  quick: Check
+}
+
+fn is_small(x: Int) -> Bool {
+  return x < 10
+}
+
+fn main() throws {
+  print("${0xFF} ${0b1010} ${0o755} ${0xFFFF_FFFF_FFFF_FFFF} ${0x7fff_ffff_ffff_ffff}")
+  print("\u{48}\u{e9}llo \u{1F600} tab:\u{9}.")
+  let rules = [Rule(name: "positive", test: x => x > 0, quick: is_small)]
+  for r in rules {
+    print("${r.name}: ${try r.test(5)} ${try r.test(-1)} ${r.quick(3)} ${r.quick(30)}")
+  }
+  var checks: List<Check> = [is_small]
+  checks.append(x => x % 2 == 0)
+  print("${checks.map(c => c(4))}")
+}

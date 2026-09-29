@@ -312,6 +312,24 @@ impl<'a> Lexer<'a> {
 
     fn number(&mut self) -> Result<(), Diag> {
         let lo = self.pos;
+        // 0xFF, 0b1010, 0o755
+        if self.peek(0) == b'0' && matches!(self.peek(1), b'x' | b'b' | b'o') {
+            let radix = match self.peek(1) {
+                b'x' => 16,
+                b'b' => 2,
+                _ => 8,
+            };
+            self.pos += 2;
+            let start = self.pos;
+            while (self.peek(0) as char).is_ascii_alphanumeric() || self.peek(0) == b'_' {
+                self.pos += 1;
+            }
+            let digits: String = std::str::from_utf8(&self.src[start..self.pos]).unwrap().chars().filter(|c| *c != '_').collect();
+            let v = u64::from_str_radix(&digits, radix).map_err(|_| self.err(lo, if digits.is_empty() { "a number needs digits after its prefix: `0xFF`" } else { "bad digits for this number's base (0x: 0-9 a-f, 0o: 0-7, 0b: 0-1), or it doesn't fit in 64 bits" }))?;
+            // up to 64 bits: 0xFFFF_FFFF_FFFF_FFFF is -1
+            self.push(Tok::Int(v as i64), lo, self.pos);
+            return Ok(());
+        }
         while self.peek(0).is_ascii_digit() || self.peek(0) == b'_' {
             self.pos += 1;
         }
@@ -372,6 +390,28 @@ impl<'a> Lexer<'a> {
             if !triple && c == b'\n' {
                 return Err(self.err(lo, "unterminated text (use \"\"\" for text over several lines)"));
             }
+            if c == b'\\' && self.peek(1) == b'u' {
+                // \u{1F600}: a character by its Unicode number
+                if self.peek(2) != b'{' {
+                    return Err(self.err(self.pos, "write a character by its number as \\u{1F600}"));
+                }
+                let start = self.pos + 3;
+                let mut end = start;
+                while end < self.src.len() && self.src[end] != b'}' && end - start <= 6 {
+                    end += 1;
+                }
+                let hex = std::str::from_utf8(&self.src[start..end.min(self.src.len())]).unwrap_or("");
+                let ch = u32::from_str_radix(hex, 16).ok().and_then(char::from_u32);
+                match (ch, self.src.get(end)) {
+                    (Some(ch), Some(b'}')) => {
+                        let mut b = [0u8; 4];
+                        cur.extend_from_slice(ch.encode_utf8(&mut b).as_bytes());
+                        self.pos = end + 1;
+                        continue;
+                    }
+                    _ => return Err(self.err(self.pos, "\\u{...} needs 1 to 6 hex digits of a Unicode character (not a surrogate)")),
+                }
+            }
             if c == b'\\' {
                 let e = self.peek(1);
                 let ch = match e {
@@ -382,7 +422,7 @@ impl<'a> Lexer<'a> {
                     b'"' => b'"',
                     b'\\' => b'\\',
                     b'$' => b'$',
-                    _ => return Err(self.err(self.pos, "unknown escape; known: \\n \\t \\r \\0 \\\" \\\\ \\$")),
+                    _ => return Err(self.err(self.pos, "unknown escape; known: \\n \\t \\r \\0 \\\" \\\\ \\$ \\u{1F600}")),
                 };
                 cur.push(ch);
                 self.pos += 2;
