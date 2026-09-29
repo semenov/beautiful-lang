@@ -12,14 +12,14 @@ fn main() throws {
   }
   print("elapsed ${t.elapsed().seconds()}")
   let c = try http.get("http://127.0.0.1:8099/conns")
-  print("conns: ${try c.text()}")
+  print("conns: ${c.text()}")
   let r404 = try http.get("http://127.0.0.1:8099/404") catch err {
     print("404 threw: ${err.message()}")
     return
   }
   print("404 status ${r404.status}")
   let red = try http.get("http://127.0.0.1:8099/redirect")
-  print("redirect status ${red.status} body ${try red.text()}")
+  print("redirect status ${red.status} body ${red.text()}")
   let bad = try http.get("http://127.0.0.1:1/") catch err {
     print("refused: ${err.message()}")
     return

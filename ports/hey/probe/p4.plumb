@@ -7,7 +7,7 @@ fn show(req: http.ClientRequest) {
     print("${req.method} failed: ${err.message()}")
     return
   }
-  print("== ${req.method} -> ${r.status} in ${t.elapsed().seconds()}\n${try r.text() catch e { "?" }}")
+  print("== ${req.method} -> ${r.status} in ${t.elapsed().seconds()}\n${r.text()}")
 }
 
 fn main() throws {

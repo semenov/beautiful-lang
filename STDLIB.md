@@ -505,10 +505,15 @@ pub type DateTime {
   hour: Int
   minute: Int
   second: Int
+  millisecond: Int = 0
   // Its text in "${x}": as `iso()`.
   pub fn to_string(self) -> String
-  // "2026-09-29T12:00:00Z"
+  // "2026-09-29T12:00:00Z", or "2026-09-29T12:00:00.250Z" when there are
+  // milliseconds
   pub fn iso(self) -> String
+  // Always with milliseconds: "2026-09-29T12:00:00.000Z" (as JavaScript's
+  // toISOString).
+  pub fn iso_millis(self) -> String
   // The same moment on the wall clock of a time zone:
   //   let berlin = try moment.in_zone("Europe/Berlin")   // 14:05 UTC -> 16:05 +02:00
   pub fn in_zone(self, zone: String) throws -> Zoned
@@ -528,16 +533,19 @@ pub type DateTime {
   pub fn plus_months(self, n: Int) -> DateTime
   // Seconds since 1970-01-01 UTC.
   pub fn to_unix(self) -> Int
+  // Milliseconds since 1970-01-01 UTC.
+  pub fn to_unix_millis(self) -> Int
   // A moment `seconds` later (or earlier, if negative).
   pub fn plus_seconds(self, seconds: Int) -> DateTime
   pub fn plus_days(self, days: Int) -> DateTime
 }
 
-// Reads "2026-09-29", "2026-09-29T12:30:00Z" or "2026-09-29 12:30:00"
-// (UTC; an offset like +02:00 is converted to UTC).
+// Reads "2026-09-29", "2026-09-29T12:30:00Z", "2026-09-29T12:30:00.250Z"
+// or "2026-09-29 12:30:00" (UTC; an offset like +02:00 is converted to UTC).
+// Digits past milliseconds are dropped.
 pub fn parse_iso(text: String) throws -> DateTime
 
-// The current date and time in UTC.
+// The current date and time in UTC, to the millisecond.
 pub fn utc_now() -> DateTime
 
 // Seconds since 1970-01-01 UTC.
@@ -546,6 +554,9 @@ pub fn unix_now() -> Int
 // Milliseconds since 1970-01-01 UTC (the wall clock; for measuring how long
 // something takes, `time.now()` is steady).
 pub fn unix_millis() -> Int
+
+// The date and time of a Unix timestamp in milliseconds.
+pub fn from_unix_millis(millis: Int) -> DateTime
 
 // The date and time of a Unix timestamp.
 pub fn from_unix(seconds: Int) -> DateTime
@@ -772,8 +783,8 @@ pub type Request {
   pub fn query_all(self, name: String) -> List<String>
   // A header, by its name in any case.
   pub fn header(self, name: String) -> String?
-  // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> String
+  // The body as text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String
   // A cookie the client sent.
   pub fn cookie(self, name: String) -> String?
   // The fields of an HTML form (application/x-www-form-urlencoded).
@@ -791,7 +802,8 @@ pub type Part {
   filename: String? = none
   content_type: String = "text/plain"
   data: Bytes
-  pub fn text(self) throws -> String
+  // As text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String
 }
 
 // A cookie to set with `Response.with_cookie`.
@@ -836,8 +848,8 @@ pub type Response {
   writer: (fn(io.Stream) throws)? = none
   // Client responses: how long the parts of the request took.
   timing: Timing = Timing()
-  // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> String
+  // The body as text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String
   // A copy with one more header.
   pub fn with_header(self, name: String, value: String) -> Response
   // A copy that sets a cookie (several can be set).
@@ -852,6 +864,10 @@ pub fn html(status: Int, body: String) -> Response
 
 // The value as JSON (see the `json` module).
 pub fn json<T>(status: Int, value: T) -> Response
+
+// The value as JSON written as the options say:
+// `http.json_with(200, value: user, options: json.EncodeOptions(keys: json.Keys.Camel))`.
+pub fn json_with<T>(status: Int, value: T, options: json.EncodeOptions) -> Response
 
 // Any bytes: `http.bytes(200, data: png, content_type: "image/png")`.
 pub fn bytes(status: Int, data: Bytes, content_type: String) -> Response
@@ -917,6 +933,8 @@ pub type Router {
   // Finds the route for a request and runs its handler: 404 when no route
   // has this path, 405 when one has it for another method. A pattern part
   // `*name` matches the rest of the path. HEAD is answered by GET routes.
+  // The most specific route wins, whatever the order they were added in:
+  // "/articles/feed" before "/articles/:slug" before "/articles/*rest".
   pub fn handle(self, request: Request) throws -> Response
 }
 
@@ -1052,14 +1070,15 @@ pub type WebSocketMessage {
   data: Bytes
   // text (UTF-8) or binary
   is_text: Bool
-  pub fn text(self) throws -> String
+  // As text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String
 }
 
 // Connects to a WebSocket server: "ws://host:port/path" or "wss://..." (TLS).
 //   with ws = try http.websocket("wss://echo.example/socket") {
 //     try ws.send_text("hi")
 //     if try ws.receive() is some(m) {
-//       print(try m.text())
+//       print(m.text())
 //     }
 //   }
 pub fn websocket(address: String) throws -> WebSocket
@@ -1183,6 +1202,11 @@ text is a compile error, so SQL injection can't happen. Parameters can be
 Int, Float, String, Bool and Bytes, and new types over them (see `sql`).
 `query<T>` fills records by column name (like `json.decode`).
 
+Open a database once and share the connection: a server's requests all
+use the same one. It holds several SQLite connections (one per CPU, in
+WAL mode; one for ":memory:"), so reads run in parallel and writes wait
+for each other.
+
 ```
 pub builtin type Connection {
   // A statement that returns no rows: create, insert, update, delete.
@@ -1192,15 +1216,19 @@ pub builtin type Connection {
   // The rows as records, columns matched to fields by name.
   fn query<T>(self, query: sql.Query, params: List<sql.Value>) throws -> List<T>
   // An insert, returning the new row's id: `let id = try conn.insert(...)`.
-  // Safe when several tasks share the connection.
   fn insert(self, query: sql.Query, params: List<sql.Value>) throws -> Int
   // The id of the row inserted last on this connection (by any task: when
   // tasks share the connection, use `insert`).
   fn last_id(self) -> Int
   fn close(self) throws
   // Runs `work` in a transaction: everything or nothing. An error inside
-  // rolls the changes back and comes out of `transaction`.
+  // rolls the changes back and comes out of `transaction`. The transaction
+  // is the task's own: other tasks' statements meanwhile aren't part of it.
+  // Inside another transaction it is a savepoint: an error rolls back only
+  // its own changes.
   fn transaction<R>(self, work: fn() throws -> R) throws -> R
+  fn __begin(self) throws
+  fn __end(self, commit: Bool) throws
 }
 
 // Opens (or creates) a database file; ":memory:" for one that lives only
@@ -1764,6 +1792,9 @@ builtin type Bytes {
   fn is_empty(self) -> Bool
   // The text these bytes encode (UTF-8); an error if they aren't valid UTF-8.
   fn text(self) throws -> String
+  // The same, with each invalid sequence replaced by U+FFFD (�): never
+  // fails. Text read from files, streams and the network comes in this way.
+  fn text_lossy(self) -> String
   fn slice(self, from: Int, to: Int) -> Bytes
   fn concat(self, other: Bytes) -> Bytes
   fn index_of(self, part: Bytes) -> Int?

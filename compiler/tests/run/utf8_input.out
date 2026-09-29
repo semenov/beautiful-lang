@@ -1,0 +1,10 @@
+caf� ok CAF� OK 7
+7 bytes kept
+the bytes are not valid UTF-8 text
+caf� ok
+�� valid: no
+��� valid: no
+���� valid: no
+a� valid: no
+a�b
+�ok

@@ -808,10 +808,10 @@ static size_t lt_curl_header(char *p, size_t size, size_t n, void *ud) {
         char *e = p + len;
         while (v < e && (*v == ' ' || *v == '\t')) v++;
         while (e > v && (e[-1] == '\r' || e[-1] == '\n' || e[-1] == ' ')) e--;
-        lt_text *name = lt_text_from(p, colon - p);
+        lt_text *name = lt_text_from_input(p, colon - p);
         for (int64_t i = 0; i < name->len; i++) name->data[i] = (char)tolower((unsigned char)name->data[i]);
         lt_texts_push(hs, name);
-        lt_texts_push(hs, lt_text_from(v, e - v));
+        lt_texts_push(hs, lt_text_from_input(v, e - v));
     } else if (len >= 5 && memcmp(p, "HTTP/", 5) == 0) {
         // a new response (after a redirect): forget earlier headers
         for (int64_t i = 0; i < (*hs)->len; i++) lt_text_drop((*hs)->items[i]);

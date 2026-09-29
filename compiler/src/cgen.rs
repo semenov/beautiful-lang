@@ -1336,7 +1336,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 };
                 let (ac, oc) = (self.tys[arr].c.clone(), self.tys[obj].c.clone());
                 format!("switch (d->kind) {{ case LT_D_NULL: *out = {n0}; {ok} case LT_D_BOOL: *out = {n1}; {ok} case LT_D_NUM: *out = {n2}; {ok} case LT_D_STR: *out = {n3}; {ok} case LT_D_ARR: {{ {ac} a; lt_err e = dec_{arr}(src, d, p, lenient, &a); if (e.obj) return e; *out = {n4}; {ok} }} default: {{ {oc} o; lt_err e = dec_{obj}(src, d, p, lenient, &o); if (e.obj) return e; *out = {n5}; {ok} }} }}",
-                    n0 = mk(0, ""), n1 = mk(1, ", .u.v1 = { d->b }"), n2 = mk(2, ", .u.v2 = { { lt_json_number_text(d) } }"), n3 = mk(3, ", .u.v3 = { lt_text_from(d->s, d->slen) }"), n4 = mk(4, ", .u.v4 = { a }"), n5 = mk(5, ", .u.v5 = { o }"),
+                    n0 = mk(0, ""), n1 = mk(1, ", .u.v1 = { d->b }"), n2 = mk(2, ", .u.v2 = { { lt_json_number_text(d) } }"), n3 = mk(3, ", .u.v3 = { lt_text_from_input(d->s, d->slen) }"), n4 = mk(4, ", .u.v4 = { a }"), n5 = mk(5, ", .u.v5 = { o }"),
                     ok = ok, ac = ac, oc = oc, arr = arr, obj = obj)
             }
             Kind::Enum { variants, boxed, .. } => {
@@ -1781,7 +1781,7 @@ free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else dr
         let gl = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::opt(Ty::Text)]));
         self.need(H::Ops, gl);
         let (mc, glc) = (self.tys[mid].c.clone(), self.tys[gl].c.clone());
-        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 1; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
+        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 1; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from_input(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from_input(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
         name
     }
 
@@ -1839,7 +1839,7 @@ static {rsc} lt_http_response_from(lt_http_out *o) {{
 #ifdef LT_THREADS
 static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *out) {{
   {mc} headers = {mc}_new(r->nheaders);
-  for (int64_t i = 0; i < r->nheaders; i++) lt_hdr_add(&headers, lt_text_from(r->hname[i], r->hname_len[i]), lt_text_from(r->hvalue[i], r->hvalue_len[i]));
+  for (int64_t i = 0; i < r->nheaders; i++) lt_hdr_add(&headers, lt_text_from_input(r->hname[i], r->hname_len[i]), lt_text_from_input(r->hvalue[i], r->hvalue_len[i]));
   {mc} query = {mc}_new(4);
   for (int64_t i = 0; i < r->query_len;) {{
     int64_t j = i; while (j < r->query_len && r->query[j] != '&') j++;
@@ -1847,7 +1847,7 @@ static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *o
     if (j > i) {mc}_put(&query, lt_url_decode(r->query + i, eq - i, true), eq < j ? lt_url_decode(r->query + eq + 1, j - eq - 1, true) : lt_text_from("", 0));
     i = j + 1;
   }}
-  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len, false), headers, lt_bytes_from(r->body, r->body_len), {mc}_new(0), query, lt_text_from(r->path, r->path_len), lt_text_from(r->query ? r->query : "", r->query_len), lt_text_cstr(r->client_ip ? r->client_ip : "") }};
+  {rqc} req = {{ lt_text_from_input(r->method, r->method_len), lt_url_decode(r->path, r->path_len, false), headers, lt_bytes_from(r->body, r->body_len), {mc}_new(0), query, lt_text_from_input(r->path, r->path_len), lt_text_from_input(r->query ? r->query : "", r->query_len), lt_text_cstr(r->client_ip ? r->client_ip : "") }};
   {rsc} resp;
   lt_err e = lt_http_call(handler, &req, &resp);
   if (e.obj) {{
@@ -3212,7 +3212,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "Int.wrapping_add" => format!("((int64_t)((uint64_t){} + (uint64_t){}))", a[0], a[1]),
             "Int.wrapping_sub" => format!("((int64_t)((uint64_t){} - (uint64_t){}))", a[0], a[1]),
             "Int.wrapping_mul" => format!("((int64_t)((uint64_t){} * (uint64_t){}))", a[0], a[1]),
-            "files.read" => format!("lt_files_read({}, {})", a[0], a[1]),
+            "files.read" => format!("lt_files_read_text({}, {})", a[0], a[1]),
             "files.write" => format!("lt_files_write_mode({}, {}, \"wb\")", a[0], a[1]),
             "files.append" => format!("lt_files_write_mode({}, {}, \"ab\")", a[0], a[1]),
             "files.exists" => format!("lt_files_exists({})", a[0]),
@@ -3580,6 +3580,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "Bytes.length" => format!("({}->len)", a[0]),
             "Bytes.get" => format!("lt_bytes_get({}, {}, {})", a[0], a[1], line),
             "Bytes.text" => format!("lt_bytes_text({}, {})", a[0], a[1]),
+            "Bytes.text_lossy" => format!("lt_bytes_text_lossy({})", a[0]),
             "Bytes.slice" => format!("lt_bytes_slice({}, {}, {})", a[0], a[1], a[2]),
             "Bytes.concat" => format!("lt_bytes_concat({}, {})", a[0], a[1]),
             "Bytes.hex" => format!("lt_bytes_hex({})", a[0]),

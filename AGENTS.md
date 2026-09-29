@@ -141,6 +141,10 @@ interface Describable {
   default parameter values. Several results make a record. Many options
   make an options record with defaults.
 - Generics: `fn first<T>(xs: List<T>) -> T?`. No bounds.
+- A `String` is always valid UTF-8: text read from files, streams, the
+  network and the environment has invalid bytes replaced with `�`. For
+  exact bytes use `Bytes`; `bytes.text()` fails on invalid UTF-8,
+  `bytes.text_lossy()` replaces.
 
 ## Missing values
 
@@ -412,7 +416,7 @@ WebSockets: `router.websocket("/chat", ws => try chat(ws))`; in `chat`,
 Forms: `try req.form()` (a Map), `try req.parts()` (multipart, with files);
 cookies: `req.cookie("session")`, `res.with_cookie(http.Cookie(name: "session", value: v))`.
 
-Bodies are `Bytes`: `try req.text()`, `try res.text()`. A handler's error
+Bodies are `Bytes`: `req.text()`, `res.text()` give them as text. A handler's error
 becomes a 500 and a log line. `http.serve` logs "listening on ..." itself.
 
 State shared by all requests goes in a `Shared<T>`, passed to the handlers
@@ -425,7 +429,7 @@ type Store {
 }
 
 fn add_todo(req: http.Request, store: Shared<Store>) throws -> http.Response {
-  let input = try json.decode<NewTodo>(try req.text())
+  let input = try json.decode<NewTodo>(req.text())
   with s = store.lock() {               // fields change in place under the lock
     let todo = Todo(id: s.next_id, title: input.title)
     s.next_id += 1

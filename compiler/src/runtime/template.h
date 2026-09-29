@@ -456,7 +456,7 @@ static lt_err lt_template_load(lt_text *dir, lt_handle **out) {
     for (int64_t i = 0; i < files->len && !e.obj; i++) {
         lt_text *path = files->items[i];
         lt_text *content = NULL;
-        e = lt_files_read(path, &content);
+        e = lt_files_read_text(path, &content);
         if (e.obj) break;
         const char *rel = path->data + dir->len;
         while (*rel == '/') rel++;

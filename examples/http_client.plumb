@@ -3,7 +3,7 @@ import time
 
 fn main() throws {
   let r = try http.send(http.ClientRequest(url: "http://localhost:8095/echo", method: "POST", headers: {"Authorization": "Bearer abc"}, body: "hi".bytes()))
-  print("${r.status} ${try r.text()}")
+  print("${r.status} ${r.text()}")
   let start = time.now()
   with res = try http.open(http.ClientRequest(url: "http://localhost:8095/ticks")) {
     print("status ${res.status()} type ${res.header("Content-Type") ?? "?"} after ${start.elapsed().millis() < 200}")

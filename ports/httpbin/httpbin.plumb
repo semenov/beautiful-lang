@@ -517,11 +517,11 @@ fn parse_body(req: http.Request, resp: BodyResponse, max: Int) throws -> BodyRes
       for part in try req.parts() {
         if part.filename is some(f) {
           var vs = uploads[part.name] ?? []
-          vs.append(try part.text() catch err { "" })
+          vs.append(part.text())
           uploads[part.name] = vs
         } else {
           var vs = form[part.name] ?? []
-          vs.append(try part.text())
+          vs.append(part.text())
           form[part.name] = vs
         }
       }
@@ -1546,7 +1546,7 @@ fn websocket_check(req: http.Request, app: App, next: fn(http.Request) throws ->
 fn websocket_echo(ws: http.WebSocket) throws {
   while try ws.receive() is some(msg) {
     if msg.is_text {
-      try ws.send_text(try msg.text())
+      try ws.send_text(msg.text())
     } else {
       try ws.send(msg.data)
     }

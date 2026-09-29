@@ -1181,23 +1181,94 @@ static int64_t lt_bytes_index_of(lt_bytes *b, lt_bytes *part) {
 }
 static bool lt_bytes_eq(lt_bytes *a, lt_bytes *b) { return a == b || (a->len == b->len && memcmp(a->data, b->data, (size_t)a->len) == 0); }
 
+// The length of the valid UTF-8 sequence at s[0] (1-4), or 0 if there
+// isn't one; `*bad` is then how many bytes to replace with one U+FFFD (the
+// longest start of a valid sequence, at least 1). Overlong forms,
+// surrogates and code points past U+10FFFF aren't valid.
+static int lt_utf8_seq(const unsigned char *s, int64_t n, int *bad) {
+    unsigned char c = s[0];
+    if (c < 0x80) return 1;
+    int k;
+    unsigned char lo = 0x80, hi = 0xBF;
+    if (c >= 0xC2 && c <= 0xDF) k = 1;
+    else if (c >= 0xE0 && c <= 0xEF) {
+        k = 2;
+        if (c == 0xE0) lo = 0xA0;
+        if (c == 0xED) hi = 0x9F;
+    } else if (c >= 0xF0 && c <= 0xF4) {
+        k = 3;
+        if (c == 0xF0) lo = 0x90;
+        if (c == 0xF4) hi = 0x8F;
+    } else {
+        *bad = 1;
+        return 0;
+    }
+    for (int j = 1; j <= k; j++) {
+        unsigned char b = j < n ? s[j] : 0;
+        bool ok = j == 1 ? (b >= lo && b <= hi) : (b & 0xC0) == 0x80;
+        if (j >= n || !ok) {
+            *bad = j;
+            return 0;
+        }
+    }
+    return k + 1;
+}
+
 static bool lt_utf8_valid(const unsigned char *s, int64_t n) {
     int64_t i = 0;
     while (i < n) {
-        unsigned char c = s[i];
-        int k; // continuation bytes that follow
-        if (c < 0x80) k = 0;
-        else if ((c >> 5) == 6) k = 1;
-        else if ((c >> 4) == 14) k = 2;
-        else if ((c >> 3) == 30) k = 3;
-        else return false;
-        if (i + k >= n && k > 0) return false;
-        for (int j = 1; j <= k; j++)
-            if ((s[i + j] & 0xC0) != 0x80) return false;
-        i += k + 1;
+        // ASCII 8 bytes at a time
+        while (i + 8 <= n) {
+            uint64_t w;
+            memcpy(&w, s + i, 8);
+            if (w & 0x8080808080808080ull) break;
+            i += 8;
+        }
+        if (i >= n) break;
+        if (s[i] < 0x80) {
+            i++;
+            continue;
+        }
+        int bad;
+        int k = lt_utf8_seq(s + i, n - i, &bad);
+        if (!k) return false;
+        i += k;
     }
     return true;
 }
+
+// A String is always valid UTF-8: text from outside (files, streams, the
+// network, the environment) comes through here, and each invalid sequence
+// becomes U+FFFD. Takes `t` and returns it, or a repaired copy.
+static lt_text *lt_text_valid(lt_text *t) {
+    if (!t || lt_utf8_valid((const unsigned char *)t->data, t->len)) return t;
+    const unsigned char *s = (const unsigned char *)t->data;
+    int64_t n = t->len;
+    lt_text *r = lt_text_new(n * 3);
+    int64_t w = 0, i = 0;
+    while (i < n) {
+        int bad = 0;
+        int k = lt_utf8_seq(s + i, n - i, &bad);
+        if (k) {
+            memcpy(r->data + w, s + i, (size_t)k);
+            w += k;
+            i += k;
+        } else {
+            memcpy(r->data + w, "\xEF\xBF\xBD", 3);
+            w += 3;
+            i += bad;
+        }
+    }
+    r->len = w;
+    r->data[w] = 0;
+    lt_text_drop(t);
+    return r;
+}
+
+static lt_text *lt_text_from_input(const char *s, int64_t n) { return lt_text_valid(lt_text_from(s, n)); }
+
+// Bytes.text_lossy
+static lt_text *lt_bytes_text_lossy(lt_bytes *b) { return lt_text_from_input((const char *)b->data, b->len); }
 
 static lt_err lt_bytes_text(lt_bytes *b, lt_text **out) {
     if (!lt_utf8_valid(b->data, b->len)) return lt_make_failure(lt_text_cstr("the bytes are not valid UTF-8 text"));

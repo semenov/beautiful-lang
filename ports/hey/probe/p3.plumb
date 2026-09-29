@@ -12,5 +12,5 @@ fn main() throws {
     }
   }
   let c = try http.get("http://127.0.0.1:8099/conns")
-  print("conns: ${try c.text()}")
+  print("conns: ${c.text()}")
 }

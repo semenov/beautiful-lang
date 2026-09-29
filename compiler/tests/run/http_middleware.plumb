@@ -51,16 +51,16 @@ test "forms, cookies and multipart parts" {
   var req = http.request("POST", "/login")
   req.body = "user=ada+lovelace&x=1".bytes()
   let res = try router.handle(req)
-  expect try res.text() == "hello ada lovelace"
+  expect res.text() == "hello ada lovelace"
   expect res.cookies()["session"] == "abc123"
   expect res.cookies()["theme"] == "dark"
   var me = http.request("GET", "/me")
   me.headers["cookie"] = "session=abc123; theme=dark"
-  expect try (try router.handle(me)).text() == "session=abc123 theme=dark"
+  expect (try router.handle(me)).text() == "session=abc123 theme=dark"
   var up = http.request("POST", "/upload")
   up.headers["content-type"] = "multipart/form-data; boundary=XX"
   up.body = "--XX\r\nContent-Disposition: form-data; name=\"title\"\r\n\r\nhello\r\n--XX\r\nContent-Disposition: form-data; name=\"f\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nfile body\r\n--XX--\r\n".bytes()
-  expect try (try router.handle(up)).text() == "title - text/plain 5\nf a.txt text/plain 9"
+  expect (try router.handle(up)).text() == "title - text/plain 5\nf a.txt text/plain 9"
 }
 
 test "cors" {

@@ -41,7 +41,7 @@ fn main() throws {
     print("auth ${m.groups}")
   }
   let r = try http.send(http.ClientRequest(url: "http://127.0.0.1:8099/echo", headers: {"accept-encoding": "identity"}))
-  print(try r.text())
+  print(r.text())
   let ch = Channel<Int>(capacity: 10)
   let c = spawn consume(ch)
   let p1 = spawn produce(ch, from: 0)

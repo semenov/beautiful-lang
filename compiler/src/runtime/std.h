@@ -86,6 +86,14 @@ static lt_err lt_files_read(lt_text *path, lt_text **out) {
     return e;
 }
 
+// files.read: the bytes as they are (above) are for read_bytes and copy;
+// as text, invalid UTF-8 becomes U+FFFD
+static lt_err lt_files_read_text(lt_text *path, lt_text **out) {
+    lt_err e = lt_files_read(path, out);
+    if (!e.obj) *out = lt_text_valid(*out);
+    return e;
+}
+
 static lt_err lt_files_write_mode_now(lt_text *path, lt_text *text, const char *mode) {
     FILE *f = fopen(path->data, mode);
     if (!f) return lt_os_error("can't write", path);
@@ -138,7 +146,7 @@ static lt_err lt_files_list(lt_text *dir, lt_texts **out) {
     struct dirent *e;
     while ((e = readdir(d))) {
         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
-        lt_texts_push(&l, lt_text_cstr(e->d_name));
+        lt_texts_push(&l, lt_text_valid(lt_text_cstr(e->d_name)));
     }
     closedir(d);
     qsort(l->items, (size_t)l->len, sizeof(lt_text *), lt_cmp_texts);
@@ -503,7 +511,7 @@ static lt_err lt_tempdir_close(lt_handle *h) {
 
 static lt_texts *lt_process_args(void) {
     lt_texts *l = lt_texts_new(lt_argc);
-    for (int i = 1; i < lt_argc; i++) lt_texts_push(&l, lt_text_cstr(lt_argv[i]));
+    for (int i = 1; i < lt_argc; i++) lt_texts_push(&l, lt_text_valid(lt_text_cstr(lt_argv[i])));
     return l;
 }
 
@@ -639,8 +647,8 @@ static lt_err lt_process_run_ex(lt_text *program, lt_texts *args, const char *di
     while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {
     }
     *status = WIFEXITED(st) ? WEXITSTATUS(st) : 128 + (WIFSIGNALED(st) ? WTERMSIG(st) : 0);
-    *out = lt_text_from(buf[0], (int64_t)len[0]);
-    *err = lt_text_from(buf[1], (int64_t)len[1]);
+    *out = lt_text_from_input(buf[0], (int64_t)len[0]);
+    *err = lt_text_from_input(buf[1], (int64_t)len[1]);
     free(buf[0]);
     free(buf[1]);
     return (lt_err){ 0 };
@@ -675,7 +683,7 @@ static void lt_env_set(lt_text *name, lt_text *value) { setenv(name->data, value
 
 static lt_text *lt_env_get(lt_text *name) {
     const char *v = getenv(name->data);
-    return v ? lt_text_cstr(v) : NULL;
+    return v ? lt_text_valid(lt_text_cstr(v)) : NULL;
 }
 
 // ---------------------------------------------------------------- time and log
@@ -690,7 +698,7 @@ extern char **environ;
 // "NAME=value" for every environment variable
 static lt_texts *lt_environ(void) {
     lt_texts *l = lt_texts_new(32);
-    for (char **e = environ; e && *e; e++) lt_texts_push(&l, lt_text_cstr(*e));
+    for (char **e = environ; e && *e; e++) lt_texts_push(&l, lt_text_valid(lt_text_cstr(*e)));
     return l;
 }
 
@@ -1422,7 +1430,7 @@ static lt_err lt_url_decode_text(lt_text *t, lt_text **out) {
     }
     r->len = w;
     r->data[w] = 0;
-    *out = r;
+    *out = lt_text_valid(r);
     return (lt_err){ 0 };
 }
 
@@ -1906,7 +1914,7 @@ static lt_text *lt_url_decode(const char *s, int64_t n, bool plus) {
     if (s[i] == '%' && i + 2 < n && lt_hex(s[i + 1]) >= 0 && lt_hex(s[i + 2]) >= 0) { t->data[w++] = (char)(lt_hex(s[i + 1]) * 16 + lt_hex(s[i + 2])); i += 2; }
     else t->data[w++] = (plus && s[i] == '+') ? ' ' : s[i];
   }
-  t->len = w; t->data[w] = 0; return t;
+  t->len = w; t->data[w] = 0; return lt_text_valid(t);
 }
 
 

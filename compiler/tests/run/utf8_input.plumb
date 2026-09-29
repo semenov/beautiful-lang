@@ -1,0 +1,27 @@
+// A String is always valid UTF-8: text from outside has invalid bytes
+// replaced with U+FFFD; Bytes keep them.
+
+import files
+import json
+import url
+
+fn main() throws {
+  // "caf" + Latin-1 é + " ok"
+  let raw = Bytes([99, 97, 102, 233, 32, 111, 107])
+  try files.write_bytes("/tmp/plumb-utf8-input.txt", data: raw)
+  let text = try files.read("/tmp/plumb-utf8-input.txt")
+  print("${text} ${text.upper()} ${text.length}")
+  print("${(try files.read_bytes("/tmp/plumb-utf8-input.txt")).length} bytes kept")
+  let strict = try raw.text() catch err {
+    err.message()
+  }
+  print(strict)
+  print(raw.text_lossy())
+  // overlong "/", a surrogate, past U+10FFFF, a cut-off sequence
+  for bad in [[0xC0, 0xAF], [0xED, 0xA0, 0x80], [0xF4, 0x90, 0x80, 0x80], [0x61, 0xE2, 0x82]] {
+    print("${Bytes(bad).text_lossy()} valid: ${(try Bytes(bad).text() catch err { "no" })}")
+  }
+  // half of a surrogate pair in JSON
+  print(try json.decode<String>("\"a\\ud800b\""))
+  print(try url.decode("%FFok"))
+}

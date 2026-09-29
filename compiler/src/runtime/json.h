@@ -256,7 +256,7 @@ static lt_err lt_dec_bool(const char *src, const lt_dyn *d, const lt_path *p, in
 }
 static lt_err lt_dec_text(const char *src, const lt_dyn *d, const lt_path *p, int lenient, lt_text **out) {
     if (d->kind == LT_D_STR) {
-        *out = lt_text_from(d->s, d->slen);
+        *out = lt_text_from_input(d->s, d->slen);
         return (lt_err){ 0 };
     }
     (void)lenient;
@@ -397,9 +397,13 @@ static bool lt_jp_string(lt_jp *p, const char **out, int64_t *len) {
             if (c >= 0xD800 && c < 0xDC00 && r + 6 < q + 1 && r[1] == '\\' && r[2] == 'u') {
                 uint32_t lo = 0;
                 for (int k = 3; k <= 6; k++) lo = lo * 16 + (uint32_t)(lt_hex(r[k]) < 0 ? 0 : lt_hex(r[k]));
-                c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
-                r += 6;
+                if (lo >= 0xDC00 && lo < 0xE000) {
+                    c = 0x10000 + ((c - 0xD800) << 10) + (lo - 0xDC00);
+                    r += 6;
+                }
             }
+            // half of a surrogate pair alone isn't a character
+            if (c >= 0xD800 && c < 0xE000) c = 0xFFFD;
             lt_utf8_put(&w, c);
             break;
         }

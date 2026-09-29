@@ -88,10 +88,7 @@ pub fn reply<T>(status: Int, value: T) -> http.Response {
 
 // The body as a T; anything unreadable is a 422 naming what's wrong.
 pub fn decode<T>(req: http.Request) throws -> T {
-  let text = try req.text() catch err {
-    throw invalid("body", problem: "is not UTF-8")
-  }
-  return try json.decode<T>(text) catch err {
+  return try json.decode<T>(req.text()) catch err {
     throw invalid("body", problem: err.message())
   }
 }
@@ -100,10 +97,7 @@ pub fn decode<T>(req: http.Request) throws -> T {
 // wrapper "user". For updates, where a field left out (keep the value)
 // differs from a field set to null (clear it).
 pub fn fields(req: http.Request, wrapper: String) throws -> Map<String, json.Value> {
-  let text = try req.text() catch err {
-    throw invalid("body", problem: "is not UTF-8")
-  }
-  let doc = try json.parse(text) catch err {
+  let doc = try json.parse(req.text()) catch err {
     throw invalid("body", problem: err.message())
   }
   if doc is json.Value.Object(top) {

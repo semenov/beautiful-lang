@@ -32,7 +32,7 @@ fn completions(req: http.Request) throws -> http.Response {
   if (req.header("authorization") ?? "") != "Bearer test" {
     return http.text(401, "{\"error\": {\"message\": \"bad key\"}}")
   }
-  let r = try json.decode<Req>(try req.text())
+  let r = try json.decode<Req>(req.text())
   let last = r.messages.last() ?? throw Failure(message: "no messages")
   if r.stream {
     return http.stream(200, content_type: "text/event-stream", writer: out => try stream_words(out, text: last.content ?? ""))
@@ -67,7 +67,7 @@ fn stream_words(out: io.Stream, text: String) throws {
 }
 
 fn embeddings(req: http.Request) throws -> http.Response {
-  let r = try json.decode<EmbedReq>(try req.text())
+  let r = try json.decode<EmbedReq>(req.text())
   var items: List<String> = []
   for i in 0..<r.input.length {
     items.append("{\"index\": ${i}, \"embedding\": [${r.input[i].length}, 0.5]}")

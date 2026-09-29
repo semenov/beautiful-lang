@@ -74,9 +74,9 @@ pub type Request {
     return self.headers[name.lower()]
   }
 
-  // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> String {
-    return try self.body.text()
+  // The body as text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String {
+    return self.body.text_lossy()
   }
 
   // A cookie the client sent.
@@ -94,7 +94,7 @@ pub type Request {
   // For forms with files, see `parts`.
   pub fn form(self) throws -> Map<String, String> {
     var out: Map<String, String> = {}
-    for pair in (try self.text()).split("&") {
+    for pair in self.text().split("&") {
       if pair.is_empty() {
         continue
       }
@@ -162,8 +162,9 @@ pub type Part {
   content_type: String = "text/plain"
   data: Bytes
 
-  pub fn text(self) throws -> String {
-    return try self.data.text()
+  // As text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String {
+    return self.data.text_lossy()
   }
 }
 
@@ -225,9 +226,9 @@ pub type Response {
   // Client responses: how long the parts of the request took.
   timing: Timing = Timing()
 
-  // The body as text; an error if it isn't valid UTF-8.
-  pub fn text(self) throws -> String {
-    return try self.body.text()
+  // The body as text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String {
+    return self.body.text_lossy()
   }
 
   // A copy with one more header.
@@ -845,8 +846,9 @@ pub type WebSocketMessage {
   // text (UTF-8) or binary
   is_text: Bool
 
-  pub fn text(self) throws -> String {
-    return try self.data.text()
+  // As text (invalid UTF-8 becomes �).
+  pub fn text(self) -> String {
+    return self.data.text_lossy()
   }
 }
 
@@ -869,7 +871,7 @@ fn run_websocket(stream: io.Stream, handler: fn(WebSocket) throws) throws {
 //   with ws = try http.websocket("wss://echo.example/socket") {
 //     try ws.send_text("hi")
 //     if try ws.receive() is some(m) {
-//       print(try m.text())
+//       print(m.text())
 //     }
 //   }
 pub fn websocket(address: String) throws -> WebSocket {

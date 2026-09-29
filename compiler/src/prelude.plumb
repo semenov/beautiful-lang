@@ -145,6 +145,9 @@ builtin type Bytes {
   }
   // The text these bytes encode (UTF-8); an error if they aren't valid UTF-8.
   fn text(self) throws -> String
+  // The same, with each invalid sequence replaced by U+FFFD (�): never
+  // fails. Text read from files, streams and the network comes in this way.
+  fn text_lossy(self) -> String
   fn slice(self, from: Int, to: Int) -> Bytes
   fn concat(self, other: Bytes) -> Bytes
   fn index_of(self, part: Bytes) -> Int?

@@ -39,7 +39,7 @@ pub type Client {
   pub fn chat(self, chat: Chat) throws -> Reply {
     let body = request_json(chat, stream: false, schema: none)
     let res = try self.post("/chat/completions", body: body)
-    let parsed = try json.decode<ChatResponse>(try res.text())
+    let parsed = try json.decode<ChatResponse>(res.text())
     let choice = parsed.choices.first() ?? throw Failure(message: "llm: the answer has no choices")
     let calls = (choice.message.tool_calls ?? []).map(c => ToolCall(id: c.id, name: c.function.name, arguments: c.function.arguments))
     let message = Message(role: "assistant", content: choice.message.content ?? "", tool_calls: calls)
@@ -58,7 +58,7 @@ pub type Client {
   pub fn object<T>(self, chat: Chat) throws -> T {
     let body = request_json(chat, stream: false, schema: json.schema<T>())
     let res = try self.post("/chat/completions", body: body)
-    let parsed = try json.decode<ChatResponse>(try res.text())
+    let parsed = try json.decode<ChatResponse>(res.text())
     let choice = parsed.choices.first() ?? throw Failure(message: "llm: the answer has no choices")
     let text = choice.message.content ?? ""
     return try json.decode<T>(strip_fences(text)) catch err {
@@ -100,7 +100,7 @@ pub type Client {
   pub fn embed(self, model: String, inputs: List<String>) throws -> List<List<Float>> {
     let body = json.Value.Object(fields: {"model": text_value(model), "input": json.Value.Array(items: inputs.map(t => text_value(t)))})
     let res = try self.post("/embeddings", body: body)
-    let parsed = try json.decode<EmbeddingResponse>(try res.text())
+    let parsed = try json.decode<EmbeddingResponse>(res.text())
     return parsed.data.sorted_by(d => d.index).map(d => d.embedding)
   }
 
@@ -116,7 +116,7 @@ pub type Client {
   fn post(self, path: String, body: json.Value) throws -> http.Response {
     let res = try http.send(self.request(path, body: body))
     if res.status >= 400 {
-      throw api_error(res.status, body: try res.text())
+      throw api_error(res.status, body: res.text())
     }
     return res
   }

@@ -7,9 +7,7 @@ import time
 
 fn show(res: http.Response) -> String {
   let allow = res.headers["allow"] ?? "-"
-  let body = try res.text() catch err {
-    "?"
-  }
+  let body = res.text()
   return "${res.status} ${http.status_text(res.status)} [${body}] allow=${allow}"
 }
 
@@ -45,11 +43,11 @@ fn main() throws {
   r.get("/files/feed", req => http.text(200, "feed"))
   for path in ["/files/feed", "/files/a", "/files/a/edit", "/files/a/b/c", "/files/feed/edit"] {
     let res = try r.handle(http.request("GET", path: path))
-    print("${path}: ${try res.text()}")
+    print("${path}: ${res.text()}")
   }
 
   let camel = http.json_with(200, value: Page(page_size: 20, next_page: none), options: json.EncodeOptions(keys: json.Keys.Camel, omit_none: true))
-  print(try camel.text())
+  print(camel.text())
 }
 
 type Page {

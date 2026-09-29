@@ -10,5 +10,5 @@ fn main() throws {
     http.Response(status: 0, body: Bytes())
   }
   let direct = try http.send(http.ClientRequest(url: url, proxy: "http://127.0.0.1:1", no_proxy: "127.0.0.1"))
-  print("${r.status} ${direct.status} ${try direct.text()}")
+  print("${r.status} ${direct.status} ${direct.text()}")
 }

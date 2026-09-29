@@ -2,7 +2,7 @@ import http
 
 fn chat(ws: http.WebSocket) throws {
   while try ws.receive() is some(msg) {
-    try ws.send_text("echo: ${try msg.text()}")
+    try ws.send_text("echo: ${msg.text()}")
   }
 }
 

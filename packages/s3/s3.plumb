@@ -55,7 +55,7 @@ pub type Client {
       }
       let res = try self.call("GET", path: "/${bucket}", query: query, body: Bytes(), headers: {})
       try check(res, what: "list ${bucket}")
-      let doc = try xml.parse(try res.text())
+      let doc = try xml.parse(res.text())
       for c in doc.elements_named("Contents") {
         out.append(Object(key: c.child_text("Key") ?? "", size: try (c.child_text("Size") ?? "0").to_int(), modified: c.child_text("LastModified") ?? "", etag: (c.child_text("ETag") ?? "").replace("\"", "")))
       }
@@ -154,7 +154,7 @@ pub fn aws(region: String, access_key: String, secret_key: String) -> Client {
 fn check(res: http.Response, what: String) throws {
   if res.status >= 300 {
     var detail = ""
-    let doc = try xml.parse(try res.text()) catch err {
+    let doc = try xml.parse(res.text()) catch err {
       throw Failure(message: "s3: ${what}: HTTP ${res.status}")
     }
     detail = "${doc.child_text("Code") ?? ""}: ${doc.child_text("Message") ?? ""}"

@@ -254,7 +254,7 @@ static lt_err lt_conn_read_line(lt_handle *h, lt_text **out) {
         if (nl) {
             size_t n = (size_t)(nl - c->buf);
             size_t len = n > 0 && c->buf[n - 1] == '\r' ? n - 1 : n;
-            *out = lt_text_from(c->buf, (int64_t)len);
+            *out = lt_text_from_input(c->buf, (int64_t)len);
             memmove(c->buf, c->buf + n + 1, c->blen - n - 1);
             c->blen -= n + 1;
             return (lt_err){ 0 };
@@ -268,7 +268,7 @@ static lt_err lt_conn_read_line(lt_handle *h, lt_text **out) {
                 *out = NULL;
                 return (lt_err){ 0 };
             }
-            *out = lt_text_from(c->buf, (int64_t)c->blen);
+            *out = lt_text_from_input(c->buf, (int64_t)c->blen);
             c->blen = 0;
             return (lt_err){ 0 };
         }

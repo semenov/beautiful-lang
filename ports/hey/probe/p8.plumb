@@ -11,5 +11,5 @@ fn main() throws {
     print("open redirect: ${res.status()} location ${res.header("location") ?? "-"}")
   }
   let r = try http.send(http.ClientRequest(url: "http://127.0.0.1:8099/redirect", method: "POST", body: "x".bytes()))
-  print("send redirect POST: ${r.status} ${try r.text()}")
+  print("send redirect POST: ${r.status} ${r.text()}")
 }

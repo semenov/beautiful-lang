@@ -5,7 +5,7 @@ import http
 fn main() throws {
   let port = try (env.get("PORT") ?? "18190").to_int()
   var router = http.Router()
-  router.post("/echo", req => http.text(200, "${req.body.length} bytes: ${try req.text()}"))
+  router.post("/echo", req => http.text(200, "${req.body.length} bytes: ${req.text()}"))
   router.get("/ip", req => http.text(200, req.client_ip))
   router.get("/lines", req => http.text(200, "a\nb\nc\n"))
   router.get("/empty", req => http.text(204, ""))

@@ -452,6 +452,15 @@ used result is always a mutation or an action. The rule also catches the
 
 ### Data formats and text
 
+- **A `String` is always valid UTF-8** (Vlad, 2026-09-29). Text from
+  outside (files, standard input, streams, process output, the network,
+  the environment, arguments, databases, JSON escapes) is checked on the
+  way in, and each invalid sequence becomes U+FFFD (�), so reading text
+  never fails and every string function can rely on it. Bytes that must
+  survive exactly stay `Bytes`; `Bytes.text()` is the strict conversion
+  (an error on invalid UTF-8), `Bytes.text_lossy()` the replacing one.
+  Go lets a string hold any bytes, which means each function needs its own
+  rule for invalid ones; Rust, Swift, Java and JS guarantee valid text.
 - **JSON keys in any case:** decoding matches a field by its exact name,
   then ignoring case and `_`/`-` (`createdAt` fills `created_at`), so
   camelCase APIs need no options; `json.encode_camel` writes them.

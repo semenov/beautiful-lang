@@ -75,7 +75,7 @@ fn failure(status: Int, message: String) -> http.Response {
 }
 
 fn create_user(req: http.Request, conn: db.Connection) throws -> http.Response {
-  let input = try json.decode<NewUser>(try req.text()) catch err {
+  let input = try json.decode<NewUser>(req.text()) catch err {
     return failure(400, message: err.message())
   }
   if input.name.trim().is_empty() or input.name.length > 100 {
@@ -91,7 +91,7 @@ fn create_user(req: http.Request, conn: db.Connection) throws -> http.Response {
 }
 
 fn login(req: http.Request, conn: db.Connection) throws -> http.Response {
-  let input = try json.decode<Login>(try req.text()) catch err {
+  let input = try json.decode<Login>(req.text()) catch err {
     return failure(400, message: err.message())
   }
   let users = try conn.query<User>("select id, name, email from users where email = ?", [input.email])
@@ -132,7 +132,7 @@ fn create_note(req: http.Request, conn: db.Connection) throws -> http.Response {
   if user == 0 {
     return failure(401, message: "log in first")
   }
-  let input = try json.decode<NewNote>(try req.text()) catch err {
+  let input = try json.decode<NewNote>(req.text()) catch err {
     return failure(400, message: err.message())
   }
   if input.title.trim().is_empty() or input.title.length > 200 {

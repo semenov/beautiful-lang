@@ -28,7 +28,7 @@ fn list_notes(conn: db.Connection) throws -> http.Response {
 }
 
 fn add_note(conn: db.Connection, req: http.Request) throws -> http.Response {
-  let input = try json.decode<NewNote>(try req.text())
+  let input = try json.decode<NewNote>(req.text())
   if input.title.trim().is_empty() {
     return http.text(400, "the title is empty")
   }

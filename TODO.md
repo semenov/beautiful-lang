@@ -8,6 +8,13 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `plumb init` instead of `plumb new` (the current directory becomes the
       project) (Vlad, 2026-09-29)
 - [ ] **Compile time vs Go**: benchmark, fix what's slow (Vlad, 2026-09-29)
+- [ ] **A critic's review of the language**: write the complaints, then
+      fix the language or explain in the README why it's right; keep it
+      simple and fast (Vlad, 2026-09-29)
+- [x] **A String is always valid UTF-8** (Vlad chose A, 2026-09-29):
+      invalid bytes become U+FFFD on the way in; `Bytes.text()` strict,
+      `Bytes.text_lossy()`; HTTP `text()` can't fail
+- [ ] `process.Output` as bytes (binary output of a command gets U+FFFD)
 - [x] **A typical backend on one core in Docker**, Plumb vs Go
       (benchmarks/backend) (Vlad, 2026-09-29)
 - [ ] **Vlad's decisions of 2026-09-29** (details in HANDOFF.md):
