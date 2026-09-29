@@ -1,0 +1,375 @@
+// Articles, favorites and tags: /api/articles, /api/tags.
+
+import api
+import auth
+import crypto
+import http
+import json
+import profiles
+import regex
+
+// A row of `article_view`, with what the viewer sees of it.
+type Row {
+  id: Int
+  slug: String
+  title: String
+  description: String
+  body: String
+  created_at: String
+  updated_at: String
+  author_id: Int
+  author_username: String
+  author_bio: String? = none
+  author_image: String? = none
+  favorites_count: Int
+  // the tags as a JSON array, in the order they were given
+  tags: String
+  favorited: Bool
+  following: Bool
+  // lists: how many articles match, over all pages
+  total: Int = 0
+}
+
+type Article {
+  slug: String
+  title: String
+  description: String
+  body: String
+  tag_list: List<String>
+  created_at: String
+  updated_at: String
+  favorited: Bool
+  favorites_count: Int
+  author: profiles.Profile
+}
+
+// An article in a list: without its body.
+type Summary {
+  slug: String
+  title: String
+  description: String
+  tag_list: List<String>
+  created_at: String
+  updated_at: String
+  favorited: Bool
+  favorites_count: Int
+  author: profiles.Profile
+}
+
+type ArticleBody {
+  article: Article
+}
+
+type ArticleList {
+  articles: List<Summary>
+  articles_count: Int
+}
+
+type NewArticle {
+  title: String = ""
+  description: String = ""
+  body: String = ""
+  tag_list: List<String> = []
+}
+
+type NewArticleBody {
+  article: NewArticle
+}
+
+type TagList {
+  tags: List<String>
+}
+
+type Tag {
+  tag: String
+}
+
+type Id {
+  id: Int
+}
+
+fn author(row: Row) -> profiles.Profile {
+  return profiles.Profile(username: row.author_username, bio: row.author_bio, image: row.author_image, following: row.following)
+}
+
+fn tags(row: Row) throws -> List<String> {
+  return try json.decode<List<String>>(row.tags)
+}
+
+fn full(row: Row) throws -> Article {
+  return Article(
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    body: row.body,
+    tag_list: try tags(row),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    favorited: row.favorited,
+    favorites_count: row.favorites_count,
+    author: author(row),
+  )
+}
+
+fn summary(row: Row) throws -> Summary {
+  return Summary(
+    slug: row.slug,
+    title: row.title,
+    description: row.description,
+    tag_list: try tags(row),
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    favorited: row.favorited,
+    favorites_count: row.favorites_count,
+    author: author(row),
+  )
+}
+
+fn find(app: api.App, slug: String, viewer: Int) throws -> Row {
+  let found = try app.conn.query<Row>(
+    """
+    select v.*,
+      exists(select 1 from favorites where article_id = v.id and user_id = ?1) as favorited,
+      exists(select 1 from follows where follower_id = ?1 and followed_id = v.author_id) as following
+    from article_view v where v.slug = ?2
+    """,
+    [viewer, slug],
+  )
+  return found.first() ?? throw api.not_found("article")
+}
+
+fn answer(status: Int, app: api.App, slug: String, viewer: Int) throws -> http.Response {
+  return api.reply(status, ArticleBody(article: try full(try find(app, slug: slug, viewer: viewer))))
+}
+
+// What a list shows: filters (empty: any) and the page.
+type Filter {
+  author: String = ""
+  tag: String = ""
+  favorited: String = ""
+  // only authors the viewer follows
+  feed: Bool = false
+  limit: Int = 20
+  offset: Int = 0
+}
+
+fn number(req: http.Request, name: String, default: Int) throws -> Int {
+  let text = req.query(name) ?? ""
+  if text.is_empty() {
+    return default
+  }
+  let n = try text.to_int() catch err {
+    throw api.invalid(name, problem: "must be a whole number")
+  }
+  if n < 0 {
+    throw api.invalid(name, problem: "can't be negative")
+  }
+  return n
+}
+
+fn list(app: api.App, filter: Filter, viewer: Int) throws -> http.Response {
+  let rows = try page(app, filter: filter, viewer: viewer)
+  var count = rows.first()?.total ?? 0
+  if rows.is_empty() and filter.offset > 0 {
+    // past the last page: the count still covers every match
+    var first = filter
+    first.offset = 0
+    first.limit = 1
+    count = (try page(app, filter: first, viewer: viewer)).first()?.total ?? 0
+  }
+  return api.reply(200, ArticleList(articles: try rows.map(r => try summary(r)), articles_count: count))
+}
+
+fn page(app: api.App, filter: Filter, viewer: Int) throws -> List<Row> {
+  return try app.conn.query<Row>(
+    """
+    select v.*,
+      exists(select 1 from favorites where article_id = v.id and user_id = ?1) as favorited,
+      exists(select 1 from follows where follower_id = ?1 and followed_id = v.author_id) as following,
+      count(*) over () as total
+    from article_view v
+    where (?2 = '' or v.author_username = ?2)
+      and (?3 = '' or exists(select 1 from article_tags t where t.article_id = v.id and t.tag = ?3))
+      and (?4 = '' or exists(
+        select 1 from favorites f join users u on u.id = f.user_id
+        where f.article_id = v.id and u.username = ?4))
+      and (not ?5 or exists(select 1 from follows where follower_id = ?1 and followed_id = v.author_id))
+    order by v.id desc
+    limit ?6 offset ?7
+    """,
+    [viewer, filter.author, filter.tag, filter.favorited, filter.feed, filter.limit, filter.offset],
+  )
+}
+
+// GET /api/articles?tag=&author=&favorited=&limit=&offset=
+pub fn get_list(req: http.Request, app: api.App) throws -> http.Response {
+  let filter = Filter(
+    author: req.query("author") ?? "",
+    tag: req.query("tag") ?? "",
+    favorited: req.query("favorited") ?? "",
+    limit: try number(req, name: "limit", default: 20),
+    offset: try number(req, name: "offset", default: 0),
+  )
+  return try list(app, filter: filter, viewer: try auth.viewer(req, app) ?? 0)
+}
+
+// GET /api/articles/feed: articles by the authors the viewer follows.
+pub fn feed(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let filter = Filter(
+    feed: true,
+    limit: try number(req, name: "limit", default: 20),
+    offset: try number(req, name: "offset", default: 0),
+  )
+  return try list(app, filter: filter, viewer: viewer)
+}
+
+// GET /api/articles/:slug
+pub fn get(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.viewer(req, app) ?? 0
+  return try answer(200, app: app, slug: req.param("slug") ?? "", viewer: viewer)
+}
+
+// "How to Train Your Dragon!" -> "how-to-train-your-dragon", made unique
+// with a random ending when another article has it.
+fn make_slug(app: api.App, title: String, id: Int) throws -> String {
+  let dashed = (try regex.compile("[^a-z0-9]+")).replace(title.lower(), replacement: "-")
+  var base = (try regex.compile("^-+|-+$")).replace(dashed, replacement: "")
+  if base.is_empty() {
+    base = "article"
+  }
+  var slug = base
+  while not (try app.conn.query<Id>("select id from articles where slug = ? and id != ?", [slug, id])).is_empty() {
+    slug = "${base}-${crypto.random_bytes(3).hex()}"
+  }
+  return slug
+}
+
+fn clean_tags(tags: List<String>) -> List<String> {
+  return tags.map(t => t.trim()).filter(t => not t.is_empty()).unique()
+}
+
+fn save_tags(app: api.App, article_id: Int, tags: List<String>) throws {
+  try app.conn.execute("delete from article_tags where article_id = ?", [article_id])
+  for tag in tags.indexed() {
+    try app.conn.execute("insert into article_tags (article_id, tag, position) values (?, ?, ?)", [article_id, tag.value, tag.index])
+  }
+}
+
+// POST /api/articles
+pub fn create(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let input = (try api.decode<NewArticleBody>(req)).article
+  if input.title.trim().is_empty() {
+    throw api.blank("title")
+  }
+  if input.description.trim().is_empty() {
+    throw api.blank("description")
+  }
+  if input.body.trim().is_empty() {
+    throw api.blank("body")
+  }
+  let now = api.now()
+  let slug = try app.conn.transaction(() => {
+    let slug = try make_slug(app, title: input.title, id: 0)
+    let id = try app.conn.insert(
+      "insert into articles (slug, title, description, body, author_id, created_at, updated_at) values (?, ?, ?, ?, ?, ?, ?)",
+      [slug, input.title, input.description, input.body, viewer, now, now],
+    )
+    try save_tags(app, article_id: id, tags: clean_tags(input.tag_list))
+    slug
+  })
+  return try answer(201, app: app, slug: slug, viewer: viewer)
+}
+
+// The article at :slug, if the viewer wrote it.
+fn own(req: http.Request, app: api.App, viewer: Int) throws -> Row {
+  let row = try find(app, slug: req.param("slug") ?? "", viewer: viewer)
+  if row.author_id != viewer {
+    throw api.forbidden("article")
+  }
+  return row
+}
+
+// PUT /api/articles/:slug: only the fields given change; a new title
+// gives a new slug.
+pub fn update(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let row = try own(req, app: app, viewer: viewer)
+  let fields = try api.fields(req, wrapper: "article")
+  var title = row.title
+  var description = row.description
+  var body = row.body
+  var slug = row.slug
+  if fields["title"] is some(v) {
+    title = try api.required_text(v, field: "title")
+    if title != row.title {
+      slug = try make_slug(app, title: title, id: row.id)
+    }
+  }
+  if fields["description"] is some(v) {
+    description = try api.required_text(v, field: "description")
+  }
+  if fields["body"] is some(v) {
+    body = try api.required_text(v, field: "body")
+  }
+  var tags: List<String>? = none
+  if fields["tagList"] is some(v) {
+    tags = try tag_list(v)
+  }
+  try app.conn.transaction(() => {
+    try app.conn.execute(
+      "update articles set slug = ?, title = ?, description = ?, body = ?, updated_at = ? where id = ?",
+      [slug, title, description, body, api.now(), row.id],
+    )
+    if tags is some(t) {
+      try save_tags(app, article_id: row.id, tags: t)
+    }
+  })
+  return try answer(200, app: app, slug: slug, viewer: viewer)
+}
+
+fn tag_list(value: json.Value) throws -> List<String> {
+  if value is json.Value.Array(items) {
+    var tags: List<String> = []
+    for item in items {
+      if item is json.Value.String(tag) {
+        tags.append(tag)
+      } else {
+        throw api.invalid("tagList", problem: "must be a list of text")
+      }
+    }
+    return clean_tags(tags)
+  }
+  throw api.invalid("tagList", problem: "must be a list of text")
+}
+
+// DELETE /api/articles/:slug
+pub fn delete(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let row = try own(req, app: app, viewer: viewer)
+  try app.conn.execute("delete from articles where id = ?", [row.id])
+  return http.text(204, "")
+}
+
+// POST /api/articles/:slug/favorite
+pub fn favorite(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let row = try find(app, slug: req.param("slug") ?? "", viewer: viewer)
+  try app.conn.execute("insert or ignore into favorites (user_id, article_id) values (?, ?)", [viewer, row.id])
+  return try answer(200, app: app, slug: row.slug, viewer: viewer)
+}
+
+// DELETE /api/articles/:slug/favorite
+pub fn unfavorite(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  let row = try find(app, slug: req.param("slug") ?? "", viewer: viewer)
+  try app.conn.execute("delete from favorites where user_id = ? and article_id = ?", [viewer, row.id])
+  return try answer(200, app: app, slug: row.slug, viewer: viewer)
+}
+
+// GET /api/tags: the most used first.
+pub fn tags_list(req: http.Request, app: api.App) throws -> http.Response {
+  let rows = try app.conn.query<Tag>("select tag from article_tags group by tag order by count(*) desc, tag", [])
+  return api.reply(200, TagList(tags: rows.map(r => r.tag)))
+}

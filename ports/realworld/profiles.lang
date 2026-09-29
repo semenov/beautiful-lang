@@ -1,0 +1,69 @@
+// Other users as the viewer sees them: /api/profiles/:username.
+
+import api
+import auth
+import http
+
+// A user as others see them; also an article's and a comment's author.
+pub type Profile {
+  username: String
+  bio: String?
+  image: String?
+  following: Bool
+}
+
+type ProfileBody {
+  profile: Profile
+}
+
+type Found {
+  id: Int
+  username: String
+  bio: String? = none
+  image: String? = none
+  following: Bool
+}
+
+fn find(app: api.App, username: String, viewer: Int) throws -> Found {
+  let found = try app.conn.query<Found>(
+    """
+    select u.id, u.username, u.bio, u.image,
+      exists(select 1 from follows where follower_id = ?1 and followed_id = u.id) as following
+    from users u where u.username = ?2
+    """,
+    [viewer, username],
+  )
+  return found.first() ?? throw api.not_found("profile")
+}
+
+fn answer(user: Found) -> http.Response {
+  let profile = Profile(username: user.username, bio: user.bio, image: user.image, following: user.following)
+  return api.reply(200, ProfileBody(profile: profile))
+}
+
+// GET /api/profiles/:username
+pub fn get(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.viewer(req, app) ?? 0
+  return answer(try find(app, username: req.param("username") ?? "", viewer: viewer))
+}
+
+// POST /api/profiles/:username/follow
+pub fn follow(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  var user = try find(app, username: req.param("username") ?? "", viewer: viewer)
+  if user.id == viewer {
+    throw api.invalid("profile", problem: "can't follow yourself")
+  }
+  try app.conn.execute("insert or ignore into follows (follower_id, followed_id) values (?, ?)", [viewer, user.id])
+  user.following = true
+  return answer(user)
+}
+
+// DELETE /api/profiles/:username/follow
+pub fn unfollow(req: http.Request, app: api.App) throws -> http.Response {
+  let viewer = try auth.require(req, app)
+  var user = try find(app, username: req.param("username") ?? "", viewer: viewer)
+  try app.conn.execute("delete from follows where follower_id = ? and followed_id = ?", [viewer, user.id])
+  user.following = false
+  return answer(user)
+}
