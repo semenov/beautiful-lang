@@ -306,7 +306,21 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 ## Then: my own review of what's missing or weak
 
-- [ ] Review the stdlib against Go and Node for backend/CLI gaps
+- [x] Review the stdlib against Go and Node for backend/CLI gaps
+      (research/stdlib-review-2026-09.md, 46 gaps ranked). Top ones:
+  - [ ] regex is POSIX ERE: no `(?:)`, lazy, named groups, `\b`; `\p{L}`
+        silently matches nothing -> RE2 syntax
+  - [ ] **bug: `time.timeout` doesn't stop `process.run`**
+  - [ ] **bug: two `http.serve` in one program: the second hangs on SIGTERM**
+  - [ ] AES-256-GCM (`crypto.encrypt` / `decrypt`)
+  - [ ] current directory, `path.absolute`, home / config / cache dirs
+  - [ ] a child process on the terminal (`$EDITOR`, pager)
+  - [ ] DateTime milliseconds, Duration between DateTimes, unix millis
+  - [ ] route groups / sub-routers; values from middleware to handlers
+  - [ ] files: set_mode, atomic write, temp file
+  - [ ] gzip middleware; streaming request bodies; TLS serving, custom CA
+  - [ ] client retries with backoff; client multipart
+  - [ ] (language, for Vlad: file embedding like go:embed; `select`)
 - [ ] Review the language for rough edges found while writing the packages:
   - `?.` : I reached for it 3 times while writing packages (agents expect it): done
   - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
