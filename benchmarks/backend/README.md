@@ -12,9 +12,14 @@ a note". `./bench.sh [connections] [seconds]` runs both on fresh databases
 and prints requests per second, latency, the server's CPU time per request
 and its peak memory.
 
-## Results (Apple M-series, 2026-09-29, 64 connections, 10 s)
+## Results (Apple M-series, 64 connections, 10 s)
 
 ```
+2026-09-30, with the connection pool (reads in parallel):
+plumb: 44219 req/s, p50 899µs, p99 8.348ms, 0 failed of 442190; CPU 80.1 us per request; peak 15 MB
+go: 16123 req/s, p50 2.574ms, p99 22.082ms, 0 failed of 161232; CPU 350.1 us per request; peak 46 MB
+
+2026-09-29, one SQLite connection:
 Plumb: 28704 req/s, p50 2.045ms, p99 4.863ms, 0 failed of 287042; CPU 90.1 us per request; peak 10 MB
 go: 17126 req/s, p50 2.408ms, p99 21.983ms, 0 failed of 171263; CPU 343.6 us per request; peak 44 MB
 ```

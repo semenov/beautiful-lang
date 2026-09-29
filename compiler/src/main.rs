@@ -788,11 +788,12 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         let _ = std::fs::remove_file(&c_path);
         return true;
     }
-    // run and test: the runtime is compiled once (optimized) and cached,
-    // so only the program's own code is compiled each time
+    // The runtime is compiled once (optimized) and cached, so only the
+    // program's own code is compiled each time. Measured on the benchmarks,
+    // separate units cost no speed (the hot paths are inline in the headers).
     let mut sources: Vec<PathBuf> = vec![c_path.clone()];
     let mut program_c: Option<PathBuf> = None;
-    if !optimize && !opts.static_link && std::env::var("PLUMB_NO_SPLIT").is_err() {
+    if !opts.static_link && std::env::var("PLUMB_NO_SPLIT").is_err() {
         if let Some(units) = split::split(&c) {
             let rt_flags: Vec<String> = if opts.debug { cmd.get_args().map(|a| a.to_string_lossy().to_string()).collect() } else { cmd.get_args().map(|a| a.to_string_lossy().to_string()).map(|a| if a == "-O1" { "-O2".into() } else { a }).collect() };
             match runtime_object(&cc, &rt_flags, &units.runtime, &cache) {

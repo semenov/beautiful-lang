@@ -13,7 +13,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] the program's own C in pieces compiled in parallel: 0.62 s -> 0.39 s
   - [ ] next: smaller generated C
         (stdlib code such as Router.route is compiled into every program);
-        `build` with the cached runtime too, if it doesn't cost speed
+  - [x] `build` with the cached runtime and pieces too: 1.08 s -> 0.23 s,
+        the same speed on every benchmark
 - [x] **A critic's review of the language** (Vlad, 2026-09-29): write the
       complaints, then fix the language or explain in the README why it's
       right; keep it simple and fast. research/critique.md (38 complaints),
