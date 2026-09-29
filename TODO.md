@@ -72,15 +72,18 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `http`: middleware (`router.use`), cookies, forms (urlencoded,
       multipart), `http.mime_type`, CORS, request logging
 - [ ] WebSockets (server and client)
-- [ ] templates (logic-less, HTML-escaping)
+- [ ] **templates** (Vlad asked too): user-friendly; look at what's popular
+      (Handlebars/Mustache, Jinja/Nunjucks, EJS, Go templates) and pick the
+      shape agents know best; HTML-escaping by default
 - [ ] `tar` and `zip`
 - [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
       (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
       chunks, partition, index_of, find_index), log levels and JSON logs
 - [ ] still small: decode key naming, log fields, cli subcommands
-- [ ] signals: Ctrl-C cancels `main` so `with` blocks close (design first)
+- [x] signals: Ctrl-C cancels `main` so `with` blocks close
 - [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
-- [ ] packages: jwt, smtp, s3, mysql, semver, markdown, yaml (maybe stdlib)
+- [ ] **markdown package** (Vlad asked): Markdown -> HTML (CommonMark)
+- [ ] packages: jwt, smtp, s3, mysql, semver, yaml (maybe stdlib)
 
 ## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)
 
@@ -94,9 +97,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] `time`: parse_duration, Duration text and arithmetic, precise timers
       (macOS: sleep(10ms) takes ~70ms), a ticker (sleep_until on a grid)
 - [x] `cli`: -n style flags and one-letter names (subcommands: still to do)
-- [ ] channels: try_receive, receive with a timeout, select
+- [x] channels: try_receive (a timeout: time.timeout around receive); select: not yet
 - [ ] `-> Never` in user code; constants (`const`)
-- [ ] signals: Ctrl-C handling for tools (with the npm item above)
+- [x] signals: Ctrl-C cancels main's tasks; process.interrupted()
 - [x] a field default can't use a type declared later in the file
 - [x] Float.format: NaN text (width: use pad_start)
 

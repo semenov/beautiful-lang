@@ -97,6 +97,7 @@ pub struct CGen<'a> {
     sqlite: bool,
     zlib: bool,
     tls: bool,
+    wants_interrupt: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -171,6 +172,7 @@ impl<'a> CGen<'a> {
             sqlite: false,
             zlib: false,
             tls: false,
+            wants_interrupt: false,
         }
     }
 
@@ -2843,6 +2845,22 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let ec = self.tys[e].c.clone();
                 format!("({{ {ec} it_ = {x}; lt_chan_send({c}, &it_); }})", ec = ec, x = a[1], c = a[0])
             }
+            "Channel.try_receive" => {
+                let e = match &self.tys[tid0.unwrap()].kind {
+                    Kind::Channel(e) => *e,
+                    _ => unreachable!(),
+                };
+                let ety = self.ty_of(e);
+                let opt = self.opt_tid_of(&ety);
+                let ec = self.tys[e].c.clone();
+                let some = self.opt_some(opt, "v_");
+                let none = self.opt_none(opt);
+                format!("({{ {ec} v_; lt_chan_try_recv({c}, &v_) ? {some} : {none}; }})", ec = ec, c = a[0], some = some, none = none)
+            }
+            "process.interrupted" => {
+                self.wants_interrupt = true;
+                "(lt_interrupted != 0)".to_string()
+            }
             "Channel.next" | "Channel.receive" => {
                 let e = match &self.tys[tid0.unwrap()].kind {
                     Kind::Channel(e) => *e,
@@ -3499,7 +3517,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         } else if let Some(m) = self.m.main {
             let f = &self.m.funcs[m];
             let call = if f.throws { format!("lt_err e = {}();", f.name) } else { format!("{}(); lt_err e = {{0}};", f.name) };
-            let report = "if (e.obj) { fflush(stdout); lt_text *m = lt_error_message(e); fprintf(stderr, \"error: %.*s\\n\", (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); return 1; }";
+            let report = "if (e.obj && lt_interrupted) { fflush(stdout); lt_iface_drop(e); return 130; } if (lt_interrupted) { fflush(stdout); return 130; } if (e.obj) { fflush(stdout); lt_text *m = lt_error_message(e); fprintf(stderr, \"error: %.*s\\n\", (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); return 1; }";
             if self.threads {
                 let _ = writeln!(main, "static void lt_main_run(lt_task *t) {{ {} t->error = e; }}", call);
                 let _ = writeln!(main, "int main(void) {{\n  lt_init();\n  lt_task *mt = lt_run_main((lt_fn){{0}}, 0, lt_main_run);\n  lt_err e = mt->error;\n  lt_iface_dup(e);\n  lt_task_drop(mt);\n  {}\n  fflush(stdout);\n  return 0;\n}}", report);
@@ -3513,6 +3531,9 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         let mut out = String::new();
         if self.threads {
             out += "#define LT_THREADS 1\n";
+        }
+        if self.wants_interrupt {
+            out += "#define LT_WANTS_INTERRUPT 1\n";
         }
         out += include_str!("runtime/rt.h");
         if self.threads {

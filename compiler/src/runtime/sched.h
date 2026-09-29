@@ -853,6 +853,22 @@ static int lt_chan_recv(lt_chan *c, void *out) {
     }
 }
 
+// A value if one is waiting; never waits.
+static int lt_chan_try_recv(lt_chan *c, void *out) {
+    lt_spin_lock(&c->spin);
+    if (c->count == 0) {
+        lt_spin_unlock(&c->spin);
+        return 0;
+    }
+    memcpy(out, c->buf + c->head * c->esize, c->esize);
+    c->head = (c->head + 1) % c->cap;
+    c->count--;
+    lt_task *s = lt_wq_pop(&c->send_q);
+    lt_spin_unlock(&c->spin);
+    if (s) lt_ready(s);
+    return 1;
+}
+
 static void lt_chan_close(lt_chan *c) {
     lt_spin_lock(&c->spin);
     c->closed = 1;
@@ -1028,12 +1044,29 @@ static int lt_ncpu(void) {
     return n < 1 ? 1 : (int)n;
 }
 
+// Ctrl-C with tasks: cancel main's task (and so all of them) from a
+// thread, since a signal handler can't take locks.
+static void *lt_interrupt_thread(void *u) {
+    (void)u;
+    char x;
+    while (read(lt_interrupt_pipe[0], &x, 1) < 0 && errno == EINTR) {
+    }
+    if (lt_main_task) lt_task_cancel(lt_main_task);
+    return NULL;
+}
+
 // Run `entry` as the first task, on a pool of worker threads.
 static lt_task *lt_run_main(lt_fn entry, size_t result_size, void (*run)(lt_task *)) {
     lt_task *m = lt_task_new(entry, result_size, run, NULL);
     m->rc = 2; // returned to the caller + running
     lt_main_task = m;
     lt_panic_hook = lt_task_panic_hook;
+    if (pipe(lt_interrupt_pipe) == 0) {
+        pthread_t it;
+        pthread_create(&it, NULL, lt_interrupt_thread, NULL);
+        pthread_detach(it);
+        lt_catch_interrupts();
+    }
     lt_workers = lt_ncpu();
     lt_timer_setup();
     pthread_t timer;

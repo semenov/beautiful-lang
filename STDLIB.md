@@ -194,6 +194,13 @@ pub fn find(program: String) -> String?
 // The command-line arguments, without the program's name.
 pub fn args() -> List<String>
 
+// Whether Ctrl-C (or SIGTERM) was pressed. With tasks, Ctrl-C cancels
+// main's task: every wait stops with `Cancelled`, `with` blocks close, and
+// the program ends with status 130. A loop that never waits checks this
+// instead: `while not process.interrupted() { ... }`. A second Ctrl-C ends
+// the program at once.
+pub fn interrupted() -> Bool
+
 // Stops the program with an exit status.
 pub fn exit(status: Int) -> Never
 ```
@@ -1410,6 +1417,8 @@ builtin type Locked<T> {
 builtin type Channel<T> {
   fn send(self, item: T) throws
   fn receive(self) throws -> T?
+  // A value if one is waiting, without waiting; none otherwise.
+  fn try_receive(self) -> T?
   fn close(self)
 }
 

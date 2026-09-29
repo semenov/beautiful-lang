@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1092,6 +1093,35 @@ LT_INLINE void lt_assert(bool c, int line) {
     if (LT_UNLIKELY(!c)) lt_panic_at("assertion failed", line);
 }
 
+// Ctrl-C (SIGINT) and SIGTERM. With tasks: the first cancels main's task
+// (waits stop with Cancelled, `with` blocks close); without tasks, only a
+// program that checks process.interrupted() gets to finish its loop. The
+// second signal ends the program at once. Exit status 130 either way.
+static volatile sig_atomic_t lt_interrupted;
+static int lt_interrupt_pipe[2] = { -1, -1 };
+
+static void lt_on_interrupt(int sig) {
+    (void)sig;
+    if (lt_interrupted) _exit(130);
+    lt_interrupted = 1;
+    if (lt_interrupt_pipe[1] >= 0) {
+        char x = 1;
+        ssize_t r = write(lt_interrupt_pipe[1], &x, 1);
+        (void)r;
+    }
+}
+
+// A signal the parent set to be ignored stays ignored (background jobs,
+// nohup), as Go does.
+static void lt_catch_interrupts(void) {
+    int sigs[2] = { SIGINT, SIGTERM };
+    for (int i = 0; i < 2; i++) {
+        struct sigaction old;
+        if (sigaction(sigs[i], NULL, &old) == 0 && old.sa_handler == SIG_IGN) continue;
+        signal(sigs[i], lt_on_interrupt);
+    }
+}
+
 static void lt_init(void) {
     // started by `lang run`: remove the temporary executable (still running)
     const char *self = getenv("LANG_RUN_EXE");
@@ -1101,6 +1131,9 @@ static void lt_init(void) {
     }
     static char buf[1 << 16];
     setvbuf(stdout, buf, _IOFBF, sizeof buf);
+#if defined(LT_WANTS_INTERRUPT) && !defined(LT_THREADS)
+    lt_catch_interrupts();
+#endif
 #ifdef LT_DEBUG_ALLOC
     atexit(lt_report_leaks);
 #endif

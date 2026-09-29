@@ -438,6 +438,8 @@ builtin type Locked<T> {
 builtin type Channel<T> {
   fn send(self, item: T) throws
   fn receive(self) throws -> T?
+  // A value if one is waiting, without waiting; none otherwise.
+  fn try_receive(self) -> T?
   fn close(self)
 }
 
