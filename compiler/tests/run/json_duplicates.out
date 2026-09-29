@@ -1,0 +1,11 @@
+In(name: "a", age: 5, created_at: "")
+In(name: "a", age: 5, created_at: "x")
+error: json: duplicate key "name" at line 1, column 15
+error: json: at $: the keys "name" and "NAME" both fill the field `name`
+error: json: at $: the keys "created_at" and "createdAt" both fill the field `created_at`
+In(name: "a", age: 5, created_at: "")
+error: json: duplicate key "c" at line 2, column 2
+ok {"a":1,"A":2}
+error: json: duplicate key "k0" at line 1, column 
+ok {"k0":0,"k1":1,"k
+ok [{"a":1},{"a":2}]

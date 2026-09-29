@@ -1,0 +1,39 @@
+42
+-7
+3
+error: " 42" is not a whole number: it has spaces around it (trim it first)
+error: "42\n" is not a whole number: it has spaces around it (trim it first)
+error: "1_000" is not a whole number: `_` isn't allowed in number text
+error: "" is not a whole number: it's empty
+error: "-" is not a whole number
+error: "12a" is not a whole number
+9223372036854775807
+-9223372036854775808
+error: "9223372036854775808" is not a whole number: it's too big for an Int
+error: "99999999999999999999999" is not a whole number: it's too big for an Int
+1.5
+-0.25
+0.5
+5.0
+1000.0
+0.0025
+1.0
+error: " 1.5" is not a number: it has spaces around it (trim it first)
+error: "1_0.5" is not a number: `_` isn't allowed in number text
+error: "nan" is not a number: NaN and infinity aren't accepted
+error: "NaN" is not a number: NaN and infinity aren't accepted
+error: "inf" is not a number: NaN and infinity aren't accepted
+error: "-Infinity" is not a number: NaN and infinity aren't accepted
+error: "1e400" is not a number: it's too big for a Float
+error: "-1e400" is not a number: it's too big for a Float
+0.0
+error: "0x1p3" is not a number
+error: "1e" is not a number
+error: "." is not a number
+error: "e5" is not a number
+error: "1.2.3" is not a number
+error: "7777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777777"... is not a whole number
+128
+19.99
+error: " 19.99" is not a decimal number: it has spaces around it (trim it first)
+error: "1_000.5" is not a decimal number: `_` isn't allowed in number text

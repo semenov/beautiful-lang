@@ -1,0 +1,33 @@
+// String.to_int and to_float are strict: no spaces around, no `_`, no NaN or
+// infinity, nothing too big; the error says what is wrong.
+fn show_int(s: String) -> String {
+  let n = try s.to_int() catch err {
+    return "error: ${err}"
+  }
+  return "${n}"
+}
+
+fn show_float(s: String) -> String {
+  let n = try s.to_float() catch err {
+    return "error: ${err}"
+  }
+  return "${n}"
+}
+
+fn main() {
+  for s in ["42", "-7", "+3", " 42", "42\n", "1_000", "", "-", "12a", "9223372036854775807", "-9223372036854775808", "9223372036854775808", "99999999999999999999999"] {
+    print(show_int(s))
+  }
+  for s in ["1.5", "-0.25", ".5", "5.", "1e3", "2.5E-3", "+1", " 1.5", "1_0.5", "nan", "NaN", "inf", "-Infinity", "1e400", "-1e400", "1e-400", "0x1p3", "1e", ".", "e5", "1.2.3"] {
+    print(show_float(s))
+  }
+  print(show_int("${"7".repeat(150)}x"))
+  print(show_float("x".repeat(2000000)).length.to_string())
+  for s in ["19.99", " 19.99", "1_000.5"] {
+    let d = try s.to_decimal() catch err {
+      print("error: ${err}")
+      continue
+    }
+    print("${d}")
+  }
+}

@@ -689,7 +689,8 @@ pub fn encode_with<T>(value: T, options: EncodeOptions) -> String
 
 // Reads JSON into a T, checking every field. A missing field is an error
 // unless it's optional (`T?`) or has a default. Extra fields are ignored.
-// Errors say where: `json: at $.users[2].age: expected a whole number`.
+// A key written twice is an error, and so are two keys that fill the same
+// field ("name" and "NAME"). Errors say where: `json: at $.users[2].age: expected a whole number`.
 pub fn decode<T>(text: String) throws -> T
 
 // A JSON Schema of T's JSON form: for describing data to other programs,
@@ -729,7 +730,8 @@ pub fn number(value: Float) -> Value
 // An Int as a JSON value.
 pub fn integer(value: Int) -> Value
 
-// Reads any JSON into a `Value`.
+// Reads any JSON into a `Value`. A key written twice in an object is an
+// error (`json: duplicate key "name" at line 1, column 15`).
 pub fn parse(text: String) throws -> Value
 ```
 
@@ -1352,12 +1354,15 @@ regex: patterns for finding and replacing text.
 ```
 let date = try regex.compile("(\\d{4})-(\\d{2})-(\\d{2})")
 if date.find(line) is some(m) {
-  print("year ${m.groups[0] ?? "?"}")
+  print("year ${m.groups[1] ?? "?"}")
 }
 ```
 
 Extended regular expressions (POSIX), plus \d \w \s (and \D \W \S);
-`(?i)` at the start ignores case. Positions are character indices.
+`(?i)` at the start ignores case. Positions are character indices. Not
+supported (an error): lazy quantifiers (`*?`), `(?:...)` and other `(?`
+groups, `\b` and other anchors, `\p{...}`. A pattern written as a literal
+in `regex.compile("...")` is checked when the program compiles.
 
 ```
 pub type Match {
@@ -1365,7 +1370,9 @@ pub type Match {
   text: String
   start: Int
   end: Int
-  // the parenthesized groups; none for a group that didn't take part
+  // groups[0] is the whole match, groups[1] the first parenthesized group,
+  // and so on (as $0, $1 in `replace`); none for a group that didn't take
+  // part. Up to 9 groups.
   groups: List<String?>
 }
 
@@ -1775,9 +1782,13 @@ builtin type String {
   fn repeat(self, times: Int) -> String
   fn pad_start(self, width: Int, fill: String) -> String
   fn pad_end(self, width: Int, fill: String) -> String
+  // "42", "-7": a sign and digits only. Spaces around it (trim first), `_`
+  // and numbers too big for an Int are errors.
   fn to_int(self) throws -> Int
+  // "1.5", "-2e3", ".5": as in JSON. Spaces, `_`, "nan", "inf" and numbers
+  // too big for a Float ("1e400") are errors.
   fn to_float(self) throws -> Float
-  // "19.99" -> 19.99 exactly
+  // "19.99" -> 19.99 exactly; strict like to_float
   fn to_decimal(self) throws -> Decimal
   fn to_string(self) -> String
   // The text as UTF-8 bytes.
@@ -1832,7 +1843,8 @@ builtin type List<T> {
   fn flat_map<R>(self, transform: fn(T) throws -> List<R>) rethrows -> List<R>
   // Without repeats, the first of each kept, in order.
   fn unique(self) -> List<T>
-  // In pieces of `size` (the last may be shorter): batches.
+  // In pieces of `size` (the last may be shorter): batches. A size below 1
+  // is a bug.
   fn chunks(self, size: Int) -> List<List<T>>
   // The position of the first item equal to `item`.
   fn index_of(self, item: T) -> Int?
@@ -1904,12 +1916,25 @@ builtin type Task<T> {
 // Inside the block the value is used and changed like a variable, fields
 // and all (`s.todos.append(x)`); the lock is released at the end of the
 // block, even on an error. A lock directly inside another is an error.
+//
+// Readers that only look use `read()`: they run at the same time, and
+// `v` can't be changed (like a `let`):
+//
+//   with c = cache.read() {
+//     let hit = c[key]             // many readers at once; a `lock()`
+//   }                              // waits for them, and they for it
+//
+// A waiting `lock()` holds back new readers, and the readers that waited
+// during a `lock()` go before the next one: neither side starves.
 builtin type Shared<T> {
+  // for changing the value: one task at a time
   fn lock(self) -> Locked<T>
+  // for reading it: readers run at the same time
+  fn read(self) -> Locked<T>
 }
 
-// What `lock()` gives: only for `with v = s.lock() { }`, where `v` is the
-// value itself.
+// What `lock()` and `read()` give: only for `with v = s.lock() { }`, where
+// `v` is the value itself.
 builtin type Locked<T> {
 }
 

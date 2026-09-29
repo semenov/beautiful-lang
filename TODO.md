@@ -29,7 +29,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         `or`, `with` captured by an escaping lambda, Shared-in-Shared,
         Duration ordered, newtypes ordered, `is` crash, `plumb test` for
         the project, hints, docs (div, Decimal, deadlocks, background jobs)
-  - [ ] runtime/stdlib: string index cache, `Shared.read()`, strict
+  - [x] runtime/stdlib: string index cache, `Shared.read()`, strict
         number parsing, duplicate JSON keys, regex groups[0] + literal
         check, `chunks(0)`, in-place `s = "${s}..."`
   - [ ] README: "Choices that surprise people"
@@ -41,6 +41,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       invalid bytes become U+FFFD on the way in; `Bytes.text()` strict,
       `Bytes.text_lossy()`; HTTP `text()` can't fail
 - [ ] `process.Output` as bytes (binary output of a command gets U+FFFD)
+- [ ] runtime: a text allocated big (>= 1 MB, mapped) and then shortened
+      below that (lt_text_quote, other `r->len = w` sites) is freed with
+      free() by its length: a crash. Free by the allocated size, or copy
+      when shortening that much
 - [x] **A typical backend on one core in Docker**, Plumb vs Go
       (benchmarks/backend) (Vlad, 2026-09-29)
 - [ ] **Vlad's decisions of 2026-09-29** (details in HANDOFF.md):

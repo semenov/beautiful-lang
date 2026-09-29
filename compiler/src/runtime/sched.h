@@ -142,6 +142,7 @@ typedef struct lt_task {
     void *txs[4];                          // db connections it has a transaction on (db.h)
     int ntxs;
     int deep;                              // its stack was opened past the top part
+    int worker;                            // the worker running it (an index)
     char result[] __attribute__((aligned(16)));
 } lt_task;
 
@@ -757,6 +758,7 @@ static void lt_worker_loop(void) {
         lt_task *t = lt_next_task();
         if (!t) return;
         lt_cur = t;
+        t->worker = (int)(lt_self - lt_ws);
         __atomic_store_n(&t->state, LT_RUNNING, __ATOMIC_RELAXED);
         lt_to_task(t);
         lt_cur = NULL;
@@ -1114,49 +1116,174 @@ static lt_err lt_scope_end(lt_scope *s, bool cancel) {
 
 // ---------------------------------------------------------------- shared state
 
+// A readers-writer lock. `with v = s.lock()` is the writer: alone.
+// `with v = s.read()` is a reader: readers run at the same time.
+//
+// Readers count themselves in per-worker slots (each on its own cache line),
+// so readers on different cores don't touch a common word. A writer raises
+// `wflag` (holding or waiting), which sends new readers to the slow path,
+// and waits until the slots add up to zero. Both sides use sequentially
+// consistent operations: a reader adds itself and then reads `wflag`; a
+// writer sets `wflag` and then reads the slots, so at least one of them
+// sees the other.
+//
+// Fairness: a waiting writer stops new readers; when a writer is done, the
+// readers that waited meanwhile all go in before the next writer. Neither
+// side can starve the other.
+#define LT_RW_SLOTS 16
+typedef struct { int64_t n; char pad[56]; } lt_rw_slot;
+
 typedef struct lt_lock {
     lt_spin spin;
-    int locked;
-    lt_waitq q;
+    int locked;         // a writer holds it
+    int writers;        // writers holding or waiting (under spin)
+    int wflag;          // writers != 0, read without the spin lock
+    lt_waitq q;         // writers waiting
+    lt_waitq rq;        // readers waiting
+    lt_rw_slot *slots;  // reader counts; made by the first reader
 } lt_lock;
 
-static void lt_lock_held(lt_lock *l, bool add) {
-    lt_task *t = lt_current();
+// the locks a task holds are remembered so a panic that ends only its
+// request can release them; a read lock is marked in the pointer's low bit
+static void lt_lock_held_by(lt_task *t, lt_lock *l, bool add, bool read) {
     if (!t) return;
+    lt_lock *k = (lt_lock *)((uintptr_t)l | (read ? 1 : 0));
     if (add) {
-        if (t->nheld < 8) t->held[t->nheld++] = l;
+        if (t->nheld < 8) t->held[t->nheld++] = k;
     } else {
         for (int i = t->nheld - 1; i >= 0; i--)
-            if (t->held[i] == l) {
+            if (t->held[i] == k) {
                 t->held[i] = t->held[--t->nheld];
                 break;
             }
     }
 }
+static void lt_lock_held(lt_lock *l, bool add, bool read) { lt_lock_held_by(lt_current(), l, add, read); }
 
 static void lt_lock_init(lt_lock *l) {
     memset(l, 0, sizeof *l);
     l->q.lock = &l->spin;
+    l->rq.lock = &l->spin;
 }
+static void lt_lock_free(lt_lock *l) {
+    if (l->slots) free(l->slots);
+}
+
+static int64_t lt_rw_readers(lt_lock *l) {
+    lt_rw_slot *s = __atomic_load_n(&l->slots, __ATOMIC_RELAXED); // (callers hold the spin lock)
+    if (!s) return 0;
+    int64_t n = 0;
+    for (int i = 0; i < LT_RW_SLOTS; i++) n += __atomic_load_n(&s[i].n, __ATOMIC_SEQ_CST);
+    return n;
+}
+// The slots are made by the first reader, under the spin lock. Until then
+// no reader has come, and writers skip `wflag` (and its fence) altogether;
+// making them sets `wflag` for the writers there are.
+__attribute__((noinline)) static lt_rw_slot *lt_rw_make_slots(lt_lock *l) {
+    lt_spin_lock(&l->spin);
+    lt_rw_slot *s = l->slots;
+    if (!s) {
+        if (posix_memalign((void **)&s, 64, sizeof(lt_rw_slot) * LT_RW_SLOTS) != 0) lt_oom();
+        memset(s, 0, sizeof(lt_rw_slot) * LT_RW_SLOTS);
+        __atomic_store_n(&l->wflag, l->writers ? 1 : 0, __ATOMIC_SEQ_CST);
+        __atomic_store_n(&l->slots, s, __ATOMIC_SEQ_CST);
+    }
+    lt_spin_unlock(&l->spin);
+    return s;
+}
+// the slot of the worker running task `t` (a task that moved to another
+// worker meanwhile leaves from another slot: only the sum counts)
+LT_INLINE lt_rw_slot *lt_rw_slot_of(lt_lock *l, lt_task *t) {
+    lt_rw_slot *s = __atomic_load_n(&l->slots, __ATOMIC_ACQUIRE);
+    if (LT_UNLIKELY(!s)) s = lt_rw_make_slots(l);
+    return &s[t ? (unsigned)t->worker % LT_RW_SLOTS : 0];
+}
+
+// (spin held) the lock is free of readers and writers: give it to the
+// first waiting writer
+static lt_task *lt_rw_hand_to_writer(lt_lock *l) {
+    if (!l->q.head || l->locked || lt_rw_readers(l) != 0) return NULL;
+    lt_task *t = lt_wq_pop(&l->q);
+    if (t) l->locked = 1;
+    return t;
+}
+
+// (spin held) a writer is done and readers waited: they all go in, counted
+// in here (kept out of line: the common path stays small)
+__attribute__((noinline)) static void lt_rw_admit_readers(lt_lock *l) {
+    int64_t n = 0;
+    for (lt_task *t = l->rq.head; t; t = t->next) n++;
+    __atomic_fetch_add(&lt_rw_slot_of(l, NULL)->n, n, __ATOMIC_SEQ_CST);
+    lt_wake_all(&l->rq);
+}
+
 static void lt_lock_acquire(lt_lock *l) {
     lt_spin_lock(&l->spin);
-    if (!l->locked) {
+    l->writers++;
+    if (l->slots) __atomic_store_n(&l->wflag, 1, __ATOMIC_SEQ_CST);
+    if (!l->locked && lt_rw_readers(l) == 0) {
         l->locked = 1;
         lt_spin_unlock(&l->spin);
-        lt_lock_held(l, true);
+        lt_lock_held(l, true, false);
         return;
     }
-    // the releaser hands the lock over directly
+    // the last reader out, or the writer before, hands the lock over
     lt_park_on(&l->q, false);
-    lt_lock_held(l, true);
+    lt_lock_held(l, true, false);
 }
 static void lt_lock_release(lt_lock *l) {
-    lt_lock_held(l, false);
+    lt_lock_held(l, false, false);
     lt_spin_lock(&l->spin);
-    lt_task *t = lt_wq_pop(&l->q);
-    if (!t) l->locked = 0;
+    l->writers--;
+    l->locked = 0;
+    lt_task *w = NULL;
+    if (l->rq.head) lt_rw_admit_readers(l); // the readers that waited go first
+    else w = lt_rw_hand_to_writer(l);
+    if (l->writers == 0 && l->slots) __atomic_store_n(&l->wflag, 0, __ATOMIC_RELEASE);
     lt_spin_unlock(&l->spin);
-    if (t) lt_ready(t);
+    if (w) lt_ready(w);
+}
+
+// a reader leaves: if a writer waits and this was the last reader, the
+// writer gets the lock
+static void lt_rw_read_leave(lt_lock *l, lt_task *t) {
+    __atomic_fetch_sub(&lt_rw_slot_of(l, t)->n, 1, __ATOMIC_SEQ_CST);
+    if (!__atomic_load_n(&l->wflag, __ATOMIC_SEQ_CST)) return;
+    lt_spin_lock(&l->spin);
+    lt_task *w = lt_rw_hand_to_writer(l);
+    lt_spin_unlock(&l->spin);
+    if (w) lt_ready(w);
+}
+
+static void lt_lock_acquire_read(lt_lock *l) {
+    lt_task *t = lt_current();
+    for (;;) {
+        __atomic_fetch_add(&lt_rw_slot_of(l, t)->n, 1, __ATOMIC_SEQ_CST);
+        if (LT_LIKELY(!__atomic_load_n(&l->wflag, __ATOMIC_SEQ_CST))) break;
+        // a writer holds the lock or waits for it: step back and wait
+        lt_rw_read_leave(l, t);
+        lt_spin_lock(&l->spin);
+        if (!l->writers) {
+            lt_spin_unlock(&l->spin);
+            continue;
+        }
+        // the writer's release counts this reader in and wakes it
+        lt_park_on(&l->rq, false);
+        t = lt_current();
+        break;
+    }
+    lt_lock_held_by(t, l, true, true);
+}
+static void lt_lock_release_read(lt_lock *l) {
+    lt_task *t = lt_current();
+    lt_lock_held_by(t, l, false, true);
+    lt_rw_read_leave(l, t);
+}
+
+// after a panic that ends only a request: whatever the task still holds
+static void lt_lock_release_held(lt_lock *k) {
+    if ((uintptr_t)k & 1) lt_lock_release_read((lt_lock *)((uintptr_t)k & ~(uintptr_t)1));
+    else lt_lock_release(k);
 }
 
 // ---------------------------------------------------------------- channels
@@ -1449,7 +1576,7 @@ static void lt_task_panic_hook(const char *msg, int line) {
     fflush(stdout);
     if (line > 0) fprintf(stderr, "panic: %s\n  at %s:%d\n", msg, lt_file, line);
     else fprintf(stderr, "panic: %s\n", msg);
-    while (t->nheld > 0) lt_lock_release(t->held[t->nheld - 1]);
+    while (t->nheld > 0) lt_lock_release_held(t->held[t->nheld - 1]);
     if (t->ntxs && lt_tx_abort_hook) lt_tx_abort_hook(t);
 #if defined(__has_feature)
 #if __has_feature(address_sanitizer)

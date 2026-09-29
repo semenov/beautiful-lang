@@ -258,7 +258,8 @@ let n = if args.length > 0 { try args[0].to_int() } else { usage("no count") }
   porting code that handles negative numbers).
 - Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`;
   `0xFF`, `0b1010`, `0o755`, `1_000_000`.
-- String to numbers: `try text.to_int()`, `try text.to_float()`.
+- String to numbers: `try text.to_int()`, `try text.to_float()`. They are
+  strict: `" 42"` (trim first), `"1_000"`, `"nan"`, `"inf"` and `"1e400"` are errors.
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
   `+ -` are exact, `*` is exact up to 18 digits after the point (then it
   rounds half up), and a result past 18 significant digits stops the
@@ -311,8 +312,11 @@ let pages = [try a.wait(), try b.wait()]
 let sizes = try urls.parallel_map(limit: 8, transform: u => try fetch(u).length)
 
 let counter = Shared<Int>(0)              // shared state: only through a lock
-with n = counter.lock() {
+with n = counter.lock() {                 // one task at a time: may change it
   n += 1
+}
+with n = counter.read() {                 // readers at the same time: n can't
+  print("${n}")                           // change (like a `let`)
 }
 let jobs = Channel<String>(capacity: 100)   // passing data between tasks
 ```
@@ -369,8 +373,8 @@ Sending to many listeners (chat, live updates over WebSockets): one
 ```
 let listeners = Shared<Map<Int, Channel<String>>>({})
 // a listener: register, then read its channel until it's closed
-// the sender:
-with ls = listeners.lock() {
+// the sender (only reads the map: senders don't wait for each other):
+with ls = listeners.read() {
   for entry in ls {
     let _ = entry.value.try_send(text)   // false: that listener is full
   }
@@ -384,7 +388,8 @@ let user = try json.decode<User>(body)          // missing fields: an error
                                                 // naming the field
 let text = json.encode(user)
                                                 // `createdAt` in JSON fills
-                                                // `created_at` (case, _ and - ignored)
+                                                // `created_at` (case, _ and - ignored);
+                                                // a key twice, or `name` and `NAME`: an error
 let api_body = json.encode_camel(user)          // keys as createdAt
 let out = json.encode_with(user, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true))
                                                 // created-at; fields that are none left out

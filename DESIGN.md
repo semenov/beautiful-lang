@@ -434,6 +434,11 @@ used result is always a mutation or an action. The rule also catches the
   reported at runtime only when every task waits and nothing else (no
   timer, no socket) could wake one; in a server, a lock cycle between two
   requests just hangs them, so keep one lock at a time.
+  Readers use `with v = s.read() { ... }`: `v` can't be changed, and
+  readers run at the same time (a readers-writer lock; a read-mostly cache
+  is the most common shared state in a backend). Readers count themselves
+  per core, so they don't contend on one word; a waiting writer holds back
+  new readers, and the readers that waited go before the next writer.
 - **Processes:** `process.run("git", ["log", "-n", "5"])` takes a list of
   arguments, not a shell string.
 - **Time:** `Instant` and `Date` are different types. Time zones are always
@@ -468,7 +473,10 @@ used result is always a mutation or an action. The rule also catches the
   rule for invalid ones; Rust, Swift, Java and JS guarantee valid text.
 - **JSON keys in any case:** decoding matches a field by its exact name,
   then ignoring case and `_`/`-` (`createdAt` fills `created_at`), so
-  camelCase APIs need no options; `json.encode_camel` writes them.
+  camelCase APIs need no options; `json.encode_camel` writes them. A key
+  written twice, or two keys that would fill the same field (`name` and
+  `NAME`), is an error: parsers disagree on which one wins (first or
+  last), and a proxy and a service that disagree are a security hole.
 - **Templates are Handlebars-style** (`{{name}}`, `{{#each}}`, `{{#if}}`,
   partials): the most widely known template language that isn't a
   programming language itself. Values are HTML-escaped in HTML templates,
@@ -562,8 +570,12 @@ wrong thing; Vlad chose (see `research/critique-response.md`):
   (`max(a, or: b)`).
 - **No nested functions**: functions live at the top level; the error for
   `fn` inside a function shows a typed lambda for small local helpers.
-- **Ranges** stay only in `for`, with `.reversed()` and `.step(n)`:
-  `for i in (0..<n).reversed()`.
+- **Ranges stay as they are** (only in `for`, counting up by one). Vlad
+  first chose `.reversed()`/`.step(n)` on them, then dropped it: that
+  borrows Rust's and Swift's syntax, where ranges are values, without
+  making them values (`let r = 0..<n` would still be an error). Counting
+  down is rare; it's a `while` loop, as in Zig. Walking a list backwards
+  is `for x in xs.reversed()`.
 
 ## Open questions
 

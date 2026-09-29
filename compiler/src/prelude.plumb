@@ -127,9 +127,13 @@ builtin type String {
   fn repeat(self, times: Int) -> String
   fn pad_start(self, width: Int, fill: String) -> String
   fn pad_end(self, width: Int, fill: String) -> String
+  // "42", "-7": a sign and digits only. Spaces around it (trim first), `_`
+  // and numbers too big for an Int are errors.
   fn to_int(self) throws -> Int
+  // "1.5", "-2e3", ".5": as in JSON. Spaces, `_`, "nan", "inf" and numbers
+  // too big for a Float ("1e400") are errors.
   fn to_float(self) throws -> Float
-  // "19.99" -> 19.99 exactly
+  // "19.99" -> 19.99 exactly; strict like to_float
   fn to_decimal(self) throws -> Decimal
   fn to_string(self) -> String {
     return self
@@ -283,13 +287,23 @@ builtin type List<T> {
     }
     return out
   }
-  // In pieces of `size` (the last may be shorter): batches.
+  // In pieces of `size` (the last may be shorter): batches. A size below 1
+  // is a bug.
   fn chunks(self, size: Int) -> List<List<T>> {
+    if size < 1 {
+      panic("chunks: the size must be at least 1")
+    }
     var out: List<List<T>> = []
-    var i = 0
-    while i < self.length {
-      out.append(self.drop(i).take(size))
-      i += max(size, 1)
+    var piece: List<T> = []
+    for x in self {
+      piece.append(x)
+      if piece.length == size {
+        out.append(piece)
+        piece = []
+      }
+    }
+    if piece.length > 0 {
+      out.append(piece)
     }
     return out
   }
@@ -476,12 +490,25 @@ builtin type Task<T> {
 // Inside the block the value is used and changed like a variable, fields
 // and all (`s.todos.append(x)`); the lock is released at the end of the
 // block, even on an error. A lock directly inside another is an error.
+//
+// Readers that only look use `read()`: they run at the same time, and
+// `v` can't be changed (like a `let`):
+//
+//   with c = cache.read() {
+//     let hit = c[key]             // many readers at once; a `lock()`
+//   }                              // waits for them, and they for it
+//
+// A waiting `lock()` holds back new readers, and the readers that waited
+// during a `lock()` go before the next one: neither side starves.
 builtin type Shared<T> {
+  // for changing the value: one task at a time
   fn lock(self) -> Locked<T>
+  // for reading it: readers run at the same time
+  fn read(self) -> Locked<T>
 }
 
-// What `lock()` gives: only for `with v = s.lock() { }`, where `v` is the
-// value itself.
+// What `lock()` and `read()` give: only for `with v = s.lock() { }`, where
+// `v` is the value itself.
 builtin type Locked<T> {
 }
 

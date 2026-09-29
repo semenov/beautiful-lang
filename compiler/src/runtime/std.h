@@ -1261,6 +1261,9 @@ static lt_err lt_regex_translate(lt_text *p, char **out, int *icase) {
             case 'b': case 'B': case 'A': case 'z': case 'Z':
                 free(o);
                 return lt_make_failure(lt_text_cstr("regex: \\b and other anchors except ^ and $ aren't supported"));
+            case 'p': case 'P':
+                free(o);
+                return lt_make_failure(lt_text_cstr("regex: \\p{...} classes aren't supported"));
             default:
                 if (in_class) {
                     *w++ = n;
@@ -1370,11 +1373,7 @@ static bool lt_regex_at(lt_handle *h, lt_text *t, int64_t from, regmatch_t *pm) 
 }
 
 static int64_t lt_char_index(lt_text *t, int64_t byte) {
-    if (lt_text_ascii(t)) return byte < t->len ? byte : t->len;
-    int64_t n = 0;
-    for (int64_t i = 0; i < byte && i < t->len; i++)
-        if (((unsigned char)t->data[i] & 0xC0) != 0x80) n++;
-    return n;
+    return lt_text_char_index(t, byte);
 }
 
 static bool lt_regex_matches(lt_handle *h, lt_text *t) {

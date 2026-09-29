@@ -1,0 +1,33 @@
+// A panic in an HTTP handler inside `with v = s.read()` releases the read
+// lock: the next request can take the lock to change the value.
+import http
+import process
+import time
+
+fn main() throws {
+  let hits = Shared<List<Int>>([1, 2])
+  var router = http.Router()
+  router.get("/boom", req => {
+    with v = hits.read() {
+      print("${v[5]}")
+    }
+    http.text(200, "no")
+  })
+  router.get("/add", req => {
+    with v = hits.lock() {
+      v.append(3)
+    }
+    var shown = ""
+    with v = hits.read() {
+      shown = "${v}"
+    }
+    http.text(200, shown)
+  })
+  let _ = spawn http.serve(router, port: 8392)
+  try time.sleep(time.millis(200))
+  let a = try http.get("http://127.0.0.1:8392/boom")
+  print("boom: ${a.status}")
+  let b = try http.get("http://127.0.0.1:8392/add")
+  print("add: ${b.status} ${b.text()}")
+  process.exit(0)
+}

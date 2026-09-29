@@ -1,0 +1,9 @@
+// List.chunks: pieces of a size; a size below 1 is a bug that stops the
+// program ("chunks: the size must be at least 1"), so nothing after it prints.
+fn main() {
+  print("${[1, 2, 3, 4, 5].chunks(2)} ${[1, 2].chunks(5)} ${[1, 2].chunks(1)}")
+  let empty: List<Int> = []
+  print("${empty.chunks(3)}")
+  print("${[1, 2, 3].chunks(0)}")
+  print("not reached")
+}

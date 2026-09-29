@@ -28,7 +28,7 @@ struct Fb<'a> {
 
 #[derive(Clone)]
 enum Cleanup {
-    Unlock { shared: L, var: L, ty: Ty },
+    Unlock { shared: L, var: L, ty: Ty, read: bool },
     Scope(L),
     Close { res: L, close: FnId },
 }
@@ -381,8 +381,9 @@ impl<'a> Lowerer<'a> {
         for i in (depth..n).rev() {
             let c = self.fbr().cleanups[i].clone();
             match c {
-                Cleanup::Unlock { shared, var, ty } => {
-                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![ty]), vec![Op::Local(shared), Op::Local(var)]));
+                Cleanup::Unlock { shared, var, ty, read } => {
+                    let release = if read { "Shared.release_read" } else { "Shared.release" };
+                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic(release.into(), vec![ty]), vec![Op::Local(shared), Op::Local(var)]));
                 }
                 Cleanup::Scope(s) => {
                     if error {
@@ -576,6 +577,16 @@ impl<'a> Lowerer<'a> {
             }
             TStmt::Assign(place, e) => {
                 self.set_line(e.span);
+                // `x = "${x}..."`: append to x in place (when nothing else holds it)
+                if let TK::Interp(parts) = &e.kind {
+                    if parts.len() >= 2 && same_place(place, &parts[0]) {
+                        let ops: Vec<Op> = parts[1..].iter().map(|p| self.expr(p)).collect();
+                        let p = self.place(place, true);
+                        let callee = MCallee::Intrinsic("String.append_parts".into(), vec![Ty::Text]);
+                        self.emit(Stmt::MutCall { dst: None, err: None, place: p, callee, args: ops });
+                        return;
+                    }
+                }
                 let v = self.expr(e);
                 let root = self.fbr().map[&place.root];
                 if place.path.is_empty() && !self.fbr().f.locals[root].self_ptr {
@@ -610,25 +621,38 @@ impl<'a> Lowerer<'a> {
                 let v = self.expr(e);
                 self.throw(v);
             }
-            TStmt::WithLock { var, shared, body } => {
+            TStmt::WithLock { var, shared, body, read } => {
+                let (acquire, release) = if *read { ("Shared.acquire_read", "Shared.release_read") } else { ("Shared.acquire", "Shared.release") };
                 self.set_line(shared.span);
                 let sty = self.ty(&shared.ty);
                 let vty = match &sty {
                     Ty::Adt(_, a) => a[0].clone(),
                     _ => unreachable!(),
                 };
-                let sv = self.expr(shared);
-                let sl = self.new_local(sty.clone(), "shared");
-                self.emit(Stmt::Assign(sl, Rv::Use(sv)));
+                // a `Shared` in a variable that can't change is used as it is:
+                // no count up and down on every `with` (a word all tasks share)
+                let fixed = match &shared.kind {
+                    TK::Local(id) if !self.fbr().body_locals[*id].mutable => self.fbr().map.get(id).copied().filter(|l| !self.fbr().f.locals[*l].self_ptr),
+                    _ => None,
+                };
+                let sl = match fixed {
+                    Some(l) => l,
+                    None => {
+                        let sv = self.expr(shared);
+                        let sl = self.new_local(sty.clone(), "shared");
+                        self.emit(Stmt::Assign(sl, Rv::Use(sv)));
+                        sl
+                    }
+                };
                 let name = self.fbr().body_locals[*var].name.clone();
                 let x = self.new_local(vty.clone(), &name);
                 self.fb().map.insert(*var, x);
-                self.emit(Stmt::Assign(x, Rv::Call(MCallee::Intrinsic("Shared.acquire".into(), vec![vty.clone()]), vec![Op::Local(sl)])));
-                self.fb().cleanups.push(Cleanup::Unlock { shared: sl, var: x, ty: vty.clone() });
+                self.emit(Stmt::Assign(x, Rv::Call(MCallee::Intrinsic(acquire.into(), vec![vty.clone()]), vec![Op::Local(sl)])));
+                self.fb().cleanups.push(Cleanup::Unlock { shared: sl, var: x, ty: vty.clone(), read: *read });
                 self.block(body);
                 self.fb().cleanups.pop();
                 if !self.terminated() {
-                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![vty]), vec![Op::Local(sl), Op::Local(x)]));
+                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic(release.into(), vec![vty]), vec![Op::Local(sl), Op::Local(x)]));
                 }
             }
             TStmt::With { var, value, body, close } => {
@@ -1938,5 +1962,21 @@ pub fn intrinsic_name(prog: &Program, f: &FnDef) -> String {
         }
         None if f.module != 0 => format!("{}.{}", prog.module_names[f.module], f.name),
         None => f.name.clone(),
+    }
+}
+
+// Whether `e` reads the place `p`: the same local and the same fields.
+fn same_place(p: &TPlace, e: &TExpr) -> bool {
+    let mut fields = vec![];
+    let mut cur = e;
+    loop {
+        match &cur.kind {
+            TK::Field(inner, f) => {
+                fields.push(*f);
+                cur = inner;
+            }
+            TK::Local(id) => break *id == p.root && fields.len() == p.path.len() && fields.iter().rev().zip(&p.path).all(|(f, el)| matches!(el, PlaceElem::Field(g) if g == f)),
+            _ => break false,
+        }
     }
 }

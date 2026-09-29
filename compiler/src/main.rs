@@ -11,6 +11,7 @@ mod parser;
 mod split;
 mod project;
 mod rc;
+mod regex_check;
 mod types;
 
 use diag::Sources;

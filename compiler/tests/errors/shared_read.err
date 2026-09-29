@@ -1,0 +1,25 @@
+error: can't change `v`: `read()` is for reading
+  --> shared_read.plumb:10:5
+   |
+10 |     v.count += 1
+   |     ^
+   = help: to change the value, take the lock: `with v = s.lock() { ... }`
+error: can't change `v`: `read()` is for reading
+  --> shared_read.plumb:11:5
+   |
+11 |     v.names.append("x")
+   |     ^
+   = help: to change the value, take the lock: `with v = s.lock() { ... }`
+error: `r` is never used
+  --> shared_read.plumb:14:7
+   |
+14 |   let r = s.read()
+   |       ^
+   = help: remove it, or write `let _ = ...` to drop a value on purpose
+error: a lock is taken with `with`
+  --> shared_read.plumb:14:11
+   |
+14 |   let r = s.read()
+   |           ^^^^^^^^
+   = help: write `with r = ... { ... }`: the lock is released at the end of the block
+4 error(s)

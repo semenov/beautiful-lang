@@ -449,6 +449,11 @@ typedef struct lt_text {
     // characters; -1 until counted (then chars == len means ASCII, where a
     // character's index is its byte offset)
     int64_t chars;
+    // a hint for walking by character: the last (character index, byte
+    // offset) pair found, as (index << 32 | offset); 0 (the start) until
+    // then. One word, read and written with relaxed atomics, so threads
+    // sharing the text always see a pair that belongs together.
+    uint64_t at;
     char data[];
 } lt_text;
 
@@ -533,6 +538,7 @@ static lt_text *lt_text_new(int64_t len) {
     t->rc = 1;
     t->len = len;
     t->chars = -1;
+    t->at = 0;
     t->data[len] = 0;
     return t;
 }
@@ -547,7 +553,7 @@ static lt_text *lt_text_cstr(const char *s) {
     return lt_text_from(s, (int64_t)strlen(s));
 }
 
-static struct { int64_t rc; int64_t len; int64_t chars; char data[1]; } lt_empty_text_obj = { -1, 0, 0, "" };
+static struct { int64_t rc; int64_t len; int64_t chars; uint64_t at; char data[1]; } lt_empty_text_obj = { -1, 0, 0, 0, "" };
 #define LT_EMPTY_TEXT ((lt_text *)&lt_empty_text_obj)
 
 LT_INLINE bool lt_text_eq(lt_text *a, lt_text *b) {
@@ -792,6 +798,66 @@ static lt_text *lt_text_concat_n(int n, lt_text **parts) {
     return t;
 }
 
+#if defined(__APPLE__)
+#include <malloc/malloc.h>
+#define LT_USABLE(p) malloc_size(p)
+#else
+#include <malloc.h>
+#define LT_USABLE(p) malloc_usable_size(p)
+#endif
+
+// the bytes the block of text `t` has room for (`size`: what its length needs)
+static size_t lt_text_room(lt_text *t, size_t size) {
+#ifndef LT_DEBUG_ALLOC
+    size_t c = (size + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
+    if (c < LT_CLASSES) return (c ? c : 1) * LT_CLASS_BYTES;
+    if (size >= LT_BIG) return ((lt_big_hdr *)((char *)t - sizeof(lt_big_hdr)))->mapped - sizeof(lt_big_hdr);
+#endif
+    return LT_USABLE(t);
+}
+
+// `x = "${x}..."`: appends the parts to the text in *tp. A text nothing else
+// holds grows in place, with room to spare (as a list does), so building
+// text in a loop is linear; a shared one is copied.
+static void lt_text_append_n(lt_text **tp, int n, lt_text **parts) {
+    lt_text *t = *tp;
+    int64_t add = 0;
+    bool alias = false;
+    for (int i = 0; i < n; i++) {
+        add += parts[i]->len;
+        alias |= parts[i] == t;
+    }
+    if (!LT_UNIQUE(t) || alias) {
+        lt_text *all[n + 1];
+        all[0] = t;
+        for (int i = 0; i < n; i++) all[i + 1] = parts[i];
+        *tp = lt_text_concat_n(n + 1, all);
+        lt_text_drop(t);
+        return;
+    }
+    if (add == 0) return;
+    size_t old = LT_TEXT_SIZE(t->len), need = LT_TEXT_SIZE(t->len + add);
+    if (need > lt_text_room(t, old)) {
+        size_t want = need;
+        // past the small size classes, grow by half again, short of a big
+        // block (those keep room themselves; see lt_big_realloc)
+        if (need >= LT_CLASSES * LT_CLASS_BYTES && need < LT_BIG) {
+            want = need + need / 2;
+            if (want >= LT_BIG) want = LT_BIG - 1;
+        }
+        t = (lt_text *)lt_realloc(t, old, want);
+    }
+    char *w = t->data + t->len;
+    for (int i = 0; i < n; i++) {
+        memcpy(w, parts[i]->data, (size_t)parts[i]->len);
+        w += parts[i]->len;
+    }
+    t->len += add;
+    *w = 0;
+    t->chars = -1; // (the position hint in `at` is still right)
+    *tp = t;
+}
+
 static int64_t lt_text_length(lt_text *t) {
     int64_t c = __atomic_load_n(&t->chars, __ATOMIC_RELAXED);
     if (c >= 0) return c;
@@ -807,18 +873,63 @@ static int64_t lt_text_length(lt_text *t) {
 // whether characters are bytes (ASCII): then indexes are byte offsets
 static inline bool lt_text_ascii(lt_text *t) { return lt_text_length(t) == t->len; }
 
-// byte offset of the character with index `ci` (clamped to the end)
+#define LT_IS_LEAD(c) (((unsigned char)(c) & 0xC0) != 0x80)
+
+LT_INLINE void lt_text_at_load(lt_text *t, int64_t *ci, int64_t *bi) {
+    uint64_t at = __atomic_load_n(&t->at, __ATOMIC_RELAXED);
+    *ci = (int64_t)(at >> 32);
+    *bi = (int64_t)(at & 0xFFFFFFFFu);
+}
+LT_INLINE void lt_text_at_store(lt_text *t, int64_t ci, int64_t bi) {
+    if (bi > 0xFFFFFFFFll || ci > 0xFFFFFFFFll) return; // texts over 4 GB: no hint
+    __atomic_store_n(&t->at, ((uint64_t)ci << 32) | (uint64_t)bi, __ATOMIC_RELAXED);
+}
+
+// byte offset of the character with index `ci` (clamped to the end).
+// Walks from the remembered position (forward or back) or from the start,
+// whichever is nearer, so a loop over the characters is linear.
 static int64_t lt_text_char_offset(lt_text *t, int64_t ci) {
     if (ci <= 0) return 0;
     if (lt_text_ascii(t)) return ci < t->len ? ci : t->len;
-    int64_t n = 0;
-    for (int64_t i = 0; i < t->len; i++) {
-        if (((unsigned char)t->data[i] & 0xC0) != 0x80) {
-            if (n == ci) return i;
-            n++;
+    if (ci >= lt_text_length(t)) return t->len;
+    int64_t c, b;
+    lt_text_at_load(t, &c, &b);
+    if (ci < c && ci < c - ci) c = b = 0; // nearer the start than the hint
+    const char *d = t->data;
+    if (ci >= c) {
+        while (c < ci) { // forward: step over one character
+            b++;
+            while (b < t->len && !LT_IS_LEAD(d[b])) b++;
+            c++;
+        }
+    } else {
+        while (c > ci) { // back
+            b--;
+            while (b > 0 && !LT_IS_LEAD(d[b])) b--;
+            c--;
         }
     }
-    return t->len;
+    lt_text_at_store(t, ci, b);
+    return b;
+}
+
+// the character index of byte offset `byte` (a character's first byte, or
+// the end); uses the same hint
+static int64_t lt_text_char_index(lt_text *t, int64_t byte) {
+    if (byte <= 0) return 0;
+    if (byte >= t->len) return lt_text_length(t);
+    if (lt_text_ascii(t)) return byte;
+    int64_t c, b;
+    lt_text_at_load(t, &c, &b);
+    if (byte < b && byte < b - byte) c = b = 0;
+    const char *d = t->data;
+    if (byte >= b) {
+        for (; b < byte; b++) c += LT_IS_LEAD(d[b]);
+    } else {
+        for (b--; b >= byte; b--) c -= LT_IS_LEAD(d[b]);
+    }
+    if (LT_IS_LEAD(d[byte])) lt_text_at_store(t, c, byte); // only a valid pair
+    return c;
 }
 
 static lt_text *lt_text_slice(lt_text *t, int64_t from, int64_t to) {
@@ -1007,61 +1118,86 @@ static lt_text *lt_text_quote(lt_text *t) {
     return r;
 }
 
+// `"<t>" is not <what>` and, if there is one, `: <why>` (a long text
+// shortened to its first 100 bytes and "...")
+static lt_err lt_number_error(lt_text *t, const char *what, const char *why) {
+    int64_t cut = t->len;
+    if (cut > 100) {
+        cut = 100;
+        while (cut > 0 && !LT_IS_LEAD(t->data[cut])) cut--;
+    }
+    lt_text *shown = lt_text_from(t->data, cut);
+    lt_text *q = lt_text_quote(shown);
+    lt_text_drop(shown);
+    char buf[160];
+    snprintf(buf, sizeof buf, "%s is not %s%s%s", cut < t->len ? "..." : "", what, why ? ": " : "", why ? why : "");
+    lt_text *suffix = lt_text_cstr(buf);
+    lt_text *parts[2] = { q, suffix };
+    lt_text *msg = lt_text_concat_n(2, parts);
+    lt_text_drop(q);
+    lt_text_drop(suffix);
+    return lt_make_failure(msg);
+}
+
+// what's wrong with number text beyond its digits: spaces around it, `_`
+static const char *lt_number_text_problem(lt_text *t) {
+    if (t->len == 0) return "it's empty";
+    if (lt_is_space(t->data[0]) || lt_is_space(t->data[t->len - 1])) return "it has spaces around it (trim it first)";
+    if (memchr(t->data, '_', (size_t)t->len)) return "`_` isn't allowed in number text";
+    return NULL;
+}
+
+// strict: an optional sign and digits, nothing else
 static lt_err lt_text_to_int(lt_text *t, int64_t *out) {
-    int64_t a = 0, b = t->len;
-    while (a < b && lt_is_space(t->data[a])) a++;
-    while (b > a && lt_is_space(t->data[b - 1])) b--;
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a whole number", why);
+    int64_t i = 0, b = t->len;
     bool neg = false;
-    int64_t i = a;
-    if (i < b && (t->data[i] == '-' || t->data[i] == '+')) {
+    if (t->data[i] == '-' || t->data[i] == '+') {
         neg = t->data[i] == '-';
         i++;
     }
-    bool ok = i < b;
+    if (i == b) return lt_number_error(t, "a whole number", NULL);
     uint64_t v = 0;
-    for (; i < b && ok; i++) {
+    bool big = false;
+    for (; i < b; i++) {
         char c = t->data[i];
-        if (c == '_' && i > a) continue;
-        if (c < '0' || c > '9') {
-            ok = false;
-            break;
-        }
-        if (v > (UINT64_MAX - 9) / 10) {
-            ok = false;
-            break;
-        }
-        v = v * 10 + (uint64_t)(c - '0');
+        if (c < '0' || c > '9') return lt_number_error(t, "a whole number", NULL);
+        if (v > (UINT64_MAX - 9) / 10) big = true;
+        else v = v * 10 + (uint64_t)(c - '0');
     }
-    if (ok && (neg ? v > (uint64_t)INT64_MAX + 1 : v > (uint64_t)INT64_MAX)) ok = false;
-    if (!ok) {
-        lt_text *q = lt_text_quote(t);
-        lt_text *suffix = lt_text_cstr(" is not a whole number");
-        lt_text *parts[2] = { q, suffix };
-        lt_text *msg = lt_text_concat_n(2, parts);
-        lt_text_drop(q);
-        lt_text_drop(suffix);
-        return lt_make_failure(msg);
-    }
+    if (big || (neg ? v > (uint64_t)INT64_MAX + 1 : v > (uint64_t)INT64_MAX))
+        return lt_number_error(t, "a whole number", "it's too big for an Int");
     *out = neg ? (int64_t)(0 - v) : (int64_t)v;
     return (lt_err){ 0 };
 }
 
+// strict: [sign] digits [. digits] [e [sign] digits], as in JSON (and ".5",
+// "5."); no NaN, infinity or hexadecimal, and not so big it's infinite
 static lt_err lt_text_to_float(lt_text *t, double *out) {
-    char *end = NULL;
-    lt_text *tr = lt_text_trim(t);
-    errno = 0;
-    double v = tr->len ? strtod(tr->data, &end) : 0;
-    bool ok = tr->len > 0 && end == tr->data + tr->len;
-    lt_text_drop(tr);
-    if (!ok) {
-        lt_text *q = lt_text_quote(t);
-        lt_text *suffix = lt_text_cstr(" is not a number");
-        lt_text *parts[2] = { q, suffix };
-        lt_text *msg = lt_text_concat_n(2, parts);
-        lt_text_drop(q);
-        lt_text_drop(suffix);
-        return lt_make_failure(msg);
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a number", why);
+    const char *d = t->data;
+    int64_t i = 0, n = t->len, digits = 0;
+    if (d[i] == '-' || d[i] == '+') i++;
+    if (i < n && (d[i] == 'n' || d[i] == 'N' || d[i] == 'i' || d[i] == 'I'))
+        return lt_number_error(t, "a number", "NaN and infinity aren't accepted");
+    while (i < n && d[i] >= '0' && d[i] <= '9') i++, digits++;
+    if (i < n && d[i] == '.') {
+        i++;
+        while (i < n && d[i] >= '0' && d[i] <= '9') i++, digits++;
     }
+    bool ok = digits > 0;
+    if (ok && i < n && (d[i] == 'e' || d[i] == 'E')) {
+        i++;
+        if (i < n && (d[i] == '-' || d[i] == '+')) i++;
+        int64_t ed = 0;
+        while (i < n && d[i] >= '0' && d[i] <= '9') i++, ed++;
+        ok = ed > 0;
+    }
+    if (!ok || i != n) return lt_number_error(t, "a number", NULL);
+    double v = strtod(d, NULL);
+    if (isinf(v)) return lt_number_error(t, "a number", "it's too big for a Float");
     *out = v;
     return (lt_err){ 0 };
 }
@@ -1735,11 +1871,9 @@ static lt_decimal lt_decimal_lit(const char *s) {
 }
 
 static lt_err lt_text_to_decimal(lt_text *t, lt_decimal *out) {
-    const char *s = t->data;
-    int64_t n = t->len;
-    while (n > 0 && (*s == ' ' || *s == '\t')) s++, n--;
-    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) n--;
-    if (!lt_decimal_parse(s, n, out)) {
+    const char *why = lt_number_text_problem(t);
+    if (why) return lt_number_error(t, "a decimal number", why);
+    if (!lt_decimal_parse(t->data, t->len, out)) {
         char buf[160];
         snprintf(buf, sizeof buf, "\"%.*s\" is not a decimal number (like 19.99)", (int)(t->len > 100 ? 100 : t->len), t->data);
         return lt_make_failure(lt_text_cstr(buf));
@@ -1770,11 +1904,7 @@ static int64_t lt_text_find(lt_text *t, lt_text *part, int64_t from) {
     if (start > t->len) return -1;
     const char *hit = lt_find(t->data + start, t->len - start, part->data, part->len);
     if (!hit) return -1;
-    if (lt_text_ascii(t)) return hit - t->data;
-    int64_t n = 0;
-    for (const char *p = t->data; p < hit; p++)
-        if (((unsigned char)*p & 0xC0) != 0x80) n++;
-    return n;
+    return lt_text_char_index(t, hit - t->data);
 }
 
 // the character index of the last `part`, or -1
@@ -1782,11 +1912,7 @@ static int64_t lt_text_rfind(lt_text *t, lt_text *part) {
     if (part->len > t->len) return -1;
     for (int64_t i = t->len - part->len; i >= 0; i--) {
         if (memcmp(t->data + i, part->data, (size_t)part->len) == 0) {
-            if (lt_text_ascii(t)) return i;
-            int64_t n = 0;
-            for (int64_t j = 0; j < i; j++)
-                if (((unsigned char)t->data[j] & 0xC0) != 0x80) n++;
-            return n;
+            return lt_text_char_index(t, i);
         }
     }
     return -1;

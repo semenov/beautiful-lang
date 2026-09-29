@@ -433,7 +433,7 @@ impl<'a> CGen<'a> {
         }
         let i = self.lits.len();
         self.lits.insert(s.to_string(), i);
-        let _ = writeln!(self.lit_defs, "static struct {{ int64_t rc; int64_t len; int64_t chars; char data[{}]; }} lit{} = {{ -1, {}, {}, {} }};", s.len() + 1, i, s.len(), s.chars().count(), c_str(s));
+        let _ = writeln!(self.lit_defs, "static struct {{ int64_t rc; int64_t len; int64_t chars; uint64_t at; char data[{}]; }} lit{} = {{ -1, {}, {}, 0, {} }};", s.len() + 1, i, s.len(), s.chars().count(), c_str(s));
         format!("((lt_text*)&lit{})", i)
     }
 
@@ -886,7 +886,7 @@ impl<'a> CGen<'a> {
                 let de = self.drop_(e, "x->v");
                 let z = self.zero(e);
                 let _ = writeln!(self.helper_types, "struct {c}_s {{ int64_t rc; lt_lock lock; {ec} v; }};", c = c, ec = ec);
-                let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {de} free(x); }}\nstatic {c} {c}_new({ec} v) {{ {c} x = ({c})calloc(1, sizeof(struct {c}_s)); x->rc = 1; lt_lock_init(&x->lock); x->v = v; return x; }}\nstatic {ec} {c}_acquire({c} x) {{ lt_lock_acquire(&x->lock); {ec} v = x->v; x->v = {z}; return v; }}\nstatic void {c}_release({c} x, {ec} v) {{ x->v = v; lt_lock_release(&x->lock); }}", c = c, ec = ec, de = de, z = z);
+                let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {de} lt_lock_free(&x->lock); free(x); }}\nstatic {c} {c}_new({ec} v) {{ {c} x = ({c})calloc(1, sizeof(struct {c}_s)); x->rc = 1; lt_lock_init(&x->lock); x->v = v; return x; }}\nstatic {ec} {c}_acquire({c} x) {{ lt_lock_acquire(&x->lock); {ec} v = x->v; x->v = {z}; return v; }}\nstatic void {c}_release({c} x, {ec} v) {{ x->v = v; lt_lock_release(&x->lock); }}\nstatic {ec} {c}_acquire_read({c} x) {{ lt_lock_acquire_read(&x->lock); return x->v; }}\nstatic void {c}_release_read({c} x, {ec} v) {{ (void)v; lt_lock_release_read(&x->lock); }}", c = c, ec = ec, de = de, z = z);
             }
             Kind::Record { boxed: true, fields, .. } => self.gen_box(id, fields.iter().map(|f| f.1).collect(), None),
             Kind::Enum { boxed: true, variants, .. } => {
@@ -1243,7 +1243,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             };
             let _ = write!(
                 s,
-                " {{ const lt_dyn *f_ = lt_dyn_get(d, \"{n}\", {nl}); if (f_ && !(f_->kind == LT_D_NULL && {opt})) {{ lt_path q_ = {{ p, \"{n}\", {nl}, 0 }}; {fc} v_; lt_err e_ = dec_{fid}(src, f_, &q_, lenient, &v_); if (e_.obj) {{ {cleanup} return e_; }} {drop_old} {acc}{i} = v_; }}{missing} }}",
+                " {{ const lt_dyn *f_; lt_err a_ = lt_dyn_field(src, d, p, \"{n}\", {nl}, &f_); if (a_.obj) {{ {cleanup} return a_; }} if (f_ && !(f_->kind == LT_D_NULL && {opt})) {{ lt_path q_ = {{ p, \"{n}\", {nl}, 0 }}; {fc} v_; lt_err e_ = dec_{fid}(src, f_, &q_, lenient, &v_); if (e_.obj) {{ {cleanup} return e_; }} {drop_old} {acc}{i} = v_; }}{missing} }}",
                 n = fname,
                 nl = fname.len(),
                 opt = opt,
@@ -1799,7 +1799,7 @@ free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else dr
         let gl = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::opt(Ty::Text)]));
         self.need(H::Ops, gl);
         let (mc, glc) = (self.tys[mid].c.clone(), self.tys[gl].c.clone());
-        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 1; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from_input(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from_input(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
+        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 0; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from_input(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from_input(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
         name
     }
 
@@ -3159,6 +3159,18 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.need(H::Ops, st);
                 format!("{}_release({}, {})", self.tys[st].c, a[0], a[1])
             }
+            // a reader borrows the value in place (x->v stays); readers
+            // don't change it, and giving it back drops nothing
+            "Shared.acquire_read" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_acquire_read({})", self.tys[st].c, a[0])
+            }
+            "Shared.release_read" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_release_read({}, {})", self.tys[st].c, a[0], a[1])
+            }
             "Channel.send" | "Channel.try_send" => {
                 let e = match &self.tys[tid0.unwrap()].kind {
                     Kind::Channel(e) => *e,
@@ -3720,6 +3732,9 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
     fn mut_intrinsic(&mut self, fi: usize, name: &str, tys: &[Ty], p: &str, a: &[String], args: &[Op], throws: bool) -> String {
         let line = self.line();
         let tid0 = self.tid(&tys[0]);
+        if name == "String.append_parts" {
+            return format!("lt_text_append_n({}, {}, (lt_text*[]){{ {} }})", p, a.len(), a.join(", "));
+        }
         if !matches!(self.tys[tid0].kind, Kind::Bytes) {
             self.need(H::Ops, tid0);
         }
