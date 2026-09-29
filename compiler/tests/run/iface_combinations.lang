@@ -1,0 +1,49 @@
+// Converting between interface combinations: `Named + Priced` to `Named`.
+
+interface Named {
+  fn name(self) -> String
+}
+
+interface Priced {
+  fn price(self) -> Int
+}
+
+type Book implements Named, Priced {
+  title: String
+  cost: Int
+
+  fn name(self) -> String {
+    return self.title
+  }
+
+  fn price(self) -> Int {
+    return self.cost
+  }
+}
+
+type Pen implements Named, Priced {
+  fn name(self) -> String {
+    return "pen"
+  }
+
+  fn price(self) -> Int {
+    return 2
+  }
+}
+
+fn label(x: Named) -> String {
+  return x.name()
+}
+
+fn both(x: Named + Priced) -> String {
+  return "${label(x)} ${x.price()}"
+}
+
+fn main() {
+  let b = Book(title: "Dune", cost: 10)
+  print(both(b))
+  print(both(Pen()))
+  let items: List<Named + Priced> = [b, Pen()]
+  let names: List<Named> = items.map(i => i)
+  print("${names.map(n => n.name())}")
+}

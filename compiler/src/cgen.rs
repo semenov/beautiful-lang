@@ -81,6 +81,8 @@ pub struct CGen<'a> {
     requested: Vec<(H, usize)>,
     done: HashSet<(H, usize)>,
     protos: String,
+    // conversions between interface combinations, generated after the vtables
+    upcasts: Vec<(Vec<DefId>, Vec<DefId>)>,
     helper_types: String,
     helpers: String,
     lits: HashMap<String, usize>,
@@ -158,6 +160,7 @@ impl<'a> CGen<'a> {
             requested: vec![],
             done: HashSet::new(),
             protos: String::new(),
+            upcasts: vec![],
             helper_types: String::new(),
             helpers: String::new(),
             lits: HashMap::new(),
@@ -2424,7 +2427,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             Rv::IfaceGet(o, t) => {
                 let e = self.op(o);
                 let tid = self.tid(t);
-                set(out, format!("((B{}*){}.obj)->v", tid, e));
+                set(out, format!("((Boxed{}*){}.obj)->v", tid, e));
                 self.need_box(tid);
                 dup_after(self, out);
             }
@@ -3228,7 +3231,22 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 }
             }
             "expect_throws_failed" => format!("lt_expect_throws_failed({}->data, {})", a[0], a[1]),
-            "iface_upcast" => format!("({}); lt_panic_at(\"converting between interface combinations is not supported yet\", {})", a[0], line),
+            "iface_upcast" => {
+                let ids = |t: &Ty| match t {
+                    Ty::Iface(ids) => ids.clone(),
+                    _ => unreachable!(),
+                };
+                let key = (ids(&tys[0]), ids(&tys[1]));
+                let k = match self.upcasts.iter().position(|u| *u == key) {
+                    Some(k) => k,
+                    None => {
+                        self.upcasts.push(key);
+                        let _ = writeln!(self.protos, "static lt_iface lt_upcast_{}(lt_iface x);", self.upcasts.len() - 1);
+                        self.upcasts.len() - 1
+                    }
+                };
+                format!("lt_upcast_{}({})", k, a[0])
+            }
             // lists
             "List.length" => format!("({}->len)", a[0]),
             "List.get" => {
@@ -3425,18 +3443,18 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             let c = self.tys[tid].c.clone();
             let drop = self.drop_(tid, "b->v");
             let dup = self.dup(tid, "n->v");
-            let eq = self.eq_expr(tid, "((B{t}*)a)->v", "((B{t}*)b)->v").replace("{t}", &tid.to_string());
-            let hash = self.hash_expr(tid, "((B{t}*)a)->v").replace("{t}", &tid.to_string());
-            let tt = self.totext_expr(tid, "((B{t}*)a)->v", false).replace("{t}", &tid.to_string());
-            let ttd = self.totext_expr(tid, "((B{t}*)a)->v", true).replace("{t}", &tid.to_string());
+            let eq = self.eq_expr(tid, "((Boxed{t}*)a)->v", "((Boxed{t}*)b)->v").replace("{t}", &tid.to_string());
+            let hash = self.hash_expr(tid, "((Boxed{t}*)a)->v").replace("{t}", &tid.to_string());
+            let tt = self.totext_expr(tid, "((Boxed{t}*)a)->v", false).replace("{t}", &tid.to_string());
+            let ttd = self.totext_expr(tid, "((Boxed{t}*)a)->v", true).replace("{t}", &tid.to_string());
             if !self.done.contains(&(H::Ops, usize::MAX - tid)) {
                 self.done.insert((H::Ops, usize::MAX - tid));
-                let _ = writeln!(out, "typedef struct {{ int64_t rc; {c} v; }} B{t};", c = c, t = tid);
-                let _ = writeln!(out, "static void B{t}_drop(lt_obj *o) {{ B{t} *b = (B{t} *)o; {drop} lt_free(b, sizeof(B{t})); }}", t = tid, drop = drop);
-                let _ = writeln!(out, "static bool B{t}_eq(lt_obj *a, lt_obj *b) {{ return {eq}; }}", t = tid, eq = eq);
-                let _ = writeln!(out, "static uint64_t B{t}_hash(lt_obj *a) {{ return {h}; }}", t = tid, h = hash);
-                let _ = writeln!(out, "static lt_text *B{t}_totext(lt_obj *a, bool debug) {{ return debug ? {d} : {n}; }}", t = tid, d = ttd, n = tt);
-                let _ = writeln!(out, "static lt_obj *B{t}_clone(lt_obj *o) {{ B{t} *n = (B{t} *)lt_alloc(sizeof(B{t})); n->rc = 1; n->v = ((B{t} *)o)->v; {dup} return (lt_obj *)n; }}", t = tid, dup = dup);
+                let _ = writeln!(out, "typedef struct {{ int64_t rc; {c} v; }} Boxed{t};", c = c, t = tid);
+                let _ = writeln!(out, "static void Boxed{t}_drop(lt_obj *o) {{ Boxed{t} *b = (Boxed{t} *)o; {drop} lt_free(b, sizeof(Boxed{t})); }}", t = tid, drop = drop);
+                let _ = writeln!(out, "static bool Boxed{t}_eq(lt_obj *a, lt_obj *b) {{ return {eq}; }}", t = tid, eq = eq);
+                let _ = writeln!(out, "static uint64_t Boxed{t}_hash(lt_obj *a) {{ return {h}; }}", t = tid, h = hash);
+                let _ = writeln!(out, "static lt_text *Boxed{t}_totext(lt_obj *a, bool debug) {{ return debug ? {d} : {n}; }}", t = tid, d = ttd, n = tt);
+                let _ = writeln!(out, "static lt_obj *Boxed{t}_clone(lt_obj *o) {{ Boxed{t} *n = (Boxed{t} *)lt_alloc(sizeof(Boxed{t})); n->rc = 1; n->v = ((Boxed{t} *)o)->v; {dup} return (lt_obj *)n; }}", t = tid, dup = dup);
             }
             // method thunks
             let mut slots = vec![];
@@ -3451,7 +3469,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let mut ps = vec!["lt_obj *o".to_string()];
                 let mut call_args = vec![];
                 if mutating {
-                    call_args.push(format!("&((B{} *)o)->v", tid));
+                    call_args.push(format!("&((Boxed{} *)o)->v", tid));
                 } else {
                     call_args.push("self_".to_string());
                 }
@@ -3475,7 +3493,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 } else {
                     (rc.clone(), if ret_unit { "".to_string() } else { "return".to_string() })
                 };
-                let pre = if mutating { String::new() } else { format!("{c} self_ = ((B{t} *)o)->v; {d}", c = c, t = tid, d = self.dup(tid, "self_")) };
+                let pre = if mutating { String::new() } else { format!("{c} self_ = ((Boxed{t} *)o)->v; {d}", c = c, t = tid, d = self.dup(tid, "self_")) };
                 let call = format!("{}({})", tname, call_args.join(", "));
                 let body = if iface_throws && !throws {
                     format!("{} {} {}; return (lt_err){{0}};", pre, tail, call)
@@ -3487,13 +3505,13 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             }
             let _ = writeln!(
                 out,
-                "static struct {{ lt_vt h; void *m[{n}]; }} vt{vi} = {{ {{ B{t}_drop, B{t}_eq, B{t}_hash, B{t}_totext, B{t}_clone, {t} }}, {{ {slots} }} }};",
+                "static struct {{ lt_vt h; void *m[{n}]; }} vt{vi} = {{ {{ Boxed{t}_drop, Boxed{t}_eq, Boxed{t}_hash, Boxed{t}_totext, Boxed{t}_clone, {t} }}, {{ {slots} }} }};",
                 n = slots.len().max(1),
                 vi = vi,
                 t = tid,
                 slots = if slots.is_empty() { "0".to_string() } else { slots.join(", ") }
             );
-            let _ = writeln!(out, "static lt_iface to_iface_vt{vi}({c} v) {{ B{t} *b = (B{t} *)lt_alloc(sizeof(B{t})); b->rc = 1; b->v = v; return (lt_iface){{ (lt_obj *)b, &vt{vi}.h }}; }}", vi = vi, c = c, t = tid);
+            let _ = writeln!(out, "static lt_iface to_iface_vt{vi}({c} v) {{ Boxed{t} *b = (Boxed{t} *)lt_alloc(sizeof(Boxed{t})); b->rc = 1; b->v = v; return (lt_iface){{ (lt_obj *)b, &vt{vi}.h }}; }}", vi = vi, c = c, t = tid);
             let _ = writeln!(self.protos, "static lt_iface to_iface_vt{}({} v);", vi, c);
         }
     }
@@ -3528,6 +3546,17 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
         }
         let mut vt_out = String::new();
         self.gen_vtables(&mut vt_out);
+        for (k, (from, to)) in self.upcasts.clone().iter().enumerate() {
+            let mut cases = String::new();
+            for vt in self.m.vtables.iter() {
+                if &vt.iface == from {
+                    let tid = self.tid(&vt.concrete);
+                    let target = self.vt_index[&(vt.concrete.clone(), to.clone())];
+                    let _ = write!(cases, " case {}: vt = &vt{}.h; break;", tid, target);
+                }
+            }
+            let _ = writeln!(vt_out, "static lt_iface lt_upcast_{}(lt_iface x) {{ const lt_vt *vt = NULL; switch (x.vt->type_id) {{{} default: lt_panic_at(\"unknown type in an interface conversion\", 0); }} lt_iface_dup(x); return (lt_iface){{ x.obj, vt }}; }}", k, cases);
+        }
         let mut env_out = String::new();
         self.gen_envs(&mut env_out);
         // lt_make_failure

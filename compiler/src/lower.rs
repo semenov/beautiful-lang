@@ -85,6 +85,8 @@ pub struct Lowerer<'a> {
     pub funcs: Vec<Func>,
     pub vtables: Vec<mir::Vtable>,
     vt_map: HashMap<(Ty, Vec<DefId>), usize>,
+    // conversions between interface combinations: (from, to)
+    upcasts: Vec<(Vec<DefId>, Vec<DefId>)>,
     instances: HashMap<(FnId, Vec<Ty>, bool), usize>,
     queue: Vec<(usize, FnId, Vec<Ty>, bool)>,
     thunks: HashMap<(FnId, Vec<Ty>), usize>,
@@ -112,6 +114,7 @@ impl<'a> Lowerer<'a> {
             funcs: vec![],
             vtables: vec![],
             vt_map: HashMap::new(),
+            upcasts: vec![],
             instances: HashMap::new(),
             queue: vec![],
             thunks: HashMap::new(),
@@ -137,6 +140,21 @@ impl<'a> Lowerer<'a> {
         let cancelled_vtable = self.vtable(Ty::Adt(self.prog.b.cancelled, vec![]), vec![self.prog.b.error]);
         let closed_vtable = self.vtable(Ty::Adt(self.prog.b.channel_closed, vec![]), vec![self.prog.b.error]);
         self.drain();
+        // every type that reaches a combination converted to another needs
+        // a vtable for the other one too (and its methods may add more)
+        loop {
+            let before = self.vtables.len();
+            for (from, to) in self.upcasts.clone() {
+                let concretes: Vec<Ty> = self.vtables.iter().filter(|v| v.iface == from).map(|v| v.concrete.clone()).collect();
+                for c in concretes {
+                    self.vtable(c, to.clone());
+                }
+            }
+            self.drain();
+            if self.vtables.len() == before {
+                break;
+            }
+        }
         mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns }
     }
 
@@ -1002,9 +1020,13 @@ impl<'a> Lowerer<'a> {
                     _ => unreachable!(),
                 };
                 match &xty {
-                    Ty::Iface(_) => {
-                        // upcast between interface combinations
-                        self.assign(ty, Rv::Call(MCallee::Intrinsic("iface_upcast".into(), vec![xty.clone()]), vec![v]))
+                    Ty::Iface(from) => {
+                        // between interface combinations: the object stays,
+                        // the vtable is looked up by its type
+                        if !self.upcasts.contains(&(from.clone(), ids.clone())) {
+                            self.upcasts.push((from.clone(), ids.clone()));
+                        }
+                        self.assign(ty.clone(), Rv::Call(MCallee::Intrinsic("iface_upcast".into(), vec![xty.clone(), ty.clone()]), vec![v]))
                     }
                     _ => {
                         self.vtable(xty.clone(), ids);

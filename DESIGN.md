@@ -498,8 +498,7 @@ cgen (C) → clang`.
   operators. The prelude marks higher-order functions `rethrows`, so
   `xs.map(x => try f(x))` throws only when the lambda can.
 
-**Not implemented yet:** converting between interface combinations, the
-other items in `TODO.md`.
+**Not implemented yet:** the items in `TODO.md`.
 
 ## Open questions
 
