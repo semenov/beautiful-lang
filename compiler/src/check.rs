@@ -3431,10 +3431,17 @@ impl Checker {
                     }
                     Ty::Iface(ids) => {
                         let md = self.fc().module;
-                        let d = match self.lookup_global(name, md) {
+                        // `NotFound`, or `time.TimedOut` from another module
+                        let found = if path.len() == 2 && self.lookup_local(&path[0]).is_none() && self.module_named(&path[0]).is_some() {
+                            let target = self.module_named(&path[0]).unwrap();
+                            self.lookup_in_module(target, &path[1], *span)
+                        } else {
+                            self.lookup_global(name, md)
+                        };
+                        let d = match found {
                             Some(Global::Type(d)) => d,
                             _ => {
-                                self.err(*span, format!("unknown type `{}`", name));
+                                self.err(*span, format!("unknown type `{}`", path.join(".")));
                                 return TPat::Wild;
                             }
                         };

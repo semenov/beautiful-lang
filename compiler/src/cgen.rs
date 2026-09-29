@@ -2798,6 +2798,14 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 }
             }
             "Channel.close" => format!("lt_chan_close({})", a[0]),
+            "time.__cancel_after" => {
+                self.threads = true;
+                format!("lt_cancel_after({}, {})", a[0], a[1])
+            }
+            "time.__deadline_stop" => {
+                self.threads = true;
+                format!("lt_deadline_stop({})", a[0])
+            }
             "time.__sleep_nanos" => {
                 self.threads = true;
                 format!("lt_sleep_nanos({})", a[0])

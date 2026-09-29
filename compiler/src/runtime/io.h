@@ -19,10 +19,11 @@
 
 #ifndef LT_THREADS
 // without tasks, waiting on a descriptor simply blocks the program
-static void lt_io_wait(int fd, bool write) {
+static bool lt_io_wait(int fd, bool write) {
     struct pollfd p = { fd, (short)(write ? POLLOUT : POLLIN), 0 };
     while (poll(&p, 1, -1) < 0 && errno == EINTR) {
     }
+    return true;
 }
 LT_INLINE bool lt_is_cancelled(void) { return false; }
 static lt_err lt_make_cancelled(void);
@@ -41,7 +42,10 @@ static bool lt_sock_write_all(int fd, const char *buf, size_t len) {
             continue;
         }
         if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            lt_io_wait(fd, true);
+            if (!lt_io_wait(fd, true)) {
+                errno = ECANCELED;
+                return false;
+            }
             continue;
         }
         if (n < 0 && errno == EINTR) continue;
@@ -184,8 +188,7 @@ static lt_err lt_conn_fill(lt_conn *c, bool *eof) {
             return (lt_err){ 0 };
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            if (lt_is_cancelled()) return lt_make_cancelled();
-            lt_io_wait(c->fd, false);
+            if (!lt_io_wait(c->fd, false)) return lt_make_cancelled();
             continue;
         }
         if (errno == EINTR) continue;
@@ -419,7 +422,10 @@ static int64_t lt_sendfile(int file, int sock, int64_t offset, int64_t count) {
         if (r == 0) break;
 #endif
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            lt_io_wait(sock, true);
+            if (!lt_io_wait(sock, true)) {
+                errno = ECANCELED;
+                break;
+            }
             continue;
         }
         if (errno == EINTR) continue;

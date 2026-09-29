@@ -259,6 +259,18 @@ pub fn now() -> Instant
 // Wait without blocking other tasks. Fails with `Cancelled` if the task is cancelled.
 pub fn sleep(duration: Duration) throws
 
+// Runs `work`, giving up after `duration`: the work is cancelled (whatever
+// it waits for stops with an error, its own tasks too) and `timeout`
+// throws `TimedOut`.
+//
+//   let page = try time.timeout(time.seconds(5), () => try http.get(url))
+pub fn timeout<R>(duration: Duration, work: fn() throws -> R) throws -> R
+
+// The error of `timeout`.
+pub type TimedOut implements Error {
+  after: Duration
+}
+
 // A moment in UTC, from the wall clock.
 pub type DateTime {
   year: Int

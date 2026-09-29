@@ -147,6 +147,7 @@ typedef struct lt_task {
     lt_scope *own_scope;                   // the scope of the function running in it
     int64_t wake_at;                       // sleeping: deadline (ns)
     int timed_out;
+    int io_fd;                             // waiting for this descriptor (-1: not)
     void *fiber;                           // ThreadSanitizer's view of the task
     lt_spin io_spin;                       // held while registering for I/O
     void *panic_jmp;                       // a jmp_buf: a panic ends this request only
@@ -300,6 +301,10 @@ static void lt_wake_all(lt_waitq *q) {
 static void lt_timer_cancel(lt_task *t);
 
 void lt_task_cancel(lt_task *t);
+typedef struct lt_fdesc lt_fdesc;
+static lt_fdesc *lt_fdesc_of(int fd);
+static lt_task *lt_fdesc_take(lt_fdesc *d, lt_task *only);
+static void lt_io_wake(lt_task *t);
 static void lt_cancel_scope(lt_scope *s) {
     for (lt_task *c = s->tasks; c; c = c->scope_next) lt_task_cancel(c);
 }
@@ -321,6 +326,12 @@ void lt_task_cancel(lt_task *t) {
         lt_spin_unlock(q->lock);
     }
     lt_timer_cancel(t);
+    // waiting for a socket: take it from the descriptor's record and wake it
+    int fd = __atomic_load_n(&t->io_fd, __ATOMIC_ACQUIRE);
+    if (fd >= 0) {
+        lt_task *mine = lt_fdesc_take(lt_fdesc_of(fd), t);
+        if (mine) lt_io_wake(mine);
+    }
     // its own tasks are cancelled too
     lt_spin_lock(&t->lock);
     lt_scope *s = t->own_scope;
@@ -360,6 +371,7 @@ __attribute__((noinline)) static void lt_task_finish(lt_task *t) {
 
 static lt_task *lt_task_new(lt_fn fn, size_t result_size, void (*run)(lt_task *), void (*drop_result)(void *)) {
     lt_task *t = (lt_task *)calloc(1, sizeof(lt_task) + result_size + 16);
+    t->io_fd = -1;
     if (!t) lt_oom();
     t->rc = 1;
     t->fn = fn;
@@ -474,12 +486,33 @@ static pthread_cond_t lt_timer_cv = PTHREAD_COND_INITIALIZER;
 static lt_spin lt_timer_spin;
 static lt_waitq lt_timer_q = { &lt_timer_spin, NULL, NULL };
 
+// time.timeout: cancel a task at a moment (under lt_timer_mu)
+typedef struct lt_deadline {
+    int64_t at;
+    lt_task *task;
+    int fired;
+    struct lt_deadline *next;
+} lt_deadline;
+static lt_deadline *lt_deadlines;
+
 static void *lt_timer_thread(void *arg) {
     (void)arg;
     pthread_mutex_lock(&lt_timer_mu);
     for (;;) {
         int64_t now = lt_monotonic_nanos();
         int64_t next = INT64_MAX;
+        for (lt_deadline **p = &lt_deadlines; *p;) {
+            lt_deadline *d = *p;
+            if (d->at <= now) {
+                *p = d->next;
+                d->fired = 1;
+                __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
+                lt_task_cancel(d->task);
+                continue;
+            }
+            if (d->at < next) next = d->at;
+            p = &d->next;
+        }
         lt_spin_lock(&lt_timer_spin);
         lt_task *t = lt_timer_q.head;
         while (t) {
@@ -512,6 +545,42 @@ static void *lt_timer_thread(void *arg) {
 }
 
 static void lt_timer_cancel(lt_task *t) { (void)t; } // cancel() already removes it via parked_on
+
+// Cancels `t` after `ns`; the handle goes to lt_deadline_stop exactly once.
+static int64_t lt_cancel_after(lt_task *t, int64_t ns) {
+    lt_deadline *d = (lt_deadline *)calloc(1, sizeof(lt_deadline));
+    d->at = lt_monotonic_nanos() + (ns > 0 ? ns : 0);
+    d->task = t;
+    lt_task_dup(t);
+    // a pending deadline can still wake things up: not a deadlock
+    __atomic_fetch_add(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
+    pthread_mutex_lock(&lt_timer_mu);
+    d->next = lt_deadlines;
+    lt_deadlines = d;
+    pthread_cond_signal(&lt_timer_cv);
+    pthread_mutex_unlock(&lt_timer_mu);
+    return (int64_t)(intptr_t)d;
+}
+
+// Stops the deadline; true if it had already fired.
+static bool lt_deadline_stop(int64_t handle) {
+    lt_deadline *d = (lt_deadline *)(intptr_t)handle;
+    pthread_mutex_lock(&lt_timer_mu);
+    bool fired = d->fired;
+    if (!fired) {
+        for (lt_deadline **p = &lt_deadlines; *p; p = &(*p)->next) {
+            if (*p == d) {
+                *p = d->next;
+                break;
+            }
+        }
+        __atomic_fetch_sub(&lt_sleepers, 1, __ATOMIC_ACQ_REL);
+    }
+    pthread_mutex_unlock(&lt_timer_mu);
+    lt_task_drop(d->task);
+    free(d);
+    return fired;
+}
 
 static lt_err lt_sleep_nanos(int64_t ns) {
     lt_task *t = lt_current();
@@ -769,6 +838,54 @@ static void lt_chan_close(lt_chan *c) {
 static int lt_poll_fd = -1;
 static pthread_once_t lt_poll_once = PTHREAD_ONCE_INIT;
 
+// One record per file descriptor, never freed: the kernel's event points
+// here, not at a task. Whoever takes `waiter` (under `spin`) wakes the task:
+// the poller on an event, or lt_task_cancel. So a task is never touched
+// after someone else woke it, and a stale event only wakes the next waiter
+// for nothing (it retries its read or write).
+struct lt_fdesc {
+    lt_spin spin;
+    lt_task *waiter;
+};
+
+#define LT_FD_CHUNK 1024
+static lt_fdesc *lt_fd_chunks[1 << 12]; // up to 4M descriptors
+static lt_spin lt_fd_grow;
+
+static lt_fdesc *lt_fdesc_of(int fd) {
+    if (fd < 0 || fd >= LT_FD_CHUNK * (1 << 12)) return NULL;
+    int c = fd / LT_FD_CHUNK;
+    lt_fdesc *chunk = __atomic_load_n(&lt_fd_chunks[c], __ATOMIC_ACQUIRE);
+    if (!chunk) {
+        lt_spin_lock(&lt_fd_grow);
+        chunk = lt_fd_chunks[c];
+        if (!chunk) {
+            chunk = (lt_fdesc *)calloc(LT_FD_CHUNK, sizeof(lt_fdesc));
+            __atomic_store_n(&lt_fd_chunks[c], chunk, __ATOMIC_RELEASE);
+        }
+        lt_spin_unlock(&lt_fd_grow);
+    }
+    return &chunk[fd % LT_FD_CHUNK];
+}
+
+// Takes the task waiting on `d` if it is `only` (or any, for NULL).
+static lt_task *lt_fdesc_take(lt_fdesc *d, lt_task *only) {
+    lt_spin_lock(&d->spin);
+    lt_task *t = d->waiter;
+    if (t && (!only || t == only)) d->waiter = NULL;
+    else t = NULL;
+    lt_spin_unlock(&d->spin);
+    return t;
+}
+
+static void lt_io_wake(lt_task *t) {
+    // the task is fully parked once its io_spin is free
+    lt_spin_lock(&t->io_spin);
+    lt_spin_unlock(&t->io_spin);
+    __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+    lt_ready(t);
+}
+
 static void *lt_poll_thread(void *arg) {
     (void)arg;
     for (;;) {
@@ -776,19 +893,16 @@ static void *lt_poll_thread(void *arg) {
         struct kevent evs[64];
         int n = kevent(lt_poll_fd, NULL, 0, evs, 64, NULL);
         for (int i = 0; i < n; i++) {
-            lt_task *t = (lt_task *)evs[i].udata;
+            lt_fdesc *d = (lt_fdesc *)evs[i].udata;
 #else
         struct epoll_event evs[64];
         int n = epoll_wait(lt_poll_fd, evs, 64, -1);
         for (int i = 0; i < n; i++) {
-            lt_task *t = (lt_task *)evs[i].data.ptr;
+            lt_fdesc *d = (lt_fdesc *)evs[i].data.ptr;
 #endif
-            if (!t) continue;
-            // the task is fully parked once its io_spin is free
-            lt_spin_lock(&t->io_spin);
-            lt_spin_unlock(&t->io_spin);
-            __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
-            lt_ready(t);
+            if (!d) continue;
+            lt_task *t = lt_fdesc_take(d, NULL);
+            if (t) lt_io_wake(t);
         }
     }
     return NULL;
@@ -805,25 +919,48 @@ static void lt_poll_start(void) {
     pthread_detach(th);
 }
 
-// Parks the current task until `fd` can be read (or written).
-__attribute__((noinline)) static void lt_io_wait(int fd, bool write) {
+// Parks the current task until `fd` can be read (or written). False when
+// the task is cancelled (before or while waiting): the caller gives up.
+// A wake-up can be spurious: the caller retries its read or write.
+__attribute__((noinline)) static bool lt_io_wait(int fd, bool write) {
     pthread_once(&lt_poll_once, lt_poll_start);
     lt_task *t = lt_current();
+    if (lt_is_cancelled()) return false;
+    lt_fdesc *d = lt_fdesc_of(fd);
     lt_spin_lock(&t->io_spin);
     __atomic_fetch_add(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+    lt_spin_lock(&d->spin);
+    d->waiter = t;
+    lt_spin_unlock(&d->spin);
+    __atomic_store_n(&t->io_fd, fd, __ATOMIC_RELEASE);
 #ifdef LT_KQUEUE
     struct kevent ev;
-    EV_SET(&ev, fd, write ? EVFILT_WRITE : EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, t);
+    EV_SET(&ev, fd, write ? EVFILT_WRITE : EVFILT_READ, EV_ADD | EV_ONESHOT, 0, 0, d);
     kevent(lt_poll_fd, &ev, 1, NULL, 0, NULL);
 #else
     struct epoll_event ev;
     ev.events = (write ? EPOLLOUT : EPOLLIN) | EPOLLONESHOT;
-    ev.data.ptr = t;
+    ev.data.ptr = d;
     if (epoll_ctl(lt_poll_fd, EPOLL_CTL_MOD, fd, &ev) != 0) epoll_ctl(lt_poll_fd, EPOLL_CTL_ADD, fd, &ev);
 #endif
     __atomic_store_n(&t->state, LT_PARKED, __ATOMIC_RELAXED);
     lt_release_after = &t->io_spin;
+    // cancelled while registering: don't sleep through it
+    if (__atomic_load_n(&t->cancelled, __ATOMIC_ACQUIRE)) {
+        lt_task *mine = lt_fdesc_take(d, t);
+        if (mine) {
+            __atomic_store_n(&t->io_fd, -1, __ATOMIC_RELEASE);
+            __atomic_fetch_sub(&lt_io_waiters, 1, __ATOMIC_ACQ_REL);
+            lt_release_after = NULL;
+            lt_spin_unlock(&t->io_spin);
+            __atomic_store_n(&t->state, LT_RUNNING, __ATOMIC_RELAXED);
+            return false;
+        }
+    }
     lt_to_worker(t);
+    t = lt_current();
+    __atomic_store_n(&t->io_fd, -1, __ATOMIC_RELEASE);
+    return !lt_is_cancelled();
 }
 
 // A task that nobody waits for (a connection of a server).

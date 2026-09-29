@@ -79,7 +79,7 @@ static ssize_t lt_sock_read(int fd, char *buf, size_t cap) {
         ssize_t n = read(fd, buf, cap);
         if (n >= 0) return n;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            lt_io_wait(fd, false);
+            if (!lt_io_wait(fd, false)) return 0;
             continue;
         }
         if (errno == EINTR) continue;
@@ -505,7 +505,7 @@ static lt_err lt_http_serve(int64_t port, lt_fn handler) {
         int c = accept(fd, NULL, NULL);
         if (c < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                lt_io_wait(fd, false);
+                if (!lt_io_wait(fd, false)) break;
                 continue;
             }
             if (errno == EINTR || errno == ECONNABORTED) continue;
@@ -648,11 +648,22 @@ static lt_err lt_http_failed(const char *method, const char *url, CURLcode rc) {
     return lt_make_failure(lt_text_cstr(buf));
 }
 
+static int lt_curl_cancel_check(void *ud, curl_off_t a, curl_off_t b, curl_off_t c, curl_off_t d) {
+    (void)a, (void)b, (void)c, (void)d;
+    return __atomic_load_n((volatile int *)ud, __ATOMIC_ACQUIRE) ? 1 : 0;
+}
+
 // One request; the body goes to `sink` (a growing buffer or a FILE).
-static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out) {
+// `cancel`, if given, stops the transfer when it becomes non-zero.
+static lt_err lt_http_perform_on(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out, volatile int *cancel) {
     struct curl_slist *slist;
     CURL *c = lt_http_setup(method, url, body, headers, timeout, &slist);
     if (!c) return lt_make_failure(lt_text_cstr("http: can't start the client"));
+    if (cancel) {
+        curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+        curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, lt_curl_cancel_check);
+        curl_easy_setopt(c, CURLOPT_XFERINFODATA, (void *)cancel);
+    }
     lt_texts *hs = lt_texts_new(8);
     curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write);
     curl_easy_setopt(c, CURLOPT_WRITEDATA, sink);
@@ -670,6 +681,85 @@ static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *bod
     out->status = status;
     out->headers = hs;
     return (lt_err){ 0 };
+}
+
+// With tasks, a request runs on its own thread while the task waits on a
+// pipe: other tasks keep running, any number of requests run at once, and
+// cancelling the task (time.timeout) stops the transfer.
+typedef struct {
+    const char *method, *url;
+    lt_bytes *body;
+    lt_texts *headers;
+    int64_t timeout;
+    size_t (*write)(char *, size_t, size_t, void *);
+    void *sink;
+    lt_http_out out;
+    lt_err err;
+    volatile int cancel;
+    int done_w;
+} lt_hjob;
+
+static void *lt_hjob_run(void *ud) {
+    lt_hjob *j = (lt_hjob *)ud;
+    j->err = lt_http_perform_on(j->method, j->url, j->body, j->headers, j->timeout, j->write, j->sink, &j->out, &j->cancel);
+    char x = 1;
+    while (write(j->done_w, &x, 1) < 0 && errno == EINTR) {
+    }
+    return NULL;
+}
+
+static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out) {
+#ifdef LT_THREADS
+    int p[2];
+    if (pipe(p) != 0) return lt_http_perform_on(method, url, body, headers, timeout, write, sink, out, NULL);
+    fcntl(p[0], F_SETFD, FD_CLOEXEC);
+    fcntl(p[1], F_SETFD, FD_CLOEXEC);
+    lt_set_nonblocking(p[0]);
+    lt_hjob j;
+    memset(&j, 0, sizeof j);
+    j.method = method;
+    j.url = url;
+    j.body = body;
+    j.headers = headers;
+    j.timeout = timeout;
+    j.write = write;
+    j.sink = sink;
+    j.done_w = p[1];
+    pthread_t th;
+    if (pthread_create(&th, NULL, lt_hjob_run, &j) != 0) {
+        close(p[0]);
+        close(p[1]);
+        return lt_http_perform_on(method, url, body, headers, timeout, write, sink, out, NULL);
+    }
+    bool cancelled = false;
+    for (;;) {
+        char x;
+        ssize_t r = read(p[0], &x, 1);
+        if (r == 1) break;
+        if (r < 0 && errno == EINTR) continue;
+        if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (!lt_io_wait(p[0], false)) {
+                __atomic_store_n(&j.cancel, 1, __ATOMIC_RELEASE);
+                cancelled = true;
+                break;
+            }
+            continue;
+        }
+        break;
+    }
+    pthread_join(th, NULL);
+    close(p[0]);
+    close(p[1]);
+    if (cancelled) {
+        if (!j.err.obj) lt_texts_free_all(j.out.headers);
+        else lt_iface_drop(j.err);
+        return lt_make_cancelled();
+    }
+    *out = j.out;
+    return j.err;
+#else
+    return lt_http_perform_on(method, url, body, headers, timeout, write, sink, out, NULL);
+#endif
 }
 
 static lt_err lt_http_send_request(lt_text *method, lt_text *url, lt_texts *headers, lt_bytes *body, int64_t timeout, lt_http_out *out) {
@@ -864,7 +954,10 @@ static lt_err lt_http_open(lt_text *method, lt_text *url, lt_texts *headers, lt_
         ssize_t r = read(s->ready_r, &x, 1);
         if (r == 1) break;
         if (r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            lt_io_wait(s->ready_r, false);
+            if (!lt_io_wait(s->ready_r, false)) {
+                lt_hstream_free(&s->h); // stops the transfer
+                return lt_make_cancelled();
+            }
             continue;
         }
         if (r < 0 && errno == EINTR) continue;

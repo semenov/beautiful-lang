@@ -42,6 +42,36 @@ pub fn sleep(duration: Duration) throws {
 
 fn __sleep_nanos(nanos: Int) throws
 
+// Runs `work`, giving up after `duration`: the work is cancelled (whatever
+// it waits for stops with an error, its own tasks too) and `timeout`
+// throws `TimedOut`.
+//
+//   let page = try time.timeout(time.seconds(5), () => try http.get(url))
+pub fn timeout<R>(duration: Duration, work: fn() throws -> R) throws -> R {
+  let task = spawn work()
+  let deadline = __cancel_after(task, duration.nanos)
+  let result = try task.wait() catch err {
+    if __deadline_stop(deadline) {
+      throw TimedOut(after: duration)
+    }
+    throw err
+  }
+  let _ = __deadline_stop(deadline)
+  return result
+}
+
+// The error of `timeout`.
+pub type TimedOut implements Error {
+  after: Duration
+
+  fn message(self) -> Text {
+    return "timed out after ${self.after.seconds()}s"
+  }
+}
+
+fn __cancel_after<R>(task: Task<R>, nanos: Int) -> Int
+fn __deadline_stop(handle: Int) -> Bool
+
 // A moment in UTC, from the wall clock.
 pub type DateTime {
   year: Int

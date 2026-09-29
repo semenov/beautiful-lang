@@ -25,7 +25,16 @@ static lt_err lt_net_connect(lt_text *host, int64_t port, lt_handle **out) {
         setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);
         int r = connect(fd, a->ai_addr, a->ai_addrlen);
         if (r != 0 && errno == EINPROGRESS) {
-            lt_io_wait(fd, true);
+            // until writable (a wake-up may be spurious), or cancelled
+            for (;;) {
+                struct pollfd pf = { fd, POLLOUT, 0 };
+                if (poll(&pf, 1, 0) > 0) break;
+                if (!lt_io_wait(fd, true)) {
+                    close(fd);
+                    freeaddrinfo(res);
+                    return lt_make_cancelled();
+                }
+            }
             socklen_t el = sizeof err;
             getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &el);
             r = err == 0 ? 0 : -1;
@@ -103,7 +112,7 @@ static lt_err lt_net_serve(int64_t port, lt_fn handler) {
         int c = accept(fd, NULL, NULL);
         if (c < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                lt_io_wait(fd, false);
+                if (!lt_io_wait(fd, false)) break;
                 continue;
             }
             if (errno == EINTR || errno == ECONNABORTED) continue;
@@ -193,7 +202,10 @@ static lt_err lt_udp_send_to(lt_handle *h, lt_bytes *data, lt_text *address) {
         ssize_t n = sendto(u->fd, data->data, (size_t)data->len, 0, res->ai_addr, res->ai_addrlen);
         if (n >= 0) break;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            lt_io_wait(u->fd, true);
+            if (!lt_io_wait(u->fd, true)) {
+                freeaddrinfo(res);
+                return lt_make_cancelled();
+            }
             continue;
         }
         freeaddrinfo(res);
@@ -230,8 +242,7 @@ static lt_err lt_udp_receive(lt_handle *h, lt_bytes **data, lt_text **from) {
             return (lt_err){ 0 };
         }
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            if (lt_is_cancelled()) return lt_make_cancelled();
-            lt_io_wait(u->fd, false);
+            if (!lt_io_wait(u->fd, false)) return lt_make_cancelled();
             continue;
         }
         if (errno == EINTR) continue;
@@ -252,11 +263,10 @@ static lt_err lt_udp_close(lt_handle *h) {
 
 // waits until the socket is ready; false when the task is cancelled
 static bool lt_tls_wait(lt_conn *c, bool for_write, lt_err *err) {
-    if (lt_is_cancelled()) {
+    if (!lt_io_wait(c->fd, for_write)) {
         *err = lt_make_cancelled();
         return false;
     }
-    lt_io_wait(c->fd, for_write);
     return true;
 }
 
@@ -286,8 +296,7 @@ static OSStatus lt_st_read(SSLConnectionRef ref, void *d, size_t *len) {
         }
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            if (lt_is_cancelled()) break;
-            lt_io_wait(c->fd, false);
+            if (!lt_io_wait(c->fd, false)) break;
             continue;
         }
         *len = got;

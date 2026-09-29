@@ -41,7 +41,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Designed but never built** (DESIGN.md promises them):
   - [ ] `lang fmt`: the formatter the design calls mandatory
   - [ ] `Decimal` for money
-  - [ ] `time.timeout(duration, work)`
+  - [x] `time.timeout(duration, work)`
   - [x] `lang doc`
   - [ ] a `Date` type (calendar dates apart from instants)
   - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
