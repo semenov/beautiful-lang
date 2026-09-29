@@ -1,0 +1,36 @@
+# Service configuration
+name: notes-api
+port: 8080
+debug: false
+ratio: 0.75
+empty:
+tags: [web, api, "with, comma"]
+owner: {name: Ada, email: ada@example.com}
+database:
+  host: db.internal
+  port: 5432
+  options:
+    ssl: true
+    timeout: 30s   # a comment
+admins:
+  - ada
+  - 'bob'
+  - "carol \"c\""
+servers:
+  - name: a
+    weight: 2
+  - name: b
+    weight: 1
+motd: |
+  Welcome!
+  Two lines.
+folded: >
+  one
+  two
+
+  three
+quoted_colon: "a: b"
+version: "1.10"
+list_same_level:
+- x
+- y

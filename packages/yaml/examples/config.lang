@@ -1,0 +1,31 @@
+import files
+import json
+import yaml
+
+type Server {
+  name: String
+  weight: Int
+}
+
+type Config {
+  name: String
+  port: Int
+  debug: Bool
+  ratio: Float
+  tags: List<String>
+  admins: List<String>
+  servers: List<Server>
+  motd: String
+  version: String
+}
+
+fn main() throws {
+  let text = try files.read("config.yaml")
+  print(try yaml.to_json(text))
+  let c = try yaml.decode<Config>(text)
+  print("${c.name} ${c.port} ${c.debug} ${c.ratio} ${c.tags} ${c.admins} ${c.servers.map(s => s.name)} ${c.version}")
+  let written = try yaml.encode(c)
+  print(written)
+  let again = try yaml.decode<Config>(written)
+  print("round trip: ${json.encode(again) == json.encode(c)}")
+}

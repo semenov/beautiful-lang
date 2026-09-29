@@ -146,11 +146,15 @@ lang new shop && cd shop
 lang add postgres https://github.com/semenov/beautiful-lang --path packages/postgres
 ```
 
-This repository has five, all written in the language itself:
+This repository has several, all written in the language itself:
 
 - [`packages/postgres`](packages/postgres): the PostgreSQL wire protocol,
   SCRAM login, TLS, typed rows;
 - [`packages/redis`](packages/redis): commands, pipelines, pub/sub;
+- [`packages/yaml`](packages/yaml): YAML configs into records (checked
+  against PyYAML), and writing YAML;
+- [`packages/smtp`](packages/smtp): sending email (STARTTLS, attachments);
+- [`packages/semver`](packages/semver): versions and npm-style ranges;
 - [`packages/jwt`](packages/jwt): JSON Web Tokens (HS256, RS256, ES256,
   provider key sets), checked against PyJWT;
 - [`packages/markdown`](packages/markdown): Markdown to HTML (CommonMark

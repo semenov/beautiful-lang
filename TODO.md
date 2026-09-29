@@ -85,7 +85,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)
 - [x] jwt package
 - [x] semver, smtp packages
-- [ ] packages: s3, mysql, yaml
+- [x] yaml package
+- [ ] packages: s3, mysql
 
 ## From porting rakyll/hey (an agent's port: 730 lines vs Go's 1038)
 

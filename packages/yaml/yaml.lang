@@ -1,0 +1,535 @@
+// yaml: YAML configuration files, written in the language itself.
+//
+//   type Config { name: String, port: Int = 8080, admins: List<String> = [] }
+//   let config = try yaml.decode<Config>(try files.read("config.yaml"))
+//
+// YAML becomes JSON, which fills the record as json.decode does (field
+// names match ignoring case and _ / -). Supported: block mappings and
+// lists, nesting, flow [a, b] and {a: 1}, "double" and 'single' quoted
+// strings, plain scalars with YAML 1.2 types (null ~ true false numbers),
+// | and > block text (with - and + chomping), comments, --- document
+// start. Not supported: anchors and aliases (&a, *a), tags (!!), several
+// documents in one text.
+//
+// Install: lang add yaml https://github.com/semenov/beautiful-lang --path packages/yaml
+
+import json
+
+pub fn decode<T>(text: String) throws -> T {
+  return try json.decode<T>(try to_json(text))
+}
+
+// YAML as JSON text.
+pub fn to_json(text: String) throws -> String {
+  var lines: List<Line> = []
+  var number = 0
+  for raw in text.replace("\r\n", "\n").split("\n") {
+    number += 1
+    let content = strip_comment(raw).trim_end()
+    let t = content.trim()
+    if t.is_empty() or t == "---" or t == "..." or t.starts_with("%") {
+      // blank lines are kept for | and > blocks
+      lines.append(Line(indent: -1, text: "", raw: raw, number: number))
+      continue
+    }
+    if content.starts_with("\t") {
+      throw Failure(message: "yaml: line ${number}: tabs can't indent YAML")
+    }
+    lines.append(Line(indent: indent_of(content), text: t, raw: raw, number: number))
+  }
+  var p = Parser(lines: lines)
+  p.skip_blank()
+  if p.at >= p.lines.length {
+    return "null"
+  }
+  let out = try p.node(p.lines[p.at].indent)
+  p.skip_blank()
+  if p.at < p.lines.length {
+    throw Failure(message: "yaml: line ${p.lines[p.at].number}: unexpected indentation")
+  }
+  return out
+}
+
+// A value as YAML text (from its JSON form).
+pub fn encode<T>(value: T) throws -> String {
+  let v = try json.parse(json.encode(value))
+  let text = emit(v, indent: 0)
+  return "${if text.starts_with("\n") { text.slice(from: 1, to: text.length) } else { text }}\n"
+}
+
+// ---- parsing
+
+type Line {
+  // -1 for a blank line
+  indent: Int
+  text: String
+  raw: String
+  number: Int
+}
+
+type Parser {
+  lines: List<Line>
+  at: Int = 0
+
+  mutating fn skip_blank() {
+    while self.at < self.lines.length and self.lines[self.at].indent < 0 {
+      self.at += 1
+    }
+  }
+
+  // the value whose lines start at the current line, indented `indent`
+  mutating fn node(indent: Int) throws -> String {
+    self.skip_blank()
+    let line = self.lines[self.at]
+    if line.text == "-" or line.text.starts_with("- ") {
+      return try self.sequence(line.indent)
+    }
+    if key_split(line.text) is some(_) {
+      return try self.mapping(line.indent)
+    }
+    // a scalar, possibly continued on more lines
+    var parts = [line.text]
+    self.at += 1
+    while self.at < self.lines.length and self.lines[self.at].indent > indent and key_split(self.lines[self.at].text) is none {
+      parts.append(self.lines[self.at].text)
+      self.at += 1
+    }
+    return try scalar(parts.join(" "), line: line.number)
+  }
+
+  mutating fn sequence(indent: Int) throws -> String {
+    var items: List<String> = []
+    while true {
+      self.skip_blank()
+      if self.at >= self.lines.length {
+        break
+      }
+      let line = self.lines[self.at]
+      if line.indent != indent or not (line.text == "-" or line.text.starts_with("- ")) {
+        break
+      }
+      let rest = line.text.slice(from: 1, to: line.text.length).trim()
+      if rest.is_empty() {
+        self.at += 1
+        self.skip_blank()
+        if self.at < self.lines.length and self.lines[self.at].indent > indent {
+          items.append(try self.node(self.lines[self.at].indent))
+        } else {
+          items.append("null")
+        }
+        continue
+      }
+      // "- key: value" starts a mapping indented where `key` is
+      let inner = indent + line.text.length - line.text.slice(from: 1, to: line.text.length).trim_start().length
+      if key_split(rest) is some(_) or rest.starts_with("- ") {
+        self.lines[self.at] = Line(indent: inner, text: rest, raw: line.raw, number: line.number)
+        items.append(try self.node(inner))
+        continue
+      }
+      self.at += 1
+      items.append(try self.value(rest, parent: indent, line: line.number))
+    }
+    return "[${items.join(",")}]"
+  }
+
+  mutating fn mapping(indent: Int) throws -> String {
+    var fields: List<String> = []
+    while true {
+      self.skip_blank()
+      if self.at >= self.lines.length {
+        break
+      }
+      let line = self.lines[self.at]
+      if line.indent != indent {
+        if line.indent > indent {
+          throw Failure(message: "yaml: line ${line.number}: unexpected indentation")
+        }
+        break
+      }
+      let kv = key_split(line.text) ?? throw Failure(message: "yaml: line ${line.number}: expected `key: value`")
+      self.at += 1
+      let key = unquote_key(kv[0])
+      let rest = kv[1]
+      var value = "null"
+      if rest.is_empty() {
+        self.skip_blank()
+        if self.at < self.lines.length and self.lines[self.at].indent > indent {
+          value = try self.node(self.lines[self.at].indent)
+        } else if self.at < self.lines.length and self.lines[self.at].indent == indent and self.lines[self.at].text.starts_with("- ") {
+          // a list at the key's own indentation
+          value = try self.sequence(indent)
+        }
+      } else {
+        value = try self.value(rest, parent: indent, line: line.number)
+      }
+      fields.append("${json.encode(key)}:${value}")
+    }
+    return "{${fields.join(",")}}"
+  }
+
+  // the value after "key:" or "- " on the same line
+  mutating fn value(text: String, parent: Int, line: Int) throws -> String {
+    if text.starts_with("|") or text.starts_with(">") {
+      return json.encode(self.block_text(text, parent: parent))
+    }
+    if text.starts_with("[") or text.starts_with("{") {
+      // a flow collection may continue on the next lines
+      var flow = text
+      while not balanced(flow) and self.at < self.lines.length {
+        flow = "${flow} ${self.lines[self.at].text}"
+        self.at += 1
+      }
+      var f = Flow(chars: flow.chars(), line: line)
+      let out = try f.value()
+      return out
+    }
+    // a plain scalar continued on more-indented lines
+    var parts = [text]
+    while self.at < self.lines.length and self.lines[self.at].indent > parent and key_split(self.lines[self.at].text) is none and not self.lines[self.at].text.starts_with("- ") {
+      parts.append(self.lines[self.at].text)
+      self.at += 1
+    }
+    return try scalar(parts.join(" "), line: line)
+  }
+
+  // | keeps line breaks, > folds them into spaces; - drops the final
+  // break, + keeps all trailing ones
+  mutating fn block_text(header: String, parent: Int) -> String {
+    let fold = header.starts_with(">")
+    let chomp = if header.contains("-") { "strip" } else if header.contains("+") { "keep" } else { "clip" }
+    var raw_lines: List<String> = []
+    var block_indent = -1
+    while self.at < self.lines.length {
+      let l = self.lines[self.at]
+      if l.indent < 0 {
+        raw_lines.append("")
+        self.at += 1
+        continue
+      }
+      if l.indent <= parent {
+        break
+      }
+      if block_indent < 0 {
+        block_indent = indent_of(l.raw)
+      }
+      raw_lines.append(l.raw.slice(from: min(block_indent, l.raw.length), to: l.raw.length))
+      self.at += 1
+    }
+    // trailing blank lines belong to the chomping, not the text
+    var trailing = 0
+    while not raw_lines.is_empty() and (raw_lines.last() ?? "").is_empty() {
+      let _ = raw_lines.pop()
+      trailing += 1
+    }
+    var text = ""
+    if fold {
+      var out: List<String> = []
+      for l in raw_lines {
+        if l.is_empty() {
+          out.append("\n")
+        } else if not out.is_empty() and not (out.last() ?? "").ends_with("\n") {
+          out.append(" ${l}")
+        } else {
+          out.append(l)
+        }
+      }
+      text = out.join("")
+    } else {
+      text = raw_lines.join("\n")
+    }
+    return match chomp {
+      "strip" => text
+      "keep" => "${text}\n${"\n".repeat(trailing)}"
+      _ => if text.is_empty() { "" } else { "${text}\n" }
+    }
+  }
+}
+
+// ---- flow collections: [a, b], {a: 1, b: [2]}
+
+type Flow {
+  chars: List<String>
+  line: Int
+  at: Int = 0
+
+  mutating fn space() {
+    while self.at < self.chars.length and self.chars[self.at].is_space() {
+      self.at += 1
+    }
+  }
+
+  mutating fn value() throws -> String {
+    self.space()
+    if self.at >= self.chars.length {
+      return "null"
+    }
+    let c = self.chars[self.at]
+    if c == "[" {
+      self.at += 1
+      var items: List<String> = []
+      while true {
+        self.space()
+        if self.at < self.chars.length and self.chars[self.at] == "]" {
+          self.at += 1
+          break
+        }
+        items.append(try self.value())
+        self.space()
+        if self.at < self.chars.length and self.chars[self.at] == "," {
+          self.at += 1
+        }
+        if self.at >= self.chars.length {
+          throw Failure(message: "yaml: line ${self.line}: a [ list isn't closed")
+        }
+      }
+      return "[${items.join(",")}]"
+    }
+    if c == "{" {
+      self.at += 1
+      var fields: List<String> = []
+      while true {
+        self.space()
+        if self.at < self.chars.length and self.chars[self.at] == "}" {
+          self.at += 1
+          break
+        }
+        let key = try self.token(true)
+        self.space()
+        if self.at < self.chars.length and self.chars[self.at] == ":" {
+          self.at += 1
+        }
+        fields.append("${json.encode(unquote_key(key))}:${try self.value()}")
+        self.space()
+        if self.at < self.chars.length and self.chars[self.at] == "," {
+          self.at += 1
+        }
+        if self.at >= self.chars.length {
+          throw Failure(message: "yaml: line ${self.line}: a { map isn't closed")
+        }
+      }
+      return "{${fields.join(",")}}"
+    }
+    return try scalar(try self.token(false), line: self.line)
+  }
+
+  // a scalar inside a flow collection, up to , ] } (and : for keys)
+  mutating fn token(key: Bool) throws -> String {
+    self.space()
+    if self.at < self.chars.length and (self.chars[self.at] == "\"" or self.chars[self.at] == "'") {
+      let q = self.chars[self.at]
+      var end = self.at + 1
+      while end < self.chars.length and self.chars[end] != q {
+        if self.chars[end] == "\\" and q == "\"" {
+          end += 1
+        }
+        end += 1
+      }
+      let text = self.chars.drop(self.at).take(end + 1 - self.at).join("")
+      self.at = end + 1
+      return text
+    }
+    var out: List<String> = []
+    while self.at < self.chars.length and not ",]}".contains(self.chars[self.at]) and not (key and self.chars[self.at] == ":") {
+      out.append(self.chars[self.at])
+      self.at += 1
+    }
+    return out.join("").trim()
+  }
+}
+
+// ---- scalars and small helpers
+
+fn balanced(text: String) -> Bool {
+  var depth = 0
+  var quote = ""
+  for c in text.chars() {
+    if not quote.is_empty() {
+      if c == quote {
+        quote = ""
+      }
+    } else if c == "\"" or c == "'" {
+      quote = c
+    } else if c == "[" or c == "{" {
+      depth += 1
+    } else if c == "]" or c == "}" {
+      depth -= 1
+    }
+  }
+  return depth <= 0
+}
+
+fn indent_of(text: String) -> Int {
+  var n = 0
+  while n < text.length and text.slice(from: n, to: n + 1) == " " {
+    n += 1
+  }
+  return n
+}
+
+// a # starts a comment at the line's start or after a space, outside quotes
+fn strip_comment(line: String) -> String {
+  let c = line.chars()
+  var quote = ""
+  for i in 0..<c.length {
+    if not quote.is_empty() {
+      if c[i] == quote {
+        quote = ""
+      }
+      continue
+    }
+    if c[i] == "\"" or c[i] == "'" {
+      quote = c[i]
+    } else if c[i] == "#" and (i == 0 or c[i - 1] == " ") {
+      return c.take(i).join("")
+    }
+  }
+  return line
+}
+
+// "key: value" -> [key, value]; "key:" -> [key, ""]
+fn key_split(text: String) -> List<String>? {
+  if text.starts_with("\"") or text.starts_with("'") {
+    let q = text.slice(from: 0, to: 1)
+    let close = text.slice(from: 1, to: text.length).index_of(q) ?? -1
+    if close < 0 {
+      return none
+    }
+    let after = text.slice(from: close + 2, to: text.length)
+    if after == ":" or after.starts_with(": ") {
+      return [text.slice(from: 0, to: close + 2), after.slice(from: 1, to: after.length).trim()]
+    }
+    return none
+  }
+  if text.starts_with("[") or text.starts_with("{") or text.starts_with("- ") {
+    return none
+  }
+  if text.ends_with(":") {
+    return [text.slice(from: 0, to: text.length - 1).trim(), ""]
+  }
+  let at = text.index_of(": ") ?? -1
+  if at > 0 {
+    return [text.slice(from: 0, to: at).trim(), text.slice(from: at + 2, to: text.length).trim()]
+  }
+  return none
+}
+
+fn unquote_key(key: String) -> String {
+  let k = key.trim()
+  if k.length >= 2 and ((k.starts_with("\"") and k.ends_with("\"")) or (k.starts_with("'") and k.ends_with("'"))) {
+    return k.slice(from: 1, to: k.length - 1)
+  }
+  return k
+}
+
+// A scalar's JSON: null, booleans and numbers by YAML 1.2's core schema,
+// strings otherwise.
+fn scalar(text: String, line: Int) throws -> String {
+  let t = text.trim()
+  if t.starts_with("\"") {
+    if not t.ends_with("\"") or t.length < 2 {
+      throw Failure(message: "yaml: line ${line}: a \" string isn't closed")
+    }
+    // YAML's double-quoted escapes are JSON's (mostly)
+    let inner = t.slice(from: 1, to: t.length - 1)
+    let value = try json.decode<String>("\"${inner}\"") catch err {
+      throw Failure(message: "yaml: line ${line}: a bad escape in a string")
+    }
+    return json.encode(value)
+  }
+  if t.starts_with("'") {
+    if not t.ends_with("'") or t.length < 2 {
+      throw Failure(message: "yaml: line ${line}: a ' string isn't closed")
+    }
+    return json.encode(t.slice(from: 1, to: t.length - 1).replace("''", "'"))
+  }
+  if t == "~" or t == "null" or t == "Null" or t == "NULL" or t.is_empty() {
+    return "null"
+  }
+  if t == "true" or t == "True" or t == "TRUE" {
+    return "true"
+  }
+  if t == "false" or t == "False" or t == "FALSE" {
+    return "false"
+  }
+  if is_number(t) {
+    let n = if t.starts_with("+") { t.slice(from: 1, to: t.length) } else { t }
+    if n.starts_with(".") {
+      return "0${n}"
+    }
+    if n.starts_with("-.") {
+      return "-0${n.slice(from: 1, to: n.length)}"
+    }
+    return if n.ends_with(".") { "${n}0" } else { n }
+  }
+  return json.encode(t)
+}
+
+fn is_number(t: String) -> Bool {
+  var s = t
+  if s.starts_with("-") or s.starts_with("+") {
+    s = s.slice(from: 1, to: s.length)
+  }
+  if s.is_empty() {
+    return false
+  }
+  var digits = 0
+  var dot = false
+  var exp = false
+  let c = s.chars()
+  var i = 0
+  while i < c.length {
+    let ch = c[i]
+    if ch.is_digit() {
+      digits += 1
+    } else if ch == "." and not dot and not exp {
+      dot = true
+    } else if (ch == "e" or ch == "E") and digits > 0 and not exp {
+      exp = true
+      if i + 1 < c.length and (c[i + 1] == "-" or c[i + 1] == "+") {
+        i += 1
+      }
+    } else {
+      return false
+    }
+    i += 1
+  }
+  return digits > 0 and not s.ends_with("e") and not s.ends_with("E")
+}
+
+// ---- writing
+
+fn emit(v: json.Value, indent: Int) -> String {
+  let pad = " ".repeat(indent)
+  return match v {
+    json.Value.Null => "null"
+    json.Value.Bool(value) => if value { "true" } else { "false" }
+    json.Value.Number(value) => if value == value.round().to_float() and value.abs() < 1000000000000000.0 { value.round().to_string() } else { json.encode(value) }
+    json.Value.String(value) => if value.contains("\n") { block(value, indent: indent) } else { quote_if_needed(value) }
+    json.Value.Array(items) => if items.is_empty() { "[]" } else { items.map(i => "\n${pad}- ${emit_nested(i, indent: indent + 2)}").join("") }
+    json.Value.Object(fields) => if fields.is_empty() { "{}" } else { fields.entries().map(e => "\n${pad}${quote_if_needed(e.key)}:${emit_value(e.value, indent: indent + 2)}").join("") }
+  }
+}
+
+// text with line breaks as a | block
+fn block(s: String, indent: Int) -> String {
+  let pad = " ".repeat(indent)
+  let body = if s.ends_with("\n") { s.slice(from: 0, to: s.length - 1) } else { s }
+  let head = if s.ends_with("\n") { "|" } else { "|-" }
+  return "${head}${body.split("\n").map(l => if l.is_empty() { "\n" } else { "\n${pad}${l}" }).join("")}"
+}
+
+fn emit_nested(v: json.Value, indent: Int) -> String {
+  let text = emit(v, indent: indent)
+  // a map inside a list item starts on the item's line
+  return if text.starts_with("\n") { text.slice(from: 1 + indent, to: text.length) } else { text }
+}
+
+fn emit_value(v: json.Value, indent: Int) -> String {
+  let text = emit(v, indent: indent)
+  return if text.starts_with("\n") { text } else { " ${text}" }
+}
+
+fn quote_if_needed(s: String) -> String {
+  let plain = not s.is_empty() and not s.contains(": ") and not s.contains(" #") and not s.starts_with(" ") and not s.ends_with(" ") and not s.contains("\n") and not "-?:,[]{}#&*!|>'\"%@`".contains(s.slice(from: 0, to: 1)) and (try scalar(s, line: 0) catch err { "" }) == json.encode(s)
+  return if plain { s } else { json.encode(s) }
+}
