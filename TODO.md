@@ -263,7 +263,14 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - `?.` : I reached for it 3 times while writing packages (agents expect it): done
   - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
   - `catch` without `try` in front is a parse error with a vague message
-- [ ] Performance: `words` benchmark is slower than Go (Text is not a view)
+- [ ] Performance: `words` benchmark is slower than Go (Text is not a view).
+      perf on Linux (2026-09-29): 44% in the map lookup (1.46 probes per
+      find, fine; the time is three cache misses per lookup: the index, the
+      entry, the key's text), 30% in musl's memcpy/memcmp/memchr (Alpine;
+      glibc and macOS are faster). An inlined short-string compare changed
+      nothing on macOS. Real fixes: a map that keeps hash bits and keys in
+      the table itself, and short strings without a heap object (inside the
+      pointer, as Swift does) -- both big changes
       (2026-09-29, Vlad asked again: 1.37 s vs Go 0.95 s). Per round: gen+join
       65 vs 75 ms, split 77 vs 55, counting 103 vs 79, the rest (top 5, frees)
       ~25 vs ~0. The gap is one heap object per piece (5M allocations, reads,
