@@ -31,7 +31,7 @@ Programs:
   plumb run <file.plumb> [args]     compile and run
   plumb fmt [files or dirs]         lay the code out the one standard way (--check: only report)
   plumb build <file.plumb> [-o out] compile an optimized binary
-  plumb test <file.plumb>           run the file's `test` blocks
+  plumb test [file.plumb or dir]    run the `test` blocks: of one file, or of every file in the project
   plumb check <file.plumb>          only check for errors (fast)
 
 Projects and packages:
@@ -297,6 +297,67 @@ struct Opts {
     args: Vec<String>,
 }
 
+// Runs the tests of every .plumb file under the project's root (or `dir`):
+// each file is compiled with the modules it imports, as `plumb test f`.
+fn test_project(dir: Option<PathBuf>, debug: bool) -> ExitCode {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let root = match dir {
+        Some(d) => d,
+        None => project::find_root(&cwd.join("x.plumb")),
+    };
+    let mut files = vec![];
+    fn collect(p: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(p) else { return };
+        let mut entries: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
+        entries.sort();
+        for e in entries {
+            let name = e.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+            if e.is_dir() {
+                // a package or project of its own is tested on its own
+                if !e.join("plumb.toml").exists() {
+                    collect(&e, out);
+                }
+            } else if name.ends_with(".plumb") {
+                if let Ok(src) = std::fs::read_to_string(&e) {
+                    if src.lines().any(|l| l.starts_with("test \"")) {
+                        out.push(e);
+                    }
+                }
+            }
+        }
+    }
+    collect(&root, &mut files);
+    if files.is_empty() {
+        eprintln!("no tests under {}", root.display());
+        return ExitCode::from(1);
+    }
+    let me = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("plumb"));
+    let mut failed = vec![];
+    for f in &files {
+        println!("== {}", f.display());
+        let mut cmd = Command::new(&me);
+        cmd.arg("test");
+        if debug {
+            cmd.arg("--debug");
+        }
+        let ok = cmd.arg(f.file_name().unwrap()).current_dir(f.parent().unwrap_or(Path::new("."))).status().map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            failed.push(f.display().to_string());
+        }
+    }
+    println!();
+    if failed.is_empty() {
+        println!("{} file(s) with tests: all passed", files.len());
+        ExitCode::SUCCESS
+    } else {
+        println!("{} file(s) with tests, {} failed: {}", files.len(), failed.len(), failed.join(", "));
+        ExitCode::from(1)
+    }
+}
+
 fn parse_args() -> Option<Opts> {
     let mut args = std::env::args().skip(1);
     let cmd = args.next()?;
@@ -312,6 +373,10 @@ fn parse_args() -> Option<Opts> {
             "--emit-c" => emit_c = Some(args.next()?),
             "--debug" if path.is_none() => debug = true,
             "--static" if path.is_none() => static_link = true,
+            _ if path.is_none() && a.starts_with("--") => {
+                eprintln!("error: unknown option `{}`", a);
+                std::process::exit(2);
+            }
             _ if path.is_none() => path = Some(a),
             _ => rest.push(a),
         }
@@ -887,6 +952,14 @@ fn main() -> ExitCode {
     if let Some(code) = project_command(&raw) {
         return code;
     }
+    // `plumb test` or `plumb test <dir>`: every file with tests in the project
+    if raw.first().map(|c| c == "test").unwrap_or(false) {
+        let dirs: Vec<&String> = raw[1..].iter().filter(|a| !a.starts_with("--")).collect();
+        let is_dir = dirs.first().map(|d| Path::new(d.as_str()).is_dir()).unwrap_or(true);
+        if dirs.len() <= 1 && is_dir {
+            return test_project(dirs.first().map(|d| PathBuf::from(d.as_str())), raw.iter().any(|a| a == "--debug"));
+        }
+    }
     let opts = match parse_args() {
         Some(o) => o,
         None => {
@@ -908,6 +981,10 @@ fn main() -> ExitCode {
         }
         "run" | "test" => {
             let tests = opts.cmd == "test";
+            if tests && !opts.args.is_empty() {
+                eprintln!("error: `plumb test` takes a file or a directory, and `--debug` (got {})", opts.args.join(" "));
+                return ExitCode::from(2);
+            }
             let exe = build_dir().join(format!("{}{}-{}", stem, if tests { "-test" } else { "" }, std::process::id()));
             if !compile(&opts, tests, false, &exe) {
                 return ExitCode::from(1);

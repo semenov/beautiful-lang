@@ -19,7 +19,7 @@ reasons behind the rules are in `DESIGN.md`.
 ## Files and programs
 
 - A file is a module. A program is a file with `fn main()` (or
-  `fn main() throws`). Run it: `plumb run app.plumb`. Tests: `plumb test app.plumb`.
+  `fn main() throws`). Run it: `plumb run app.plumb`. Tests: `plumb test` (the whole project).
 - `import json`, `import store.users` (the file `store/users.plumb` from the
   project root). Use names with the module prefix: `json.decode<T>(text)`,
   `users.find(id)`. No `from`, no `*`, no relative paths.
@@ -495,7 +495,8 @@ test "discount never goes below zero" {
 ```
 
 `expect` prints both sides on failure. Tests go in the same file and can
-see private functions.
+see private functions. `plumb test` runs the tests of every file in the
+project (`plumb test app.plumb`: one file's).
 
 ## Common compiler errors and their fixes
 
