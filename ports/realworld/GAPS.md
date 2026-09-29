@@ -33,6 +33,7 @@ failures contradict the hurl suite; see README.md).
 | 17 | No way to trim given characters (`trim_matches("-")`) and no transliteration: "Привет, мир! Hello" slugs to `hello` (Go's gosimple/slug: `privet-mir-hello`). | minor | Two regexes (`[^a-z0-9]+` -> `-`, `^-+\|-+$` -> ``) | — |
 | 18 | `jwt.verify` errors are `Failure`s with a message: an expired token can't be told from a forged one (to answer "token expired"). | minor | Both are 401 `token is invalid` | — |
 | 19 | `lang add jwt --path ../../packages/jwt` says "1 package(s) pinned in lang.lock", but no `lang.lock` is written (path packages aren't pinned, which is fine, but the message says otherwise). | minor | — | — |
+| 20 | `lang fmt --check` passes a file that doesn't parse (`repro/block_after_coalesce.lang`: exit 0, no message), so a broken file looks formatted. | minor | — | `repro/block_after_coalesce.lang` |
 
 ## Docs
 
