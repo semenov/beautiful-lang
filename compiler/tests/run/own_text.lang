@@ -1,0 +1,57 @@
+// A type's own `to_string` is its text in "${x}", also inside lists,
+// fields, maps, optionals and errors. A `match` returning in every arm.
+type Money {
+  cents: Int
+
+  fn to_string(self) -> String {
+    return "$${self.cents.div(100)}.${(self.cents % 100).to_string().pad_start(2, fill: "0")}"
+  }
+}
+
+enum Shape {
+  Circle(r: Int)
+  Square(side: Int)
+
+  fn to_string(self) -> String {
+    match self {
+      Circle(r) => return "circle r=${r}"
+      Square(side) => return "square ${side}"
+    }
+  }
+}
+
+type Order {
+  id: Int
+  total: Money
+  note: String?
+}
+
+type Oops implements Error {
+  what: String
+
+  fn message(self) -> String {
+    return "oops: ${self.what}"
+  }
+
+  fn to_string(self) -> String {
+    return "Oops[${self.what}]"
+  }
+}
+
+fn fail() throws {
+  throw Oops(what: "x")
+}
+
+fn main() {
+  let m = Money(cents: 1250)
+  print("total: ${m}")
+  print("${[m, Money(cents: 5)]} ${Circle(r: 2)} ${[Square(side: 3)]}")
+  let o = Order(id: 1, total: m, note: none)
+  print("${o}")
+  let maybe: Money? = m
+  print("${maybe}")
+  print("${{"a": m}}")
+  try fail() catch e {
+    print("${e}")
+  }
+}

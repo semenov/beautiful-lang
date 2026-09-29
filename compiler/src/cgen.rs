@@ -733,6 +733,14 @@ impl<'a> CGen<'a> {
         let c = self.tys[id].c.clone();
         let kind = self.tys[id].kind.clone();
         let _ = writeln!(self.protos, "static lt_text *totext_{}({} a, bool debug);", id, c);
+        // the type's own `to_string` (it consumes its argument)
+        let own = self.m.shows.clone().into_iter().find(|(t, _)| self.tid(t) == id).map(|(_, f)| f);
+        if let Some(f) = own {
+            let name = self.m.funcs[f].name.clone();
+            let dup = self.dup(id, "a");
+            let _ = writeln!(self.helpers, "static lt_text *totext_{}({} a, bool debug) {{ (void)debug; {} return {}(a); }}", id, c, dup, name);
+            return;
+        }
         // builds a list of parts and concatenates
         let mut s = String::from("lt_texts *p = lt_texts_new(8); (void)debug;");
         let lit = |g: &mut CGen, s: &mut String, t: &str| {
@@ -2740,8 +2748,12 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                         let _ = writeln!(out, "  *out_ = {};", v);
                     }
                     let _ = writeln!(out, "  return (lt_err){{0}};");
-                } else if ret_unit || v.is_empty() {
+                } else if ret_unit {
                     let _ = writeln!(out, "  return;");
+                } else if v.is_empty() {
+                    // the end of a function whose every path returned
+                    // earlier (a `match` returning in each arm): never reached
+                    let _ = writeln!(out, "  lt_panic_at(\"unreachable code was reached (a compiler bug)\", {});", self.line());
                 } else {
                     let _ = writeln!(out, "  return {};", v);
                 }

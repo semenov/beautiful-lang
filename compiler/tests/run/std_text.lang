@@ -1,0 +1,28 @@
+// Standard types and errors in "${x}": durations and dates for people, an
+// error as its message.
+import time
+
+type NotFound implements Error {
+  id: Int
+
+  fn message(self) -> String {
+    return "no user ${self.id}"
+  }
+}
+
+fn load(id: Int) throws -> Int {
+  throw NotFound(id: id)
+}
+
+fn main() throws {
+  print("${time.millis(1500)} ${time.Date(year: 2026, month: 9, day: 29)} ${time.from_unix(0)}")
+  let x = try load(7) catch e {
+    print("failed: ${e}")
+    0
+  }
+  let y = try load(8) catch e {
+    print("${Failure(message: "loading", cause: e)}")
+    0
+  }
+  print("${[NotFound(id: 1)]}")
+}

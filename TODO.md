@@ -6,7 +6,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 ## Now
 
 - [ ] **Vlad's decisions of 2026-09-29** (details in HANDOFF.md):
-  - [ ] `fn to_string(self)` used by `"${x}"`; readable stdlib types
+  - [x] `fn to_string(self)` used by `"${x}"`; readable stdlib types
+        (Duration, Date, DateTime, Zoned; errors print their message)
   - [ ] `?.`
   - [ ] exact JSON numbers (`json.Value.Number` as written)
   - [ ] `json.encode` options: `keys:` naming, `omit_empty:`

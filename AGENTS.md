@@ -117,6 +117,14 @@ let v = json.Value.Null            // from another module: module.Enum.Variant
 
 type UserId = Int              // a NEW type, not an alias: UserId(5), id.value
 
+type Money {
+  cents: Int
+  fn to_string(self) -> String {           // its text in "${m}" (also inside
+    return "$${self.cents.div(100)}"       // lists, fields and maps); without
+  }                                        // it: Money(cents: 1250)
+}
+// an error in "${err}" is its message(); durations print as 1.5s, dates as ISO
+
 type User implements Describable { ... }   // interfaces are explicit
 
 interface Describable {

@@ -5,7 +5,7 @@ use crate::ast::{BinOp, UnOp};
 use crate::diag::{Sources, Span};
 use crate::mir::{self, Callee as MCallee, FnKind, Func, Op, Place, Proj, Rv, Stmt, Term, B, L};
 use crate::types::*;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 struct Fb<'a> {
     f: Func,
@@ -94,6 +94,8 @@ pub struct Lowerer<'a> {
     user_file: u32,
     default_fns: Vec<(Ty, usize)>,
     consts: Vec<usize>,
+    shows: Vec<(Ty, usize)>,
+    show_seen: HashSet<Ty>,
     decoded: std::collections::HashSet<Ty>,
 }
 
@@ -123,6 +125,8 @@ impl<'a> Lowerer<'a> {
             user_file,
             default_fns: vec![],
             consts: vec![],
+            shows: vec![],
+            show_seen: HashSet::new(),
             decoded: std::collections::HashSet::new(),
         }
     }
@@ -157,7 +161,7 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts, shows: self.shows }
     }
 
     fn drain(&mut self) {
@@ -300,6 +304,18 @@ impl<'a> Lowerer<'a> {
             // code after a return/throw: put it in a dead block
             let b = self.new_block();
             self.switch_to(b);
+        }
+        // an intrinsic may turn its arguments into text (debug_text, log
+        // fields, expect): types with their own `to_string` must be known
+        let intrinsic_args = match &s {
+            Stmt::Assign(_, Rv::Call(MCallee::Intrinsic(..), args)) | Stmt::CallT { callee: MCallee::Intrinsic(..), args, .. } | Stmt::MutCall { callee: MCallee::Intrinsic(..), args, .. } => args.clone(),
+            _ => vec![],
+        };
+        for a in intrinsic_args {
+            if let Op::Local(l) = a {
+                let t = self.fbr().f.locals[l].ty.clone();
+                self.register_shows(&t);
+            }
         }
         let cur = self.fbr().cur;
         self.fb().f.blocks[cur].stmts.push(s);
@@ -453,11 +469,59 @@ impl<'a> Lowerer<'a> {
 
     // ---- vtables ----
 
+    // The instance of a type's own `to_string`, if it has one.
+    // An error without one is its message.
+    fn show_fn(&mut self, t: &Ty) -> Option<usize> {
+        let Ty::Adt(d, args) = t else { return None };
+        let def = &self.prog.defs[*d];
+        let f = match def.methods.get("to_string") {
+            Some(f) => *f,
+            None if def.implements.contains(&self.prog.b.error) => *def.methods.get("message")?,
+            None => return None,
+        };
+        let fd = &self.prog.fns[f];
+        if fd.intrinsic || fd.body.is_none() || fd.throws || !fd.params.is_empty() || fd.ret != Ty::Text {
+            return None;
+        }
+        Some(self.instance(f, args.clone(), false))
+    }
+
+    // Records and enums inside `t` (fields, elements, ...) with their own
+    // `to_string`, for the code generator's text of `t`.
+    fn register_shows(&mut self, t: &Ty) {
+        if !self.show_seen.insert(t.clone()) {
+            return;
+        }
+        match t {
+            Ty::Opt(x) => self.register_shows(&x.clone()),
+            Ty::Adt(d, args) => {
+                let (d, args) = (*d, args.clone());
+                if matches!(self.prog.defs[d].kind, TypeKind::Record { .. } | TypeKind::Enum { .. }) {
+                    if let Some(f) = self.show_fn(t) {
+                        self.shows.push((t.clone(), f));
+                        return;
+                    }
+                }
+                let inner: Vec<Ty> = match &self.prog.defs[d].kind {
+                    TypeKind::Record { fields } => fields.iter().map(|f| f.ty.subst(&args)).collect(),
+                    TypeKind::Enum { variants } => variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty.subst(&args))).collect(),
+                    TypeKind::Newtype(i) => vec![i.subst(&args)],
+                    _ => args.clone(),
+                };
+                for i in inner {
+                    self.register_shows(&i);
+                }
+            }
+            _ => {}
+        }
+    }
+
     fn vtable(&mut self, concrete: Ty, ids: Vec<DefId>) -> usize {
         let key = (concrete.clone(), ids.clone());
         if let Some(v) = self.vt_map.get(&key) {
             return *v;
         }
+        self.register_shows(&concrete);
         let d = match &concrete {
             Ty::Adt(d, _) => *d,
             _ => panic!("vtable for a non-record type"),
@@ -1130,6 +1194,10 @@ impl<'a> Lowerer<'a> {
             TK::ToText(x) => {
                 let xty = self.ty(&x.ty);
                 let v = self.expr(x);
+                if let Some(f) = self.show_fn(&xty) {
+                    return self.assign(Ty::Text, Rv::Call(MCallee::Fn(f), vec![v]));
+                }
+                self.register_shows(&xty);
                 self.assign(Ty::Text, Rv::Call(MCallee::Intrinsic("to_text".into(), vec![xty]), vec![v]))
             }
             TK::List(items) => {

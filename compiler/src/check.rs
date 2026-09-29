@@ -280,6 +280,7 @@ impl Checker {
             self.check_implements(m, i);
         }
         self.check_task_escapes();
+        self.check_to_string_shapes();
         for (i, (_, m, _)) in mods.iter().enumerate() {
             self.check_defaults(m, i);
         }
@@ -600,6 +601,24 @@ impl Checker {
         });
         self.fn_asts.push(Some((decl.clone(), md)));
         self.prog.fns.len() - 1
+    }
+
+    // A type's `to_string` is its text in `"${x}"`, so it has one shape.
+    fn check_to_string_shapes(&mut self) {
+        for d in 0..self.prog.defs.len() {
+            if self.prog.defs[d].is_prelude || matches!(self.prog.defs[d].kind, TypeKind::Interface { .. }) {
+                continue;
+            }
+            let Some(&f) = self.prog.defs[d].methods.get("to_string") else { continue };
+            let fd = &self.prog.fns[f];
+            if fd.intrinsic {
+                continue;
+            }
+            if fd.self_mode != SelfMode::Value || !fd.params.is_empty() || fd.ret != Ty::Text || fd.throws {
+                let sp = fd.span;
+                self.err_help(sp, "`to_string` gives a value's text in `\"${x}\"`, so it must be `fn to_string(self) -> String`", "no parameters, not `mutating`, and it can't throw; name a different conversion differently");
+            }
+        }
     }
 
     fn add_methods(&mut self, d: DefId, methods: &[ast::FnDecl], generics: &[String], md: usize) {

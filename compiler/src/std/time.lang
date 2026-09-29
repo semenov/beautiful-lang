@@ -36,6 +36,11 @@ pub type Duration {
     return Duration(nanos: self.nanos.div(n))
   }
 
+  // Its text in "${d}": as `text()`.
+  pub fn to_string(self) -> String {
+    return self.text()
+  }
+
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
   pub fn text(self) -> String {
     let n = self.nanos
@@ -242,6 +247,11 @@ pub type DateTime {
   hour: Int
   minute: Int
   second: Int
+
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String {
+    return self.iso()
+  }
 
   // "2026-09-29T12:00:00Z"
   pub fn iso(self) -> String {
@@ -459,6 +469,11 @@ pub type Date {
   year: Int
   month: Int
   day: Int
+
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String {
+    return self.iso()
+  }
 
   // "2026-09-29"
   pub fn iso(self) -> String {
@@ -701,6 +716,11 @@ pub type Zoned {
   zone: String
   // "CEST"
   abbreviation: String
+
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String {
+    return self.iso()
+  }
 
   // "2026-09-29T16:05:09+02:00"
   pub fn iso(self) -> String {

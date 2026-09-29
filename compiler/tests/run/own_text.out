@@ -1,0 +1,6 @@
+total: $12.50
+[$12.50, $0.05] circle r=2 [square 3]
+Order(id: 1, total: $12.50, note: none)
+$12.50
+{"a": $12.50}
+Oops[x]

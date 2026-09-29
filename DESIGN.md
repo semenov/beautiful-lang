@@ -468,6 +468,11 @@ syntax slips in 40 files), so braces stay for the reasons below.
   block in `with`/`if` doesn't re-indent it (safer string-replacement edits,
   cleaner diffs); truncated output is caught by an unbalanced brace.
 - `${x}` interpolation (backends put JSON in strings, so `{x}` would clash).
+  A type's text there is its own `fn to_string(self) -> String` if it has
+  one (so `Money` prints `$12.50`, a `Duration` `1.5s`), an error's is its
+  `message()`, and otherwise the value as written (`User(id: 1, ...)`).
+  `to_string` has exactly that shape, so it can't be confused with other
+  conversions.
 - `and` / `or` / `not` (a reviewer misses `!` easily).
 - `//` comments, `name: Type`, `-> Result`, `<T>`, no semicolons.
 - `match x { Circle(r) => … }` without `case`.

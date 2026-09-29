@@ -167,6 +167,8 @@ pub struct Module {
     pub default_fns: Vec<(Ty, FnIdx)>,
     // top-level `let`s: built once, on first use
     pub consts: Vec<FnIdx>,
+    // types whose text comes from their own `to_string` method
+    pub shows: Vec<(Ty, FnIdx)>,
 }
 
 impl Stmt {

@@ -413,6 +413,8 @@ pub type Duration {
   pub fn is_shorter_than(self, other: Duration) -> Bool
   // A part of it: `total.divided_by(count)` is the average.
   pub fn divided_by(self, n: Int) -> Duration
+  // Its text in "${d}": as `text()`.
+  pub fn to_string(self) -> String
   // For people: "1h30m", "2m5s", "1.5s", "250ms", "80µs", "12ns".
   pub fn text(self) -> String
 }
@@ -474,6 +476,8 @@ pub type DateTime {
   hour: Int
   minute: Int
   second: Int
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String
   // "2026-09-29T12:00:00Z"
   pub fn iso(self) -> String
   // The same moment on the wall clock of a time zone:
@@ -532,6 +536,8 @@ pub type Date {
   year: Int
   month: Int
   day: Int
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String
   // "2026-09-29"
   pub fn iso(self) -> String
   // Days since 1970-01-01 (negative before).
@@ -575,6 +581,8 @@ pub type Zoned {
   zone: String
   // "CEST"
   abbreviation: String
+  // Its text in "${x}": as `iso()`.
+  pub fn to_string(self) -> String
   // "2026-09-29T16:05:09+02:00"
   pub fn iso(self) -> String
   // As `DateTime.format`; %z gives the offset (+0200), %Z the abbreviation.
