@@ -173,6 +173,10 @@ typedef struct lt_worker {
     lt_task *q[LT_LOCALQ];
     uint32_t tick;       // schedules, to look at the global queue now and then
     uint32_t seed;       // for picking whom to steal from
+    // stacks kept by this worker (only it touches them), traded with the
+    // global pool in batches
+    char *stacks[16];
+    int nstacks;
 } lt_worker;
 static lt_worker *lt_ws;
 static __thread lt_worker *lt_self;
@@ -211,7 +215,30 @@ static lt_spin lt_stack_lock;
 static char *lt_stack_pool[64];
 static int lt_stack_count;
 
+#define LT_STACK_BATCH 8
+static char *lt_stack_get_shared(void);
+static void lt_stack_put_shared(char *s);
+static lt_worker *lt_self_worker(void);
 static char *lt_stack_get(void) {
+    lt_worker *w = lt_self_worker();
+    if (w) {
+        if (w->nstacks == 0) {
+            // a batch from the pool, under one lock
+            lt_spin_lock(&lt_stack_lock);
+            while (w->nstacks < LT_STACK_BATCH && lt_stack_count > 0) w->stacks[w->nstacks++] = lt_stack_pool[--lt_stack_count];
+            lt_spin_unlock(&lt_stack_lock);
+        }
+        if (w->nstacks > 0) {
+            char *s = w->stacks[--w->nstacks];
+#ifdef LT_ASAN
+            __asan_unpoison_memory_region(s + LT_GUARD, LT_STACK_SIZE - LT_GUARD);
+#endif
+            return s;
+        }
+    }
+    return lt_stack_get_shared();
+}
+static char *lt_stack_get_shared(void) {
     lt_spin_lock(&lt_stack_lock);
     if (lt_stack_count > 0) {
         char *s = lt_stack_pool[--lt_stack_count];
@@ -245,6 +272,21 @@ static void lt_stack_put(char *s, bool deep) {
         mprotect(s + LT_GUARD, LT_STACK_SIZE - LT_STACK_KEEP - LT_GUARD, PROT_NONE);
 #endif
     }
+    lt_worker *w = lt_self_worker();
+    if (w) {
+        if (w->nstacks == 16) {
+            // half back to the pool, under one lock
+            lt_spin_lock(&lt_stack_lock);
+            while (w->nstacks > LT_STACK_BATCH && lt_stack_count < 64) lt_stack_pool[lt_stack_count++] = w->stacks[--w->nstacks];
+            lt_spin_unlock(&lt_stack_lock);
+            while (w->nstacks > LT_STACK_BATCH) munmap(w->stacks[--w->nstacks], LT_STACK_SIZE);
+        }
+        w->stacks[w->nstacks++] = s;
+        return;
+    }
+    lt_stack_put_shared(s);
+}
+static void lt_stack_put_shared(char *s) {
     lt_spin_lock(&lt_stack_lock);
     if (lt_stack_count < 64) {
         lt_stack_pool[lt_stack_count++] = s;

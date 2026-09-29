@@ -199,13 +199,13 @@ reference counting that the compiler inserts, with no garbage collector.
 | binary trees | 2.76 s, 130 MB | 4.70 s, 137 MB |
 | sort (3M records by key) | 1.17 s, 151 MB | 1.79 s, 97 MB |
 | word count | 1.42 s, 226 MB | 1.01 s, 211 MB |
-| JSON encode + decode | 1.61 s, 332 MB | 2.35 s, 247 MB |
-| map of Ints | 1.34 s, 59 MB | 1.49 s, 43 MB |
+| JSON encode + decode | 1.55 s, 264 MB | 2.35 s, 247 MB |
+| map of Ints | 1.17 s, 42 MB | 1.49 s, 43 MB |
 | CSV-like text processing | 0.61 s, 138 MB | 0.99 s, 164 MB |
 | n-body (floating point) | 0.23 s, 2 MB | 0.21 s, 4 MB |
 | writing and reading a file by lines | 0.96 s, 2 MB | 0.96 s, 11 MB |
-| channel, producer and consumer | 0.09 s, 2 MB | 0.13 s, 4 MB |
-| spawning 200k small tasks | 0.18 s, 4 MB | 0.06 s, 14 MB |
+| channel, producer and consumer | 0.07 s, 2 MB | 0.13 s, 4 MB |
+| spawning 200k small tasks | 0.06 s, 7 MB | 0.06 s, 14 MB |
 | HTTP file server, 2 KB files | 75-93k req/s, 7 MB | 55k req/s, 27 MB |
 
 (`benchmarks/`: `ONLY=Go,Lang python3 run.py`; median of 3 runs on an
@@ -268,7 +268,6 @@ Weak spots, known:
   not for thousands at once. (HTTP server timeouts don't use them: each
   connection keeps its deadline, and the timer thread sweeps them once a
   second, so they're up to a second late.)
-- **Spawning** costs about three times what it costs in Go (see the table).
 - **Atomic reference counts** in any program that uses tasks cost about 10%
   on allocation-heavy code, even for values that never leave one task.
 - Each task reserves 8 MB of address space. That's nothing on 64-bit
