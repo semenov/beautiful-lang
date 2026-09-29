@@ -1,0 +1,15 @@
+// A regex written as a literal is checked at compile time: what the runtime
+// would refuse is an error at the literal (the .err file).
+import regex
+
+fn main() throws {
+  let ok = try regex.compile("(\\d+)-(\\d+)")
+  let lazy = try regex.compile("<(.+?)>")
+  let group = try regex.compile("(?:ab)+")
+  let word = try regex.compile("\\bword\\b")
+  let open = try regex.compile("(a|b")
+  let class = try regex.compile("[\\S]")
+  let unicode = try regex.compile("\\p{L}+")
+  let text = "(?:x)"
+  let at_run_time = try regex.compile(text)
+}

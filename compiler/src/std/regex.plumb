@@ -2,18 +2,23 @@
 //
 //   let date = try regex.compile("(\\d{4})-(\\d{2})-(\\d{2})")
 //   if date.find(line) is some(m) {
-//     print("year ${m.groups[0] ?? "?"}")
+//     print("year ${m.groups[1] ?? "?"}")
 //   }
 //
 // Extended regular expressions (POSIX), plus \d \w \s (and \D \W \S);
-// `(?i)` at the start ignores case. Positions are character indices.
+// `(?i)` at the start ignores case. Positions are character indices. Not
+// supported (an error): lazy quantifiers (`*?`), `(?:...)` and other `(?`
+// groups, `\b` and other anchors, `\p{...}`. A pattern written as a literal
+// in `regex.compile("...")` is checked when the program compiles.
 
 pub type Match {
   // the matched text
   text: String
   start: Int
   end: Int
-  // the parenthesized groups; none for a group that didn't take part
+  // groups[0] is the whole match, groups[1] the first parenthesized group,
+  // and so on (as $0, $1 in `replace`); none for a group that didn't take
+  // part. Up to 9 groups.
   groups: List<String?>
 }
 

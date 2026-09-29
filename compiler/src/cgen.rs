@@ -1781,7 +1781,7 @@ free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else dr
         let gl = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::opt(Ty::Text)]));
         self.need(H::Ops, gl);
         let (mc, glc) = (self.tys[mid].c.clone(), self.tys[gl].c.clone());
-        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 1; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from_input(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from_input(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
+        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 0; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from_input(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from_input(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
         name
     }
 

@@ -2781,6 +2781,14 @@ impl Checker {
         }
         let what = format!("`{}`", f.name);
         let checked = self.check_args(&params, args, span, &what, true);
+        // a regex written right here is checked now (see regex_check.rs)
+        if f.name == "compile" && self.prog.module_names.get(f.module).map(|m| m == "regex").unwrap_or(false) {
+            if let Some(TExpr { kind: TK::Text(p), span: psp, .. }) = checked.first() {
+                if let Some((msg, help)) = crate::regex_check::problem(p) {
+                    self.err_help(*psp, msg, help);
+                }
+            }
+        }
         targs_e.extend(checked);
         let throws = self.rethrow_result(&f, &targs_e[if f.self_mode == SelfMode::None { 0 } else { 1 }..], f.throws);
         self.check_constraints(&f, &targs, span);

@@ -1,0 +1,37 @@
+error: regex: lazy quantifiers like *? aren't supported
+  --> regex_literals.plumb:7:32
+  |
+7 |   let lazy = try regex.compile("<(.+?)>")
+  |                                ^^^^^^^^^
+  = help: match up to a stop character instead: `<([^>]+)>` rather than `<(.+?)>`
+error: regex: (?...) groups aren't supported, except (?i) at the start
+  --> regex_literals.plumb:8:33
+  |
+8 |   let group = try regex.compile("(?:ab)+")
+  |                                 ^^^^^^^^^
+  = help: use a plain group `(...)`; groups[1] and up are the parenthesized groups
+error: regex: \b and other anchors except ^ and $ aren't supported
+  --> regex_literals.plumb:9:32
+  |
+9 |   let word = try regex.compile("\\bword\\b")
+  |                                ^^^^^^^^^^^^
+  = help: match the characters around the word, e.g. `(^|[^[:alnum:]_])word([^[:alnum:]_]|$)`
+error: regex: parentheses not balanced
+  --> regex_literals.plumb:10:32
+   |
+10 |   let open = try regex.compile("(a|b")
+   |                                ^^^^^^
+   = help: close the `(` with `)`; `\\(` matches a parenthesis
+error: regex: \D, \W and \S can't be used inside [...]
+  --> regex_literals.plumb:11:33
+   |
+11 |   let class = try regex.compile("[\\S]")
+   |                                 ^^^^^^^
+   = help: use [^...] with \d, \w or \s
+error: regex: \p{...} classes aren't supported
+  --> regex_literals.plumb:12:35
+   |
+12 |   let unicode = try regex.compile("\\p{L}+")
+   |                                   ^^^^^^^^^
+   = help: use a POSIX class such as `[[:alpha:]]`, or list the characters
+6 error(s)

@@ -1261,6 +1261,9 @@ static lt_err lt_regex_translate(lt_text *p, char **out, int *icase) {
             case 'b': case 'B': case 'A': case 'z': case 'Z':
                 free(o);
                 return lt_make_failure(lt_text_cstr("regex: \\b and other anchors except ^ and $ aren't supported"));
+            case 'p': case 'P':
+                free(o);
+                return lt_make_failure(lt_text_cstr("regex: \\p{...} classes aren't supported"));
             default:
                 if (in_class) {
                     *w++ = n;

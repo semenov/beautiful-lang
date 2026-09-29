@@ -27,6 +27,14 @@ for f in *.plumb; do
     echo "FAIL $f: memory error"; head -20 /tmp/plumb-test-err; fail=1
   fi
 done
+# compile errors: `plumb check` must print exactly the .err file
+for f in ../errors/*.plumb; do
+  [ -f "${f%.plumb}.err" ] || continue
+  out=$(cd ../errors && $PLUMB_BIN check "$(basename "$f")" 2>&1)
+  if [ "$out" != "$(cat "${f%.plumb}.err")" ]; then
+    echo "FAIL $f: compile errors differ"; echo "$out" | head -20; fail=1
+  fi
+done
 # over real connections: each script's output must match its .out
 cd ../wire || exit 1
 for f in *.sh; do
