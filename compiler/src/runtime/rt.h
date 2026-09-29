@@ -1118,11 +1118,19 @@ static lt_text *lt_text_quote(lt_text *t) {
     return r;
 }
 
-// `"<t>" is not <what>` and, if there is one, `: <why>`
+// `"<t>" is not <what>` and, if there is one, `: <why>` (a long text
+// shortened to its first 100 bytes and "...")
 static lt_err lt_number_error(lt_text *t, const char *what, const char *why) {
-    lt_text *q = lt_text_quote(t);
+    int64_t cut = t->len;
+    if (cut > 100) {
+        cut = 100;
+        while (cut > 0 && !LT_IS_LEAD(t->data[cut])) cut--;
+    }
+    lt_text *shown = lt_text_from(t->data, cut);
+    lt_text *q = lt_text_quote(shown);
+    lt_text_drop(shown);
     char buf[160];
-    snprintf(buf, sizeof buf, " is not %s%s%s", what, why ? ": " : "", why ? why : "");
+    snprintf(buf, sizeof buf, "%s is not %s%s%s", cut < t->len ? "..." : "", what, why ? ": " : "", why ? why : "");
     lt_text *suffix = lt_text_cstr(buf);
     lt_text *parts[2] = { q, suffix };
     lt_text *msg = lt_text_concat_n(2, parts);
