@@ -143,10 +143,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] RealWorld "Conduit" API (ports/realworld, 2026-09-29, newcomer
         agent): official hurl suite 13/13 files (154 requests), Postman
         486/488; 883 lines vs Go's 1395. Gaps (ports/realworld/GAPS.md):
-    - [ ] **transactions on a shared connection**: concurrent `transaction`s
+    - [x] **transactions on a shared connection**: concurrent `transaction`s
           fail ("within a transaction"), and another task's insert joins an
           open transaction and vanishes on its rollback (major)
-    - [ ] no connection pool: every query of every request runs one at a
+    - [x] no connection pool: every query of every request runs one at a
           time (major)
     - [ ] the first matching route wins (`/articles/:slug` before
           `/articles/feed`); Go routers pick the most specific (major)

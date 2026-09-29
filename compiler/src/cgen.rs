@@ -3398,6 +3398,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                     }
                     "db.Connection.last_id" => format!("lt_db_last_id({})", a[0]),
                     "db.Connection.close" => format!("lt_db_close({})", a[0]),
+                    "db.Connection.__begin" => format!("lt_db_begin({})", a[0]),
+                    "db.Connection.__end" => format!("lt_db_end({}, {})", a[0], a[1]),
                     _ => panic!("unknown intrinsic {}", n),
                 }
             }

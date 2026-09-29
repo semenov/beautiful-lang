@@ -10,6 +10,11 @@
 // text is a compile error, so SQL injection can't happen. Parameters can be
 // Int, Float, String, Bool and Bytes, and new types over them (see `sql`).
 // `query<T>` fills records by column name (like `json.decode`).
+//
+// Open a database once and share the connection: a server's requests all
+// use the same one. It holds several SQLite connections (one per CPU, in
+// WAL mode; one for ":memory:"), so reads run in parallel and writes wait
+// for each other.
 
 import sql
 
@@ -21,7 +26,6 @@ pub builtin type Connection {
   // The rows as records, columns matched to fields by name.
   fn query<T>(self, query: sql.Query, params: List<sql.Value>) throws -> List<T>
   // An insert, returning the new row's id: `let id = try conn.insert(...)`.
-  // Safe when several tasks share the connection.
   fn insert(self, query: sql.Query, params: List<sql.Value>) throws -> Int
   // The id of the row inserted last on this connection (by any task: when
   // tasks share the connection, use `insert`).
@@ -29,16 +33,21 @@ pub builtin type Connection {
   fn close(self) throws
 
   // Runs `work` in a transaction: everything or nothing. An error inside
-  // rolls the changes back and comes out of `transaction`.
+  // rolls the changes back and comes out of `transaction`. The transaction
+  // is the task's own: other tasks' statements meanwhile aren't part of it.
+  // Inside another transaction it is a savepoint: an error rolls back only
+  // its own changes.
   fn transaction<R>(self, work: fn() throws -> R) throws -> R {
-    try self.execute("begin", [])
+    try self.__begin()
     let result = try work() catch err {
-      try self.execute("rollback", [])
+      try self.__end(commit: false)
       throw err
     }
-    try self.execute("commit", [])
+    try self.__end(commit: true)
     return result
   }
+  fn __begin(self) throws
+  fn __end(self, commit: Bool) throws
 }
 
 // Opens (or creates) a database file; ":memory:" for one that lives only

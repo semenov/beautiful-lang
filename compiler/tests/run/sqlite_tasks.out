@@ -1,0 +1,12 @@
+both committed: 2
+transaction: rolled back on purpose
+outside kept: 1, rolled back: 0
+inner: inner only
+outer: 1, inner: 0
+many: 40
+both committed: 2
+transaction: rolled back on purpose
+outside kept: 1, rolled back: 0
+inner: inner only
+outer: 1, inner: 0
+many: 40
