@@ -37,6 +37,9 @@ short version: what's in flight, what waits for Vlad, and what to do next.
     - list sort keys;
     - building a variant named `String`;
     - the guide example.
+- When gron is finished, copy it into `ports/gron` without binaries, the
+  way `ports/hey` and `ports/httpbin` were copied. Update the table in
+  `ports/README.md`. `tests/run.sh` checks that ports compile.
 - The go-httpbin port is done: see the TODO section "mccutchen/go-httpbin".
   Its code is in `/tmp/port-httpbin`, with `GAPS.md` there.
 
