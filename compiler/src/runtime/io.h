@@ -313,7 +313,14 @@ static lt_err lt_conn_write_raw(lt_handle *h, const void *d, int64_t n) {
         lt_err e = lt_conn_flush(c);
         if (e.obj) return e;
     }
-    if (c->is_stdout) fflush(stdout);
+    if (c->is_stdout) {
+        // through print's buffer: fast, and in order with print
+        if (fwrite(d, 1, (size_t)n, stdout) != (size_t)n) {
+            if (errno == EPIPE) _exit(141);
+            return lt_conn_error(c, "write", strerror(errno));
+        }
+        return (lt_err){ 0 };
+    }
     if (!lt_sock_write_all(c->fd, (const char *)d, (size_t)n)) {
         // the reader went away (`... | head`): stop quietly, as tools do
         if (errno == EPIPE && c->borrowed) _exit(141);
@@ -325,6 +332,7 @@ static lt_err lt_conn_write_raw(lt_handle *h, const void *d, int64_t n) {
 static lt_err lt_conn_close(lt_handle *h) {
     lt_conn *c = (lt_conn *)h;
     if (c->fd < 0) return (lt_err){ 0 };
+    if (c->is_stdout && fflush(stdout) != 0 && errno == EPIPE) _exit(141);
     lt_err e = lt_conn_flush(c);
     if (c->finish) {
         lt_err f = c->finish(c);

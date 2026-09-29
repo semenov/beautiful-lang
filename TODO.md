@@ -32,7 +32,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] tomnomnom/gron (JSON of any shape, streams, colors): being finished
     - [x] bug: appending to a shared list doubled its capacity (OOM on deep JSON)
     - [x] `String.slice` / `index_of` were O(n) per call: ASCII strings now O(1)
-    - [ ] `io.stdout().write_text` ~4x slower than `print` (buffering)
+    - [x] `io.stdout().write_text` was 10x slower than `print`: now shares its buffer
     - [ ] reading `m[k]` then writing `m[k]` copies the value (quadratic); `take` avoids it: document or optimize
     - [ ] JSON numbers as written (gron prints them verbatim; `json.Value.Number` is a Float)
     - [ ] Float text like JS/Go (`12345678901234567000`, not `1.2345678901234567e+19`)
