@@ -32,7 +32,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] runtime/stdlib: string index cache, `Shared.read()`, strict
         number parsing, duplicate JSON keys, regex groups[0] + literal
         check, `chunks(0)`, in-place `s = "${s}..."`
-  - [ ] README: "Choices that surprise people"
+  - [x] README: "Choices that surprise people"
   - [ ] later: stack traces, mutating through interface elements,
         Decimal 38 digits: write the complaints, then
       fix the language or explain in the README why it's right; keep it

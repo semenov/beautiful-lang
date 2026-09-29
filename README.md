@@ -292,6 +292,69 @@ Weak spots, known:
 - Each task reserves 8 MB of address space. That's nothing on 64-bit
   systems, unless the kernel is set up to refuse overcommitting memory.
 
+## Choices that surprise people
+
+A critic went through the language looking for problems
+([`research/critique.md`](research/critique.md), 38 complaints, each
+checked by running code). Most were fixed
+([`research/critique-response.md`](research/critique-response.md) says how).
+These were kept on purpose, because the alternative costs more than it gives
+in a language meant to be simple and fast:
+
+- **Generic functions can't compare or call methods on `T`.** There are no
+  bounds (`<T: Ordered>`), so a generic helper takes a function instead:
+  `largest(xs, key: x => x.score)`. Generic code is mostly library code;
+  bounds would be a whole concept for the few places that need it.
+  (`max`, `sum` and `sorted` know numbers and text by themselves.)
+- **Fields are visible everywhere.** Most types are data that other files
+  read: JSON bodies, database rows, settings. Private fields would put
+  `pub` on nearly every field for the few types that guard a rule, and
+  those are built through a function (`email.parse(text)`) by convention.
+- **SQL is one literal, written in the call.** Not a variable, not a
+  string built from pieces, not a choice between two literals. That's what
+  makes SQL injection impossible, and the compiler can check it. Optional
+  filters are written as `(?1 = '' or tag = ?1)`.
+- **Naming arguments: after the first when there are 3 or more
+  parameters, optional with 2.** Always naming would put `body:`,
+  `params:` and `handler:` on the most common lines of a backend
+  (`http.text(200, "ok")`, `conn.query(sql, [id])`), where swapping the
+  two is already a type error.
+- **Ranges are only for counting up in `for`.** `for i in 0..<n`; counting
+  down is a `while` loop, and a list backwards is `xs.reversed()`. Ranges
+  as values with `.reversed()` and `.step(n)` (Rust, Swift) would be a new
+  type for a rare need.
+- **`div` and `%` round down, toward minus infinity** (as in Python):
+  `(-7).div(2) == -4`, `(-1) % 7 == 6`, which is what you want for days of
+  the week, buckets and wrapping. Go, Rust, C and JS give `-3` and `-1`:
+  mind it when porting code with negative numbers.
+- **A change to a value someone else holds makes a copy.** Values are
+  copied on write, so `var t = s; t.items.append(x)` copies `s.items` if `s`
+  is still used afterwards. It's what makes values safe to pass around;
+  change values in place (`m[k].append(x)`, `xs[i].qty = 1`) instead of
+  reading them out and writing them back.
+- **A function waits for the tasks it starts.** A handler that `spawn`s an
+  email waits for it before replying. Work after the response goes to a
+  worker started in `main`, through a channel (AGENTS.md shows it). In
+  exchange, no task is ever left running by accident.
+- **JSON keys match loosely.** `createdAt`, `created_at` and `CreatedAt` all
+  fill the field `created_at`, so camelCase APIs need no mapping. A key
+  written twice, or two keys filling the same field, is an error.
+- **No shadowing, and module names are taken.** `let x = x + 1` is an
+  error, and after `import path` a variable can't be called `path`. Every
+  name in a function means one thing, which is easier to read and review.
+- **No operators on your own types.** `Money` or `Vector` have methods
+  (`a.plus(b)`), not `+`. Built-in number types (`Int`, `Float`,
+  `Decimal`) have operators; time types have `<` but not `+`.
+- **Names follow what things are.** `xs.length` is the number of items;
+  `xs.count(x => x > 0)` counts the ones that pass a test. `task.wait()`
+  needs `try` even for a task that can't fail, because waiting can be
+  cancelled (Ctrl-C); `channel.receive()` for the same reason, and it gives
+  `none` once the channel is closed and empty.
+- **`Int` and `Float` don't mix.** `total.to_float() / count.to_float()`
+  reads noisier than `total / count`, but no value changes type silently,
+  and `/` on two `Int`s (is that whole-number division?) doesn't exist:
+  `a.div(b)`.
+
 ## Status
 
 A working language and toolchain, used for real programs and packages. The

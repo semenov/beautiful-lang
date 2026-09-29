@@ -12,7 +12,7 @@ answer: does it keep the language simple and fast?
 | 1 | a change to a copy is silently lost | **fix**: the error DESIGN.md promises ("you changed a copy that is never used afterward"); the loop-variable hint points to an index loop |
 | 2 | enum patterns bind by position | **fix**: a binding named like a *different* field of the variant is an error (`Rect(height, width)`) |
 | 3 | string indexing quadratic for non-ASCII | **fix**: a string remembers its last (character, byte) position, so walking it is linear |
-| 4 | copy-on-write makes some loops quadratic | **explain** the rule (a change to a value someone else still holds copies it) + the idioms that avoid it; a compiler note later |
+| 4 | copy-on-write makes some loops quadratic | **explain** (README) the rule (a change to a value someone else still holds copies it) + the idioms that avoid it; a compiler note later |
 | 5 | `Shared` is one mutex | **fix**: `with v = s.read() { }` for readers (a readers-writer lock) |
 | 6 | generics without bounds | **explain**: asked; they stay without bounds (pass a function) |
 | 7 | SQL only as one literal | **explain**: asked; stays one literal for now |
