@@ -140,6 +140,34 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] docs: `b[i]` on Bytes, `is_letter`, the stack and speed notes
     - [x] a variant named `String` can't be built by its bare name: now it can where the enum is expected, else the error names `Value.String(...)`
     - [x] guide: a one-line record example doesn't parse
+  - [x] RealWorld "Conduit" API (ports/realworld, 2026-09-29, newcomer
+        agent): official hurl suite 13/13 files (154 requests), Postman
+        486/488; 883 lines vs Go's 1395. Gaps (ports/realworld/GAPS.md):
+    - [ ] **transactions on a shared connection**: concurrent `transaction`s
+          fail ("within a transaction"), and another task's insert joins an
+          open transaction and vanishes on its rollback (major)
+    - [ ] no connection pool: every query of every request runs one at a
+          time (major)
+    - [ ] the first matching route wins (`/articles/:slug` before
+          `/articles/feed`); Go routers pick the most specific (major)
+    - [ ] `json.decode<T>` can't tell a missing field from `null` (PUT
+          semantics) (major)
+    - [ ] `crypto.hash_password` ~200 ms vs ~22 ms for OpenSSL's PBKDF2
+    - [ ] a `String?` as an SQL parameter (docs say `none` is allowed)
+    - [ ] SQL can't be shared between queries (not even a top-level `let`)
+    - [ ] database errors are untyped (UNIQUE violation is only text)
+    - [ ] `http.json` has no camelCase option; `omit_none` is all or nothing
+    - [ ] `time.DateTime` has no milliseconds
+    - [ ] no plain mutex (a `Shared<Int>` nobody reads); middleware can't pass
+          the signed-in user to handlers; no route groups / prefixes
+    - [ ] a `{` block after `??` parses as a map literal (unclear error)
+    - [ ] `expect` only directly inside `test`, not in helpers
+    - [ ] slugs: no transliteration, no trimming of given characters
+    - [ ] jwt errors untyped (expired vs forged)
+    - [ ] `lang add --path` says "pinned in lang.lock" but writes none;
+          `lang fmt --check` exits 0 on a file that doesn't parse
+    - [ ] docs: cli `T?` without `= none`; `lang doc String` shows
+          `__find`; db sharing; route order; sql `none`
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
         on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).
