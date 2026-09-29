@@ -362,3 +362,43 @@ fn is_callback_line(l: &str, names: &[&str]) -> bool {
     let last = head.rsplit(|c: char| !(c.is_ascii_alphanumeric() || c == '_')).next().unwrap_or("");
     names.contains(&last)
 }
+
+// The program's unit in `parts` pieces to compile in parallel. Each piece
+// has everything before the generated code, and the generated code's
+// types, data and inline functions; every other function is defined in
+// one piece (no longer `static`) and declared in the others at the same
+// place. Functions go to the piece with the least code so far.
+pub fn split_program(program: &str, parts: usize) -> Option<Vec<String>> {
+    let at = program.find(MARKER)?;
+    let (head, generated) = (&program[..at], &program[at..]);
+    let its = items(generated);
+    let mut out: Vec<String> = (0..parts).map(|_| String::with_capacity(program.len() / parts + head.len())).collect();
+    let mut load = vec![0usize; parts];
+    for o in out.iter_mut() {
+        o.push_str(head);
+    }
+    for it in &its {
+        match it {
+            Item::Other(s) => out.iter_mut().for_each(|o| o.push_str(s)),
+            Item::Decl(d) => {
+                // prototypes lose `static` (their definitions are shared now)
+                let text = if is_function_decl(d) && !inline(d) { unstatic(d) } else { d.to_string() };
+                out.iter_mut().for_each(|o| o.push_str(&text));
+            }
+            Item::Func { sig, all } => {
+                if inline(sig) {
+                    out.iter_mut().for_each(|o| o.push_str(all));
+                    continue;
+                }
+                let k = (0..parts).min_by_key(|&k| load[k]).unwrap_or(0);
+                load[k] += all.len();
+                let def = unstatic(all);
+                let proto = format!("{};", unstatic(sig));
+                for (i, o) in out.iter_mut().enumerate() {
+                    o.push_str(if i == k { &def } else { &proto });
+                }
+            }
+        }
+    }
+    Some(out)
+}

@@ -216,13 +216,13 @@ Apple M-series laptop, 2026-09-29. Where we lose, `TODO.md` says why.)
 
 Compiling is slower than Go's, because the C compiler does most of the
 work. For the notes backend (`benchmarks/backend`, 167 lines), after a
-change: `plumb check` 8 ms, `plumb run` 0.62 s, `plumb build` (optimized)
+change: `plumb check` 8 ms, `plumb run` 0.39 s, `plumb build` (optimized)
 1.03 s; Go with a warm cache, `go build` 0.13 s. What helps:
 
 - an unchanged program comes from a build cache (12 ms);
 - `run` and `test` compile the runtime once per configuration (optimized)
   and cache it, so only the program's own code goes through the C compiler
-  each time.
+  each time, in pieces compiled side by side (one per CPU, up to 8).
 
 ## How tasks run
 

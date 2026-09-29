@@ -799,8 +799,13 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
                 Some(obj) => {
                     let p = build_dir().join(format!("{}-{}-program.c", exe_name, std::process::id()));
                     if std::fs::write(&p, &units.program).is_ok() {
-                        sources = vec![p.clone(), obj];
+                        sources = vec![p.clone(), obj.clone()];
                         program_c = Some(p);
+                        // a big program: its code in pieces compiled side by side
+                        if let Some(objs) = compile_parts(&cc, &cmd, &units.program, &exe_name) {
+                            sources = objs;
+                            sources.push(obj);
+                        }
                     }
                 }
                 None => {}
@@ -812,6 +817,11 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
     if let Some(p) = &program_c {
         if matches!(&status, Ok(s) if s.success()) && std::env::var("LANG_KEEP_C").is_err() {
             let _ = std::fs::remove_file(p);
+        }
+    }
+    for f in &sources {
+        if f.extension().map(|e| e == "o").unwrap_or(false) && f.to_string_lossy().contains("-part") {
+            let _ = std::fs::remove_file(f);
         }
     }
     // kept when the C compiler fails: the message points at it
@@ -832,6 +842,49 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
             false
         }
     }
+}
+
+// Compiles the program's unit in pieces at once (`cc -c` each), when it is
+// big enough for that to pay off; None: compile it whole.
+fn compile_parts(cc: &str, cmd: &Command, program: &str, exe_name: &str) -> Option<Vec<PathBuf>> {
+    let generated = program.len() - program.find(split::MARKER)?;
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
+    // about 25 KB of generated C per piece (~600 lines), at most one per
+    // CPU: the backend benchmark (160 KB) goes from 0.64 s to 0.39 s
+    let mut parts = (generated / 25_000).min(cpus).min(8);
+    if let Some(n) = std::env::var("PLUMB_PARTS").ok().and_then(|v| v.parse::<usize>().ok()) {
+        parts = n;
+    }
+    if parts < 2 || std::env::var("PLUMB_NO_PARTS").is_ok() {
+        return None;
+    }
+    let pieces = split::split_program(program, parts)?;
+    let flags: Vec<std::ffi::OsString> = cmd.get_args().map(|a| a.to_owned()).collect();
+    let mut children = vec![];
+    let mut objs = vec![];
+    for (i, text) in pieces.iter().enumerate() {
+        let c_path = build_dir().join(format!("{}-{}-part{}.c", exe_name, std::process::id(), i));
+        let o_path = build_dir().join(format!("{}-{}-part{}.o", exe_name, std::process::id(), i));
+        std::fs::write(&c_path, text).ok()?;
+        let child = Command::new(cc).args(&flags).arg("-c").arg("-o").arg(&o_path).arg(&c_path).spawn().ok()?;
+        children.push((child, c_path));
+        objs.push(o_path);
+    }
+    let mut ok = true;
+    for (mut child, c_path) in children {
+        ok &= child.wait().map(|s| s.success()).unwrap_or(false);
+        if std::env::var("LANG_KEEP_C").is_err() {
+            let _ = std::fs::remove_file(&c_path);
+        }
+    }
+    if !ok {
+        eprintln!("warning: compiling the program in pieces failed; compiling it whole");
+        if std::env::var("PLUMB_SPLIT_STRICT").is_ok() {
+            std::process::exit(3);
+        }
+        return None;
+    }
+    Some(objs)
 }
 
 // The runtime unit compiled to an object file, from the cache when the
