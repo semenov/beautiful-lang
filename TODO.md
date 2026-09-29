@@ -202,9 +202,14 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - `/` on Ints is an error (use `.div`): tripped 3 times; the error is clear
   - `catch` without `try` in front is a parse error with a vague message
 - [ ] Performance: `words` benchmark is slower than Go (Text is not a view)
-      (2026-09-29, Vlad asked again: 1.37 s vs Go 0.95 s)
-- [ ] Performance: HTTP file server, small files: 93k req/s vs Go's 100k
-      (README; Vlad asked again 2026-09-29)
+      (2026-09-29, Vlad asked again: 1.37 s vs Go 0.95 s). Per round: gen+join
+      65 vs 75 ms, split 77 vs 55, counting 103 vs 79, the rest (top 5, frees)
+      ~25 vs ~0. The gap is one heap object per piece (5M allocations, reads,
+      frees); a faster split loop changed nothing. The fix is the text
+      representation: (pointer, length, owner) values or views into the parent
+- [x] Performance: HTTP file server, small files: 93k req/s vs Go's 100k
+      (README; Vlad asked again 2026-09-29). Re-measured (100 files of 2 KB,
+      64 connections): lang 75-93k req/s, 7 MB; Go FileServer 55k, 27 MB
 
 ## Done
 

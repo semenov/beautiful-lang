@@ -198,8 +198,8 @@ reference counting that the compiler inserts, with no garbage collector.
 | records (allocation-heavy) | 0.38 s, 156 MB | 0.46 s, 396 MB |
 | binary trees | 2.17 s | 2.63 s |
 | sort | 1.07 s | 1.62 s |
-| word count | 1.29 s | 0.93 s |
-| HTTP file server, small files | 93k req/s, 7 MB | 100k req/s, 23 MB |
+| word count | 1.37 s | 0.95 s |
+| HTTP file server, 2 KB files | 75-93k req/s, 7 MB | 55k req/s, 27 MB |
 
 (`benchmarks/`, an Apple M-series laptop.)
 
