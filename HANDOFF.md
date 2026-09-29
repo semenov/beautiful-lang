@@ -24,31 +24,38 @@ short version: what's in flight, what waits for Vlad, and what to do next.
   (see `git log`).
 - `plumb fmt` must pass: the test suite checks it.
 
-## Latest (2026-09-29, night)
+## Latest (2026-09-30)
 
-Done and pushed: db.Connection is a pool (transactions are the task's own;
-RealWorld #1, #2); most specific route wins (#3); `T?` SQL parameters (#6);
-`http.json_with` (#9); DateTime milliseconds (#10); fmt reports files that
-don't parse (#20); `??` block hint (#14); `plumb add --path` message (#19);
-`plumb init` replaces `plumb new`; a build cache (unchanged program: 12 ms);
-workers and the db pool follow the container's CPU limit (PLUMB_WORKERS);
-benchmarks/backend/docker.sh (one CPU: Plumb ~= tuned Go, half the memory).
+Done and pushed since the 29th (details in TODO.md and git log):
+- The critic's review: research/critique.md (38 complaints) and
+  research/critique-response.md (the answer to each). Vlad's choices are in
+  DESIGN.md "After the critic's review"; after a second look he kept
+  generics without bounds, visible fields, SQL as one literal, argument
+  names and ranges as they were. README "Choices that surprise people"
+  explains those.
+- New compile errors: an optional in text, `m[k] += 1`, a lambda seeing an
+  old `var`, unused `let`/import, a change to a copy never read, swapped
+  pattern names, a lambda keeping a `with` resource, Shared in Shared.
+  `is` looks through `cause`; narrowing through `or`; time types and new
+  types ordered; `plumb test` runs the project; tests/errors/*.err check
+  the messages.
+- A String is always valid UTF-8 (invalid bytes become U+FFFD on the way
+  in; Vlad's choice A).
+- Compile time: the runtime is a cached object, the program compiles in
+  pieces in parallel, a build cache: backend `plumb run` 0.39 s, `plumb
+  build` 0.23 s (was 1.0 s; Go 0.13 s), at the same run speed.
+- A panic prints the call stack and the right file.
+- db: a pool (transactions per task, reads in parallel), rolled back on a
+  handler panic; `sql.UniqueViolation`; route prefixes; `trim_chars`;
+  jwt.Expired/Invalid; workers follow the container's CPU limit.
 
 Next:
-- **Compile time** (Vlad asked): `plumb build` of the backend is 1.03 s vs
-  Go's 127 ms (warm). The C compiler is ~all of it. Measured: a runtime
-  compiled once per configuration and cached would cut the program's C to
-  ~510 ms at -O1; the rest is generated code (much of it stdlib Plumb code
-  like Router.route), which could be split into TUs compiled in parallel.
-  Plan: runtime functions non-static behind a macro, runtime TU cached by
-  hash + flags, generated code in N TUs.
-- RealWorld gaps left that need Vlad: #4 missing vs null in decode, #7 SQL
-  shared between queries, #11 omit one field, #13 per-request values from
-  middleware, #15 `expect` in helpers. Without a decision: #5 PBKDF2 speed,
-  #8 typed db errors, #12 mutex, #16 route groups, #17 trim_matches /
-  transliteration, #18 jwt errors, the docs items.
-- A panic inside `transaction` leaves its handle pinned (the task is gone):
-  release pins when a task ends.
+- Ask Vlad, one at a time and with how other languages do it (see the
+  memory note on syntax choices): RealWorld #4 missing vs null in
+  json.decode, #11 leaving out one field, #13 per-request values from
+  middleware, #15 `expect` in helpers.
+- Where benchmarks still lose (TODO "More benchmarks").
+- Locations on thrown errors; smaller generated C.
 
 ## Next, in this order
 
