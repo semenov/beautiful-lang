@@ -2882,6 +2882,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "Float.to_decimal" => format!("lt_decimal_from_float({}, {})", a[0], line),
             "String.to_decimal" => format!("lt_text_to_decimal({}, {})", a[0], a[1]),
             "eprint" => format!("lt_eprint({})", a[0]),
+            "io.write" => format!("lt_write_out({})", a[0]),
             "scope_new" => {
                 self.threads = true;
                 "((int64_t)(intptr_t)lt_scope_new())".to_string()
@@ -3670,6 +3671,16 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             let xt = Ty::Adt(self.prog.b.channel_closed, vec![]);
             let xc = self.cty(&xt);
             let _ = write!(make_failure, "static lt_err lt_make_cancelled(void) {{ return to_iface_vt{}(({}){{0}}); }}\nstatic lt_err lt_make_channel_closed(void) {{ return to_iface_vt{}(({}){{0}}); }}\n", self.m.cancelled_vtable, cc, self.m.closed_vtable, xc);
+        }
+        // lt_make_file_error: 1 NotFound, 2 PermissionDenied, 3 IsADirectory,
+        // 4 AlreadyExists, when the program has `files`; else a Failure
+        {
+            let mut cases = String::new();
+            for (i, (t, vt)) in self.m.file_errors.clone().iter().enumerate() {
+                let c = self.cty(t);
+                let _ = write!(cases, " case {}: return to_iface_vt{}(({}){{ lt_text_ret(path), msg }});", i + 1, vt, c);
+            }
+            let _ = writeln!(make_failure, "static lt_err lt_make_file_error(int kind, lt_text *path, lt_text *msg) {{ (void)path; switch (kind) {{{} default: return lt_make_failure(msg); }} }}", cases);
         }
         // error message: Error.message is slot 0 of the Error interface
         let err_msg = "static lt_text *lt_error_message(lt_err e) { return ((lt_text *(*)(lt_obj *))e.vt->m[0])(e.obj); }\n\

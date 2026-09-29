@@ -75,12 +75,15 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           (generated tables: L/Lu/Ll and case mappings, so lower/upper work
           past ASCII too; `String.code_points()`, `Int.character()`)
     - [ ] `http.ResponseStream` isn't an `io.Stream`
-    - [ ] file errors have no kinds (NotFound, ...); `files.read` of a
-          directory gives empty text instead of an error
+    - [x] file errors have no kinds (NotFound, ...); `files.read` of a
+          directory gives empty text instead of an error (files.NotFound,
+          PermissionDenied, IsADirectory, AlreadyExists; others: Failure)
     - [ ] `read_line` can return non-UTF-8 text that `Bytes.text()` refuses
+          -- a question for Vlad: is a String always UTF-8 (replace bad bytes
+          on the way in) or any bytes, as in Go (then `text()` can't fail)?
     - [ ] HTTP client: proxy and "insecure" options
-    - [ ] print without a line break without a `with` stream
-    - [ ] errors: misplaced `catch` inside a lambda says "expected `)`"; a
+    - [x] print without a line break without a `with` stream (`io.write`)
+    - [x] errors: misplaced `catch` inside a lambda says "expected `)`"; a
           file named like a stdlib module gets an unclear error
     - [ ] docs: `b[i]` on Bytes, `is_letter`, the stack and speed notes
     - [x] a variant named `String` can't be built by its bare name: now it can where the enum is expected, else the error names `Value.String(...)`

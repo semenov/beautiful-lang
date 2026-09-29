@@ -20,7 +20,9 @@ static lt_err lt_os_error(const char *what, lt_text *path) {
     char buf[1024];
     int e = errno;
     snprintf(buf, sizeof buf, "%s \"%.*s\": %s", what, (int)(path ? path->len : 0), path ? path->data : "", strerror(e));
-    return lt_make_failure(lt_text_cstr(buf));
+    int kind = e == ENOENT ? 1 : (e == EACCES || e == EPERM) ? 2 : e == EISDIR ? 3 : e == EEXIST ? 4 : 0;
+    if (!path) kind = 0;
+    return lt_make_file_error(kind, path, lt_text_cstr(buf));
 }
 
 // ---------------------------------------------------------------- handles
@@ -44,6 +46,12 @@ LT_INLINE void lt_handle_drop(lt_handle *h) {
 static lt_err lt_files_read(lt_text *path, lt_text **out) {
     FILE *f = fopen(path->data, "rb");
     if (!f) return lt_os_error("can't read", path);
+    struct stat st;
+    if (fstat(fileno(f), &st) == 0 && S_ISDIR(st.st_mode)) {
+        fclose(f);
+        errno = EISDIR;
+        return lt_os_error("can't read", path);
+    }
     if (fseek(f, 0, SEEK_END) == 0) {
         long n = ftell(f);
         if (n >= 0) {

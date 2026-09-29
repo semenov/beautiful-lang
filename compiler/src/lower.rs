@@ -145,6 +145,15 @@ impl<'a> Lowerer<'a> {
         let failure_vtable = self.vtable(failure, vec![self.prog.b.error]);
         let cancelled_vtable = self.vtable(Ty::Adt(self.prog.b.cancelled, vec![]), vec![self.prog.b.error]);
         let closed_vtable = self.vtable(Ty::Adt(self.prog.b.channel_closed, vec![]), vec![self.prog.b.error]);
+        let mut file_errors = vec![];
+        for name in ["NotFound", "PermissionDenied", "IsADirectory", "AlreadyExists"] {
+            let d = (0..self.prog.defs.len()).find(|&d| self.prog.defs[d].name == name && self.prog.module_names.get(self.prog.defs[d].module).map(|m| m == "files").unwrap_or(false));
+            if let Some(d) = d {
+                let t = Ty::Adt(d, vec![]);
+                let vt = self.vtable(t.clone(), vec![self.prog.b.error]);
+                file_errors.push((t, vt));
+            }
+        }
         self.drain();
         // every type that reaches a combination converted to another needs
         // a vtable for the other one too (and its methods may add more)
@@ -161,7 +170,7 @@ impl<'a> Lowerer<'a> {
                 break;
             }
         }
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts, shows: self.shows }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns, consts: self.consts, shows: self.shows, file_errors }
     }
 
     fn drain(&mut self) {

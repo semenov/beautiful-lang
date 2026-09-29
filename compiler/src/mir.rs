@@ -169,6 +169,9 @@ pub struct Module {
     pub consts: Vec<FnIdx>,
     // types whose text comes from their own `to_string` method
     pub shows: Vec<(Ty, FnIdx)>,
+    // files.NotFound, PermissionDenied, IsADirectory, AlreadyExists (when
+    // the program uses `files`): their types and vtables
+    pub file_errors: Vec<(Ty, usize)>,
 }
 
 impl Stmt {

@@ -4,6 +4,51 @@
 import io
 import path
 
+// The kinds of failure a program often handles on its own:
+// `try files.read(p) catch err { if err is files.NotFound { ... } }`.
+// Other failures are a `Failure` with the system's reason.
+
+// Nothing exists at the path.
+pub type NotFound implements Error {
+  path: String
+  // what failed and why: `can't read "a.txt": No such file or directory`
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+// The permissions don't allow it.
+pub type PermissionDenied implements Error {
+  path: String
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+// A file was expected, and the path is a directory.
+pub type IsADirectory implements Error {
+  path: String
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+// Something already exists at the path.
+pub type AlreadyExists implements Error {
+  path: String
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
 // The whole file as text.
 pub fn read(path: String) throws -> String
 // The whole file as bytes.

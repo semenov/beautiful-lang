@@ -1,4 +1,4 @@
-// A project file named like a standard module (url.lang) can't import that
+// FIXED (the error names the shadowed module). Was: A project file named like a standard module (url.lang) can't import that
 // standard module: "the main file can't be imported". The error should say
 // that the file name shadows the standard `url` module.
 import url

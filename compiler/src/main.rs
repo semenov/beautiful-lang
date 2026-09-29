@@ -409,6 +409,12 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
             };
             imp.key = key.clone();
             graph.entry(from_key.to_string()).or_default().push((key.clone(), imp.span));
+            if key == entry_key && base.prefix.is_empty() && file.is_none() {
+                let d = diag::Diag::new(imp.span, format!("this file is named like the standard `{}` module, so it can't import it", dotted)).help(format!("rename the file (say, `my_{}.lang`)", dotted));
+                eprint!("{}", sources.render(&d));
+                ok = false;
+                continue;
+            }
             if key == entry_key && base.prefix.is_empty() {
                 let d = diag::Diag::new(imp.span, "the main file can't be imported").help("move the shared code into its own file and import that");
                 eprint!("{}", sources.render(&d));

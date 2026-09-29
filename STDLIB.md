@@ -14,6 +14,31 @@ files: read and write files and directories. Paths are text; errors say
 which path failed and why.
 
 ```
+// Nothing exists at the path.
+pub type NotFound implements Error {
+  path: String
+  // what failed and why: `can't read "a.txt": No such file or directory`
+  text: String
+}
+
+// The permissions don't allow it.
+pub type PermissionDenied implements Error {
+  path: String
+  text: String
+}
+
+// A file was expected, and the path is a directory.
+pub type IsADirectory implements Error {
+  path: String
+  text: String
+}
+
+// Something already exists at the path.
+pub type AlreadyExists implements Error {
+  path: String
+  text: String
+}
+
 // The whole file as text.
 pub fn read(path: String) throws -> String
 // The whole file as bytes.
@@ -156,6 +181,10 @@ pub builtin type Stream {
 pub fn stdin() -> Stream
 pub fn stdout() -> Stream
 pub fn stderr() -> Stream
+
+// Text to standard output as it is, without a line break: a prompt, a
+// progress line ("\r42%"). `print` adds the line break.
+pub fn write(text: String)
 
 // The next line of standard input; none at the end.
 pub fn read_line() throws -> String?

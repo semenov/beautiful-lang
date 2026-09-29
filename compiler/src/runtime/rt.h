@@ -389,6 +389,7 @@ LT_INLINE void lt_iface_unique(lt_iface *x) {
 }
 
 static lt_err lt_make_failure(lt_text *msg);
+static lt_err lt_make_file_error(int kind, lt_text *path, lt_text *msg);
 
 // ---------------------------------------------------------------- text
 
@@ -1195,6 +1196,17 @@ static void lt_print(lt_text *t) {
     fwrite(t->data, 1, (size_t)t->len, stdout);
     putc_unlocked('\n', stdout);
     // the reader went away (`... | head`): stop quietly, as tools do
+    if (ferror_unlocked(stdout) && errno == EPIPE) _exit(141);
+    funlockfile(stdout);
+}
+
+// io.write: no line break; shown at once on a terminal (a prompt, progress)
+static void lt_write_out(lt_text *t) {
+    static int tty = -1;
+    if (tty < 0) tty = isatty(1);
+    flockfile(stdout);
+    fwrite(t->data, 1, (size_t)t->len, stdout);
+    if (tty) fflush(stdout); // (the lock is recursive)
     if (ferror_unlocked(stdout) && errno == EPIPE) _exit(141);
     funlockfile(stdout);
 }

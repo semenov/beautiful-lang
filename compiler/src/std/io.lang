@@ -39,6 +39,10 @@ pub fn stdin() -> Stream
 pub fn stdout() -> Stream
 pub fn stderr() -> Stream
 
+// Text to standard output as it is, without a line break: a prompt, a
+// progress line ("\r42%"). `print` adds the line break.
+pub fn write(text: String)
+
 // The next line of standard input; none at the end.
 pub fn read_line() throws -> String?
 // All of standard input.

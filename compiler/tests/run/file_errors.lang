@@ -1,0 +1,33 @@
+// File errors have kinds to test with `is`; reading a directory is an error.
+import files
+
+fn kind(err: Error) -> String {
+  if err is files.NotFound {
+    return "not found"
+  }
+  if err is files.IsADirectory {
+    return "a directory"
+  }
+  if err is files.PermissionDenied {
+    return "permission denied"
+  }
+  return "other"
+}
+
+fn main() throws {
+  with dir = try files.temp_dir() {
+    let missing = "${dir.path}/missing.txt"
+    for p in [missing, dir.path] {
+      let text = try files.read(p) catch err {
+        print("${kind(err)}: ${err.message().replace(dir.path, new: "DIR")}")
+        continue
+      }
+      print(text)
+    }
+    let n = try files.read_bytes(dir.path).length catch err {
+      print("read_bytes: ${kind(err)}")
+      0
+    }
+    print("${n}")
+  }
+}

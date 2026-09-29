@@ -1,0 +1,8 @@
+// io.write: standard output without a line break.
+import io
+
+fn main() {
+  io.write("a")
+  io.write("b\n")
+  print("c")
+}

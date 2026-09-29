@@ -1,4 +1,4 @@
-// 1. File errors are only text: there is no NotFound / PermissionDenied /
+// FIXED (files.NotFound etc.; reading a directory is an error). Was: 1. File errors are only text: there is no NotFound / PermissionDenied /
 //    IsADirectory to test with `is`, so a program that words its own
 //    messages (gron copies Go's "open x: permission denied") has to match on
 //    the text or ask files.exists / files.is_dir again.

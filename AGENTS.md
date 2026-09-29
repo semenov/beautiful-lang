@@ -35,7 +35,9 @@ reasons behind the rules are in `DESIGN.md`.
 - Files: `files.read` / `write` / `append` (whole files), `files.open` /
   `create` / `open_append` (streams, with `with`), `list`, `walk`, `glob`,
   `exists`, `is_dir`, `make_dir`, `copy`, `rename`, `delete`, `delete_all`,
-  `temp_dir`. Paths as text: the `path` module.
+  `temp_dir`. Paths as text: the `path` module. Failures to handle:
+  `if err is files.NotFound` (also `PermissionDenied`, `IsADirectory`,
+  `AlreadyExists`).
 
 ## Syntax at a glance
 

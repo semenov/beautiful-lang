@@ -1,0 +1,4 @@
+not found: can't read "DIR/missing.txt": No such file or directory
+a directory: can't read "DIR": Is a directory
+read_bytes: a directory
+0

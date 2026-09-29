@@ -84,6 +84,8 @@ impl Parser {
             let s = self.span();
             self.bump();
             Ok(s)
+        } else if self.at(&Tok::Catch) {
+            Err(self.err_here("`catch` needs `try` before the call it handles").help("`try` goes at the start and covers the whole expression: `try h(g(x)) catch err { ... }`"))
         } else {
             Err(self.err_here(format!("expected {}, found {}", what, Self::describe(self.peek()))))
         }
