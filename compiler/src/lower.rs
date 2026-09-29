@@ -15,9 +15,66 @@ struct Fb<'a> {
     // for rethrows instances called with non-throwing functions
     no_throw_fns: bool,
     body_locals: &'a [LocalDef],
-    loops: Vec<(B, B)>,
+    // (break target, continue target, cleanup depth)
+    loops: Vec<(B, B, usize)>,
     line: u32,
     closed: Vec<bool>,
+    // things to undo on every way out: locks, the function's tasks
+    cleanups: Vec<Cleanup>,
+    scope: Option<L>,
+    last_propagate: Option<B>,
+}
+
+#[derive(Clone)]
+enum Cleanup {
+    Unlock { shared: L, var: L, ty: Ty },
+    Scope(L),
+}
+
+// Does the code start tasks (not counting nested lambdas)?
+fn expr_spawns(e: &TExpr) -> bool {
+    match &e.kind {
+        TK::Spawn(_) => true,
+        TK::Lambda { .. } => false,
+        TK::Call { callee, args, .. } => {
+            (match callee {
+                Callee::Value(f) => expr_spawns(f),
+                _ => false,
+            }) || args.iter().any(expr_spawns)
+        }
+        TK::MutCall { place, args, .. } | TK::IfaceMutCall { place, args, .. } => place_spawns(place) || args.iter().any(expr_spawns),
+        TK::Record { fields, .. } | TK::Variant { fields, .. } | TK::Interp(fields) | TK::List(fields) => fields.iter().any(expr_spawns),
+        TK::Map(entries) => entries.iter().any(|(k, v)| expr_spawns(k) || expr_spawns(v)),
+        TK::Wrap(x) | TK::Unwrap(x) | TK::Field(x, _) | TK::Prop(x, _) | TK::Unary(_, x) | TK::Some(x) | TK::ToIface(x) | TK::ToText(x) | TK::ExpectThrows(x) | TK::Is(x, _) => expr_spawns(x),
+        TK::Index(a, b) | TK::MapGet(a, b) | TK::Binary(_, a, b) | TK::Coalesce(a, b) => expr_spawns(a) || expr_spawns(b),
+        TK::Block(b) => block_spawns(b),
+        TK::If { cond, then, els } => expr_spawns(cond) || block_spawns(then) || els.as_ref().map(|x| expr_spawns(x)).unwrap_or(false),
+        TK::Match { scrut, arms } => expr_spawns(scrut) || arms.iter().any(|a| expr_spawns(&a.body) || a.guard.as_ref().map(expr_spawns).unwrap_or(false)),
+        TK::Try { call, catch } => expr_spawns(call) || catch.as_ref().map(|(_, b)| block_spawns(b)).unwrap_or(false),
+        TK::Diverge(s) => stmt_spawns(s),
+        _ => false,
+    }
+}
+fn place_spawns(p: &TPlace) -> bool {
+    p.path.iter().any(|e| match e {
+        PlaceElem::Index(x) | PlaceElem::MapKey(x) => expr_spawns(x),
+        _ => false,
+    })
+}
+fn block_spawns(b: &TBlock) -> bool {
+    b.stmts.iter().any(stmt_spawns) || b.tail.as_ref().map(|x| expr_spawns(x)).unwrap_or(false)
+}
+fn stmt_spawns(s: &TStmt) -> bool {
+    match s {
+        TStmt::Let(_, e) | TStmt::Discard(e) | TStmt::Expr(e) | TStmt::Throw(e) => expr_spawns(e),
+        TStmt::Assign(p, e) => place_spawns(p) || expr_spawns(e),
+        TStmt::Return(e) => e.as_ref().map(expr_spawns).unwrap_or(false),
+        TStmt::While(c, b) => expr_spawns(c) || block_spawns(b),
+        TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } => expr_spawns(e) || block_spawns(body),
+        TStmt::ForRange { lo, hi, body, .. } => expr_spawns(lo) || expr_spawns(hi) || block_spawns(body),
+        TStmt::Expect { cond, .. } => expr_spawns(cond),
+        TStmt::Break | TStmt::Continue => false,
+    }
 }
 
 pub struct Lowerer<'a> {
@@ -71,8 +128,10 @@ impl<'a> Lowerer<'a> {
         // the runtime builds `Failure` errors (e.g. for `to_int`)
         let failure = Ty::Adt(self.prog.b.failure, vec![]);
         let failure_vtable = self.vtable(failure, vec![self.prog.b.error]);
+        let cancelled_vtable = self.vtable(Ty::Adt(self.prog.b.cancelled, vec![]), vec![self.prog.b.error]);
+        let closed_vtable = self.vtable(Ty::Adt(self.prog.b.channel_closed, vec![]), vec![self.prog.b.error]);
         self.drain();
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable }
     }
 
     fn drain(&mut self) {
@@ -127,7 +186,7 @@ impl<'a> Lowerer<'a> {
 
     fn build(&mut self, body: &'a TBody, subst: Vec<Ty>, no_throw: bool, name: String, kind: FnKind, ret: Ty, throws: bool, mutating: bool, src_name: String) -> Func {
         let func = Func { name, kind, params: vec![], ret: ret.clone(), throws, mutating, locals: vec![], blocks: vec![], source_name: src_name };
-        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals: &body.locals, loops: vec![], line: 0, closed: vec![] });
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals: &body.locals, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
         self.new_block();
         for (i, p) in body.params.iter().enumerate() {
             let ty = self.local_ty(*p);
@@ -138,14 +197,17 @@ impl<'a> Lowerer<'a> {
             self.fb().map.insert(*p, l);
             self.fb().f.params.push(l);
         }
+        if block_spawns(&body.block) {
+            self.open_scope();
+        }
         let v = self.block(&body.block);
         if !self.terminated() {
             let r = self.fb().f.ret.clone();
             if r == Ty::Unit || r == Ty::Never {
-                self.term(Term::Return(Op::Unit));
+                self.ret(Op::Unit);
             } else {
                 // a value block (lambdas): return the tail
-                self.term(Term::Return(v));
+                self.ret(v);
             }
         }
         self.fbs.pop().unwrap().f
@@ -249,6 +311,73 @@ impl<'a> Lowerer<'a> {
         }
     }
 
+    // ---- cleanups: locks and the function's tasks ----
+
+    fn open_scope(&mut self) {
+        let s = self.new_local(Ty::Int, "scope");
+        self.emit(Stmt::Assign(s, Rv::Call(MCallee::Intrinsic("scope_new".into(), vec![]), vec![])));
+        self.fb().scope = Some(s);
+        self.fb().cleanups.push(Cleanup::Scope(s));
+    }
+
+    // Undo cleanups down to `depth`. On the error path, tasks are cancelled
+    // and their errors ignored (the function already has one).
+    fn run_cleanups(&mut self, depth: usize, error: bool) {
+        let items: Vec<Cleanup> = self.fbr().cleanups[depth..].iter().rev().cloned().collect();
+        for c in items {
+            match c {
+                Cleanup::Unlock { shared, var, ty } => {
+                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![ty]), vec![Op::Local(shared), Op::Local(var)]));
+                }
+                Cleanup::Scope(s) => {
+                    if error {
+                        let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("scope_cancel".into(), vec![]), vec![Op::Local(s)]));
+                    } else {
+                        let err = self.tmp(self.prog.error_ty());
+                        self.emit(Stmt::CallT { dst: None, err, callee: MCallee::Intrinsic("scope_end".into(), vec![]), args: vec![Op::Local(s)] });
+                        let bad = self.new_block();
+                        let ok = self.new_block();
+                        self.term(Term::IfErr(err, bad, ok));
+                        self.switch_to(bad);
+                        self.term(Term::Throw(Op::Local(err)));
+                        self.switch_to(ok);
+                    }
+                }
+            }
+        }
+    }
+
+    fn ret(&mut self, v: Op) {
+        if self.terminated() {
+            return;
+        }
+        let v = match v {
+            Op::Local(l) if !self.fbr().cleanups.is_empty() => Op::Local(l),
+            o if !self.fbr().cleanups.is_empty() && !matches!(o, Op::Unit) => {
+                let ty = self.fbr().f.ret.clone();
+                Op::Local(self.to_local(o, ty))
+            }
+            o => o,
+        };
+        self.run_cleanups(0, false);
+        self.term(Term::Return(v));
+    }
+
+    fn throw(&mut self, v: Op) {
+        if self.terminated() {
+            return;
+        }
+        let v = match v {
+            Op::Local(l) => Op::Local(l),
+            o => {
+                let et = self.prog.error_ty();
+                Op::Local(self.to_local(o, et))
+            }
+        };
+        self.run_cleanups(0, true);
+        self.term(Term::Throw(v));
+    }
+
     // ---- vtables ----
 
     fn vtable(&mut self, concrete: Ty, ids: Vec<DefId>) -> usize {
@@ -318,20 +447,73 @@ impl<'a> Lowerer<'a> {
                     }
                     None => Op::Unit,
                 };
-                self.term(Term::Return(v));
+                self.ret(v);
             }
             TStmt::Break => {
-                let t = self.fbr().loops.last().unwrap().0;
+                let (t, _, depth) = *self.fbr().loops.last().unwrap();
+                self.run_cleanups(depth, false);
                 self.term(Term::Goto(t));
             }
             TStmt::Continue => {
-                let t = self.fbr().loops.last().unwrap().1;
+                let (_, t, depth) = *self.fbr().loops.last().unwrap();
+                self.run_cleanups(depth, false);
                 self.term(Term::Goto(t));
             }
             TStmt::Throw(e) => {
                 self.set_line(e.span);
                 let v = self.expr(e);
-                self.term(Term::Throw(v));
+                self.throw(v);
+            }
+            TStmt::WithLock { var, shared, body } => {
+                self.set_line(shared.span);
+                let sty = self.ty(&shared.ty);
+                let vty = match &sty {
+                    Ty::Adt(_, a) => a[0].clone(),
+                    _ => unreachable!(),
+                };
+                let sv = self.expr(shared);
+                let sl = self.new_local(sty.clone(), "shared");
+                self.emit(Stmt::Assign(sl, Rv::Use(sv)));
+                let name = self.fbr().body_locals[*var].name.clone();
+                let x = self.new_local(vty.clone(), &name);
+                self.fb().map.insert(*var, x);
+                self.emit(Stmt::Assign(x, Rv::Call(MCallee::Intrinsic("Shared.acquire".into(), vec![vty.clone()]), vec![Op::Local(sl)])));
+                self.fb().cleanups.push(Cleanup::Unlock { shared: sl, var: x, ty: vty.clone() });
+                self.block(body);
+                self.fb().cleanups.pop();
+                if !self.terminated() {
+                    let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![vty]), vec![Op::Local(sl), Op::Local(x)]));
+                }
+            }
+            TStmt::ForChannel { var, chan, body } => {
+                self.set_line(chan.span);
+                let cty = self.ty(&chan.ty);
+                let elem = match &cty {
+                    Ty::Adt(_, a) => a[0].clone(),
+                    _ => unreachable!(),
+                };
+                let cv = self.expr(chan);
+                let cl = self.new_local(cty.clone(), "chan");
+                self.emit(Stmt::Assign(cl, Rv::Use(cv)));
+                let head = self.new_block();
+                let bodyb = self.new_block();
+                let exit = self.new_block();
+                self.term(Term::Goto(head));
+                self.switch_to(head);
+                let item = self.assign(Ty::opt(elem.clone()), Rv::Call(MCallee::Intrinsic("Channel.next".into(), vec![cty.clone()]), vec![Op::Local(cl)]));
+                let c = self.assign(Ty::Bool, Rv::OptIsSome(item.clone()));
+                self.term(Term::If(c, bodyb, exit));
+                self.switch_to(bodyb);
+                let name = self.fbr().body_locals[*var].name.clone();
+                let v = self.new_local(elem, &name);
+                self.fb().map.insert(*var, v);
+                self.emit(Stmt::Assign(v, Rv::OptGet(item, false)));
+                let depth = self.fbr().cleanups.len();
+                self.fb().loops.push((exit, head, depth));
+                self.block(body);
+                self.fb().loops.pop();
+                self.term(Term::Goto(head));
+                self.switch_to(exit);
             }
             TStmt::While(c, body) => {
                 let head = self.new_block();
@@ -343,7 +525,8 @@ impl<'a> Lowerer<'a> {
                 let cv = self.expr(c);
                 self.term(Term::If(cv, bodyb, exit));
                 self.switch_to(bodyb);
-                self.fb().loops.push((exit, head));
+                let depth = self.fbr().cleanups.len();
+                self.fb().loops.push((exit, head, depth));
                 self.block(body);
                 self.fb().loops.pop();
                 self.term(Term::Goto(head));
@@ -369,7 +552,8 @@ impl<'a> Lowerer<'a> {
                 let v = self.new_local(Ty::Int, &self.fbr().body_locals[*var].name.clone());
                 self.fb().map.insert(*var, v);
                 self.emit(Stmt::Assign(v, Rv::Use(Op::Local(i))));
-                self.fb().loops.push((exit, step));
+                let depth = self.fbr().cleanups.len();
+                self.fb().loops.push((exit, step, depth));
                 self.block(body);
                 self.fb().loops.pop();
                 self.term(Term::Goto(step));
@@ -439,7 +623,8 @@ impl<'a> Lowerer<'a> {
         let v = self.new_local(elem.clone(), &name);
         self.fb().map.insert(var, v);
         self.emit(Stmt::Assign(v, Rv::Call(MCallee::Intrinsic("List.get_unchecked".into(), vec![lty.clone()]), vec![Op::Local(it), Op::Local(i)])));
-        self.fb().loops.push((exit, step));
+        let depth = self.fbr().cleanups.len();
+        self.fb().loops.push((exit, step, depth));
         self.block(body);
         self.fb().loops.pop();
         self.term(Term::Goto(step));
@@ -479,7 +664,7 @@ impl<'a> Lowerer<'a> {
         let mut args = vec![Op::Text(text), Op::Int(line as i64)];
         args.extend(details);
         let err = self.assign(self.prog.error_ty(), Rv::Call(MCallee::Intrinsic("expect_failed".into(), vec![]), args));
-        self.term(Term::Throw(err));
+        self.throw(err);
         self.switch_to(ok);
     }
 
@@ -837,6 +1022,7 @@ impl<'a> Lowerer<'a> {
                 Some((err_id, blk)) => self.try_catch(call, *err_id, blk, ty),
             },
             TK::ExpectThrows(call) => self.expect_throws(call, e.span),
+            TK::Spawn(call) => self.spawn(call, ty),
             TK::Interp(parts) => {
                 let ops: Vec<Op> = parts.iter().map(|p| self.expr(p)).collect();
                 self.assign(Ty::Text, Rv::Call(MCallee::Intrinsic("Text.concat".into(), vec![]), ops))
@@ -1089,23 +1275,30 @@ impl<'a> Lowerer<'a> {
         let ok = self.new_block();
         self.term(Term::IfErr(err, bad, ok));
         self.switch_to(bad);
-        self.term(Term::Throw(Op::Local(err)));
+        self.throw(Op::Local(err));
+        self.fb().last_propagate = Some(bad);
         self.switch_to(ok);
     }
 
-    fn try_catch(&mut self, call: &'a TExpr, err_id: LocalId, blk: &'a TBlock, ty: Ty) -> Op {
-        // Lower the call, then rewrite its error edge to the catch block.
-        let before = self.fbr().f.blocks.len();
-        let v = self.expr(call);
-        // find the Throw block created by `propagate` for this call
-        let bad = (before..self.fbr().f.blocks.len())
-            .rev()
-            .find(|b| matches!(self.fbr().f.blocks[*b].term, Term::Throw(Op::Local(_))) && self.fbr().f.blocks[*b].stmts.is_empty())
-            .expect("try without a throwing call");
-        let err_local = match self.fbr().f.blocks[bad].term {
-            Term::Throw(Op::Local(l)) => l,
+    // The error block of the call just lowered, emptied for a `catch`.
+    fn take_error_block(&mut self) -> (B, L) {
+        let bad = self.fb().last_propagate.take().expect("try without a throwing call");
+        let err = match &self.fbr().f.blocks[bad].term {
+            Term::Throw(Op::Local(l)) => *l,
             _ => unreachable!(),
         };
+        // the error local of the call is the one tested by IfErr; find it via the Throw
+        // (cleanups only add statements before the Throw)
+        self.fb().f.blocks[bad].stmts.clear();
+        self.reopen(bad);
+        (bad, err)
+    }
+
+    fn try_catch(&mut self, call: &'a TExpr, err_id: LocalId, blk: &'a TBlock, ty: Ty) -> Op {
+        // Lower the call, then turn its error edge into the catch block.
+        self.fb().last_propagate = None;
+        let v = self.expr(call);
+        let (bad, err_local) = self.take_error_block();
         let res = if ty != Ty::Unit && ty != Ty::Never { Some(self.tmp(ty.clone())) } else { None };
         let join = self.new_block();
         if !self.terminated() {
@@ -1115,7 +1308,6 @@ impl<'a> Lowerer<'a> {
             self.term(Term::Goto(join));
         }
         // the catch block
-        self.reopen(bad);
         self.switch_to(bad);
         let name = self.fbr().body_locals[err_id].name.clone();
         let el = self.new_local(self.prog.error_ty(), &name);
@@ -1133,24 +1325,16 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expect_throws(&mut self, call: &'a TExpr, span: Span) -> Op {
-        let before = self.fbr().f.blocks.len();
+        self.fb().last_propagate = None;
         let _ = self.expr(call);
-        let bad = (before..self.fbr().f.blocks.len())
-            .rev()
-            .find(|b| matches!(self.fbr().f.blocks[*b].term, Term::Throw(Op::Local(_))) && self.fbr().f.blocks[*b].stmts.is_empty())
-            .expect("expect throws without a throwing call");
-        let err_local = match self.fbr().f.blocks[bad].term {
-            Term::Throw(Op::Local(l)) => l,
-            _ => unreachable!(),
-        };
+        let (bad, err_local) = self.take_error_block();
         let res = self.tmp(self.prog.error_ty());
         let join = self.new_block();
         // success: the expectation fails
         let text = self.src_text(call.span);
         let (line, _) = self.src.line_col(span);
         let e = self.assign(self.prog.error_ty(), Rv::Call(MCallee::Intrinsic("expect_throws_failed".into(), vec![]), vec![Op::Text(text), Op::Int(line as i64)]));
-        self.term(Term::Throw(e));
-        self.reopen(bad);
+        self.throw(e);
         self.switch_to(bad);
         self.emit(Stmt::Assign(res, Rv::Use(Op::Local(err_local))));
         self.term(Term::Goto(join));
@@ -1221,7 +1405,7 @@ impl<'a> Lowerer<'a> {
         self.funcs.push(Func { name: name.clone(), kind: FnKind::Normal, params: vec![], ret: Ty::Unit, throws: false, mutating: false, locals: vec![], blocks: vec![], source_name: src_name.clone() });
         let func = Func { name, kind: FnKind::Closure(cap_tys.clone()), params: vec![], ret: ft.ret.clone(), throws: ft.throws, mutating: false, locals: vec![], blocks: vec![], source_name: format!("lambda in {}", src_name) };
         let line = self.fbr().line;
-        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals, loops: vec![], line, closed: vec![] });
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals, loops: vec![], line, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
         self.new_block();
         self.switch_to(0);
         for p in params {
@@ -1244,6 +1428,126 @@ impl<'a> Lowerer<'a> {
         let f = self.fbs.pop().unwrap().f;
         self.funcs[idx] = f;
         self.assign(fty.clone(), Rv::Closure(idx, cap_ops))
+    }
+
+    // `spawn f(args)`: the arguments are evaluated here, the call runs in a
+    // new task. The call is wrapped in a closure over the argument values.
+    fn spawn(&mut self, call: &'a TExpr, task_ty: Ty) -> Op {
+        let rty = self.ty(&call.ty);
+        let (callee, args, throws) = match &call.kind {
+            TK::Call { callee, args, throws } => (callee, args, *throws),
+            _ => unreachable!(),
+        };
+        // what the thunk calls, and the values it captures
+        let mut caps: Vec<Op> = vec![];
+        let mut cap_tys: Vec<Ty> = vec![];
+        let (mcallee, n_fixed, throws) = match callee {
+            Callee::Fn(id, targs) => {
+                let f = &self.prog.fns[*id];
+                let targs: Vec<Ty> = targs.iter().map(|x| self.ty(x)).collect();
+                let mut arg_tys = vec![];
+                for a in args {
+                    let a = self.strip_adapter_if(f.rethrows, a);
+                    let at = self.ty(&a.ty);
+                    let v = self.expr(a);
+                    caps.push(v);
+                    cap_tys.push(at.clone());
+                    arg_tys.push(at);
+                }
+                if f.intrinsic {
+                    let name = match f.owner {
+                        Some(d) => format!("{}.{}", self.prog.defs[d].name, f.name),
+                        None => f.name.clone(),
+                    };
+                    let mut itys = vec![];
+                    if f.owner.is_some() {
+                        itys.push(arg_tys[0].clone());
+                        let n_owner = self.prog.defs[f.owner.unwrap()].generics.len();
+                        itys.extend(targs.iter().skip(n_owner).cloned());
+                    } else {
+                        itys.extend(targs.iter().cloned());
+                        if targs.is_empty() {
+                            itys.extend(arg_tys.iter().cloned());
+                        }
+                    }
+                    (MCallee::Intrinsic(name, itys), 0, throws && f.throws)
+                } else {
+                    let rethrow = f.rethrows && arg_tys.iter().any(|t| matches!(t, Ty::Func(ft) if ft.throws));
+                    let throws = if f.rethrows { rethrow } else { throws };
+                    (MCallee::Fn(self.instance(*id, targs, rethrow)), 0, throws)
+                }
+            }
+            Callee::Value(fv) => {
+                let fty = self.ty(&fv.ty);
+                let v = self.expr(fv);
+                caps.push(v);
+                cap_tys.push(fty.clone());
+                for a in args {
+                    let at = self.ty(&a.ty);
+                    caps.push(self.expr(a));
+                    cap_tys.push(at);
+                }
+                let throws = matches!(&fty, Ty::Func(ft) if ft.throws);
+                (MCallee::Closure(Op::Local(0)), 1, throws)
+            }
+            Callee::Iface { method, .. } => {
+                let rty0 = self.ty(&args[0].ty);
+                let ids = match &rty0 {
+                    Ty::Iface(ids) => ids.clone(),
+                    _ => unreachable!(),
+                };
+                let slot = iface_methods(self.prog, &ids).iter().position(|m| m == method).unwrap();
+                for a in args {
+                    let at = self.ty(&a.ty);
+                    caps.push(self.expr(a));
+                    cap_tys.push(at);
+                }
+                (MCallee::Iface(slot), 0, self.prog.fns[*method].throws)
+            }
+        };
+        // the thunk: load the captures, make the call, return its result
+        let mut func = Func {
+            name: format!("spawn{}", self.funcs.len()),
+            kind: FnKind::Closure(cap_tys.clone()),
+            params: vec![],
+            ret: rty.clone(),
+            throws,
+            mutating: false,
+            locals: vec![],
+            blocks: vec![],
+            source_name: format!("task in {}", self.fbr().f.source_name),
+        };
+        let mut stmts = vec![];
+        for (i, ct) in cap_tys.iter().enumerate() {
+            func.locals.push(mir::Local { ty: ct.clone(), name: format!("c{}", i), self_ptr: false });
+            stmts.push(Stmt::Assign(i, Rv::EnvField(i)));
+        }
+        let call_args: Vec<Op> = (n_fixed..cap_tys.len()).map(Op::Local).collect();
+        let mut blocks = vec![];
+        if throws {
+            let dst = if rty == Ty::Unit { None } else { Some(func.locals.len()) };
+            if dst.is_some() {
+                func.locals.push(mir::Local { ty: rty.clone(), name: "r".into(), self_ptr: false });
+            }
+            let err = func.locals.len();
+            func.locals.push(mir::Local { ty: self.prog.error_ty(), name: "e".into(), self_ptr: false });
+            stmts.push(Stmt::CallT { dst, err, callee: mcallee, args: call_args });
+            blocks.push(mir::Block { stmts, term: Term::IfErr(err, 1, 2), line: 0 });
+            blocks.push(mir::Block { stmts: vec![], term: Term::Throw(Op::Local(err)), line: 0 });
+            blocks.push(mir::Block { stmts: vec![], term: Term::Return(dst.map(Op::Local).unwrap_or(Op::Unit)), line: 0 });
+        } else {
+            let r = func.locals.len();
+            func.locals.push(mir::Local { ty: rty.clone(), name: "r".into(), self_ptr: false });
+            stmts.push(Stmt::Assign(r, Rv::Call(mcallee, call_args)));
+            blocks.push(mir::Block { stmts, term: Term::Return(if rty == Ty::Unit { Op::Unit } else { Op::Local(r) }), line: 0 });
+        }
+        func.blocks = blocks;
+        self.funcs.push(func);
+        let thunk = self.funcs.len() - 1;
+        let fn_ty = Ty::func(vec![], rty.clone(), throws);
+        let clo = self.assign(fn_ty, Rv::Closure(thunk, caps));
+        let scope = self.fbr().scope.expect("spawn outside a scope");
+        self.assign(task_ty, Rv::Call(MCallee::Intrinsic("spawn".into(), vec![rty, Ty::Bool]), vec![Op::Local(scope), clo, Op::Bool(throws)]))
     }
 
     // A named function used as a value.

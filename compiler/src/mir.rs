@@ -159,6 +159,8 @@ pub struct Module {
     pub main: Option<FnIdx>,
     pub tests: Vec<FnIdx>,
     pub failure_vtable: usize,
+    pub cancelled_vtable: usize,
+    pub closed_vtable: usize,
 }
 
 impl Stmt {
@@ -193,8 +195,9 @@ impl Stmt {
                     args.iter().skip(1).for_each(|a| op(a, true, out));
                 }
                 Callee::Intrinsic(name, _) => {
-                    let consume = consumes_args(name);
-                    args.iter().for_each(|a| op(a, consume, out));
+                    for (i, a) in args.iter().enumerate() {
+                        op(a, consumes_arg(name, i), out);
+                    }
                 }
             }
         }
@@ -292,9 +295,9 @@ impl Term {
     }
 }
 
-// Intrinsics that take ownership of their arguments.
-pub fn consumes_args(name: &str) -> bool {
-    matches!(name, "print_consume")
+// Intrinsics that take ownership of an argument (the rest are borrowed).
+pub fn consumes_arg(name: &str, i: usize) -> bool {
+    matches!((name, i), ("Shared.release", 1) | ("spawn", 1) | ("Channel.send", 1))
 }
 
 // Mutating intrinsics that store their arguments.

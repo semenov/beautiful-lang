@@ -750,6 +750,12 @@ impl Parser {
                 let span = sp.to(self.prev_span());
                 return Ok(Expr { kind: ExprKind::Try { expr: Box::new(e), catch }, span });
             }
+            Tok::Spawn => {
+                self.bump();
+                let e = self.postfix_expr()?;
+                let span = sp.to(e.span);
+                return Ok(Expr { kind: ExprKind::Spawn(Box::new(e)), span });
+            }
             Tok::Expect if matches!(self.peek_at(1), Tok::Throws) => {
                 self.bump();
                 self.bump();
@@ -1197,6 +1203,7 @@ pub fn tok_text(t: &Tok) -> &'static str {
         Tok::None => "none",
         Tok::Mutating => "mutating",
         Tok::SelfLower => "self",
+        Tok::Spawn => "spawn",
         Tok::LParen => "(",
         Tok::RParen => ")",
         Tok::LBracket => "[",

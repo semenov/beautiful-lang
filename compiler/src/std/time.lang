@@ -1,0 +1,43 @@
+// time: clocks, durations and waiting.
+
+pub type Duration {
+  nanos: Int
+
+  pub fn seconds(self) -> Float {
+    return self.nanos.to_float() / 1000000000.0
+  }
+
+  pub fn millis(self) -> Int {
+    return self.nanos.div(1000000)
+  }
+}
+
+pub fn seconds(n: Int) -> Duration {
+  return Duration(nanos: n * 1000000000)
+}
+
+pub fn millis(n: Int) -> Duration {
+  return Duration(nanos: n * 1000000)
+}
+
+// A point in time, for measuring how long something takes.
+pub type Instant {
+  nanos: Int
+
+  pub fn elapsed(self) -> Duration {
+    return Duration(nanos: __monotonic_nanos() - self.nanos)
+  }
+}
+
+pub fn now() -> Instant {
+  return Instant(nanos: __monotonic_nanos())
+}
+
+fn __monotonic_nanos() -> Int
+
+// Wait without blocking other tasks. Fails with `Cancelled` if the task is cancelled.
+pub fn sleep(duration: Duration) throws {
+  try __sleep_nanos(duration.nanos)
+}
+
+fn __sleep_nanos(nanos: Int) throws

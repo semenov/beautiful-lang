@@ -1,0 +1,6 @@
+sum of squares: 385
+ran in parallel
+parallel_map: [1, 4, 9, 16]
+hits: 8000
+caught: task 1 failed
+after catch: 0

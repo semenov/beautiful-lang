@@ -47,6 +47,7 @@ pub enum Tok {
     None,
     Mutating,
     SelfLower,
+    Spawn,
     // punctuation
     LParen,
     RParen,
@@ -132,6 +133,7 @@ pub fn keyword(s: &str) -> Option<Tok> {
         "none" => Tok::None,
         "mutating" => Tok::Mutating,
         "self" => Tok::SelfLower,
+        "spawn" => Tok::Spawn,
         _ => return None,
     })
 }

@@ -249,6 +249,8 @@ pub enum ExprKind {
     Is(Box<Expr>, Pattern),
     Try { expr: Box<Expr>, catch: Option<(String, Block)> },
     ExpectThrows(Box<Expr>),
+    // `spawn f(x)`: start the call as a task
+    Spawn(Box<Expr>),
     // `throw`, `return`, `break`, `continue` used in expression position
     // (match arms, `??`, catch blocks)
     Diverge(Box<Stmt>),

@@ -42,12 +42,15 @@ are no cycles. APIs are designed so a handle is rarely needed
 (`files.read(path)`, `http.get(url)` open and close by themselves).
 
 Implementation: reference counting inserted by the compiler (like Swift, Koka,
-Roc), not a tracing GC. It fits the value model:
+Roc), not a tracing GC (decided during implementation, then confirmed). It
+fits the value model:
 - Values can't form cycles (there are no references), so counting frees
   everything.
 - Copy-on-write comes for free: if the counter is 1, a change happens in
   place, including `x = f(x)`.
 - No GC pauses, and memory is freed immediately.
+- With many cores, only values passed to another task need atomic counters
+  (a flag on the object); a good parallel tracing GC would be years of work.
 
 The only possible cycle is a `Shared` that holds itself, so a `Shared` can't
 contain another `Shared` in its value (a compile error).
@@ -232,34 +235,49 @@ used result is always a mutation or an action. The rule also catches the
 - `m[key]` returns `V?` (a missing key is normal). `xs.first()` returns
   `T?`.
 
-### Concurrency: lightweight tasks, structured
+### Concurrency: sequential code plus `spawn`
 
-- No `async`/`await` (no function coloring).
-- A task group is an ordinary resource received through `with`:
+- No `async`/`await` (no function coloring). Code that waits (network,
+  database) is written sequentially; an HTTP server runs each request as its
+  own task, and waiting doesn't block other requests.
+- Parallel work is started with `spawn`, which returns a `Task<T>`:
 
   ```
-  with group = tasks.group()
-    let user = group.run(() => try load_user(id))       # Task<User>, starts right away
-    let orders = group.run(() => try load_orders(id))
-    show(try user.wait(), try orders.wait())
-  # the block doesn't exit until every task is finished
+  fn dashboard(id: Int) throws -> Dashboard {
+    let user = spawn load_user(id)
+    let orders = spawn load_orders(id)
+    return Dashboard(user: try user.wait(), orders: try orders.wait())
+  }
   ```
 
-  Every line runs in order. Concurrency is visible exactly where `run` is
-  written.
-- Tasks can't outlive the group. An escaped `Task` is already finished, so
-  `wait()` just returns the stored result.
-- An error in one task cancels the others, and the group throws it.
-- Cancellation is automatic: a waiting operation (network, files, `sleep`, a
-  queue) in a cancelled task throws `Cancelled`. There's no `ctx`.
-- For a list: `try urls.parallel_map(limit: 10, url => try http.get(url))`.
-- Data races are impossible: tasks share data only through `Shared<T>` or
-  pass it through `Channel<T>`.
-- Timeouts: `try time.timeout(seconds: 5, () => try http.get(url))`.
-- No `spawn` outside a group and no futures or promises.
-- **Rejected:** a `parallel` block where every line runs at the same time. It
-  looks sequential but isn't, dependencies between lines need a special
-  rule, and adding one line changes the meaning.
+- **A task belongs to the function that started it.** The function doesn't
+  finish until all its tasks have finished, so tasks can't leak.
+- **A `Task` can't leave the function:** it can't be returned, stored in a
+  record or captured by a lambda (compile errors). Local variables and lists
+  are fine: `pending.append(spawn fetch(url))`.
+- **Errors aren't lost.** An error arrives in `try task.wait()`. If a task
+  fails and nobody waits for it, the other tasks are cancelled and the error
+  comes out of the function, so `spawn` of a failing call requires `throws`.
+- **Results must be used:** a `Task<T>` nobody waits for is an error.
+  `spawn f()` for a function without a result is a plain statement (a
+  background worker).
+- **At the end of the function, unfinished tasks are waited for**, not
+  cancelled: nothing is lost silently. A background worker is stopped
+  explicitly, e.g. by closing its queue. On an early exit (`return` or an
+  error before `wait`) unfinished tasks are cancelled, then waited for.
+- For lists: `urls.parallel_map(limit: 10, transform: url => try fetch(url))`.
+- **All cores are used:** tasks run on a pool of threads (like Go), so `spawn`
+  and `parallel_map` speed up computation too, not only waiting.
+- Cancellation is automatic: a waiting operation in a cancelled task throws
+  `Cancelled`.
+- Tasks share data only through `Shared<T>` or pass it through `Channel<T>`.
+- Timeouts: `try time.timeout(time.seconds(5), () => try http.get(url))`.
+- **Rejected:**
+  - a `parallel` block where every line runs at the same time (it looks
+    sequential but isn't);
+  - task groups through `with` (`tasks.group()`, `group.run`): `spawn` gives
+    the same guarantees with one keyword instead of a group object;
+  - `async`/`await`.
 
 ### Tests and tooling
 
@@ -307,16 +325,26 @@ used result is always a mutation or an action. The rule also catches the
   returns nothing (`execute_counting` returns the row count), `map.remove(k)`
   returns nothing (`map.take(k) -> V?` removes and returns). A result is
   returned only when it's usually needed.
-- **`Shared<T>.update`** gives the lambda a mutable value and returns the
-  lambda's result, so read-modify-write is atomic:
-  `let id = state.update(s => { s.next_id += 1; s.next_id })`.
+- **Shared state: `Shared<T>` is accessed only through a lock with `with`:**
+
+  ```
+  with views = app.views.lock() {
+    views[id] = (views[id] ?? 0) + 1
+  }
+  ```
+
+  Inside the block the value is changed like an ordinary variable; other
+  tasks wait at the entrance; the lock is released at the end of the block,
+  even on an error. There is no `update`. A `lock()` directly inside another
+  `lock()` is a compile error; a deadlock through function calls is reported
+  at runtime instead of hanging.
 - **Processes:** `process.run("git", ["log", "-n", "5"])` takes a list of
   arguments, not a shell string.
 - **Time:** `Instant` and `Date` are different types. Time zones are always
   explicit.
 - **Modules:** `json`, `cli`, `env`, `files`, `process`, `http` (client and
   server), `db` (Postgres, SQLite), `time`, `log` (structured), `text`,
-  `crypto`, `tasks`.
+  `crypto`.
 - **HTTP server:** a handler is `fn(Request) throws -> Response`. An error or
   a bug becomes a 500. Handlers can be tested without a network.
 - **Third-party packages** are postponed. When they come, they work like Go's:
@@ -372,7 +400,7 @@ cgen (C) → clang`.
   `xs.map(x => try f(x))` throws only when the lambda can.
 
 **Not implemented yet:** `with`, modules and `import`, `decode<T>`,
-`Decimal`, concurrency (`tasks`, `Shared`, `Channel`), the standard library
+`Decimal`, concurrency (`spawn`, `Shared`, `Channel`), the standard library
 modules (files, http, db, …), converting between interface combinations.
 
 ## Open questions

@@ -22,6 +22,21 @@
 
 static const char *lt_file = "?";
 
+// ---------------------------------------------------------------- reference counts
+// In a program that uses tasks, counters change atomically; otherwise with
+// plain increments. Negative counts are immortal static objects.
+#ifdef LT_THREADS
+#define LT_INC(p) do { if (__atomic_load_n(&(p)->rc, __ATOMIC_RELAXED) > 0) __atomic_fetch_add(&(p)->rc, 1, __ATOMIC_RELAXED); } while (0)
+#define LT_DEC_ZERO(p) (__atomic_load_n(&(p)->rc, __ATOMIC_RELAXED) > 0 && __atomic_sub_fetch(&(p)->rc, 1, __ATOMIC_ACQ_REL) == 0)
+#define LT_UNIQUE(p) (__atomic_load_n(&(p)->rc, __ATOMIC_ACQUIRE) == 1)
+#define LT_TLS __thread
+#else
+#define LT_INC(p) do { if ((p)->rc > 0) (p)->rc++; } while (0)
+#define LT_DEC_ZERO(p) ((p)->rc > 0 && --(p)->rc == 0)
+#define LT_UNIQUE(p) ((p)->rc == 1)
+#define LT_TLS
+#endif
+
 // ---------------------------------------------------------------- memory
 
 // Small objects come from per-size free lists: a freed block goes on the list
@@ -29,8 +44,8 @@ static const char *lt_file = "?";
 #define LT_CLASSES 32
 #define LT_CLASS_BYTES 16
 typedef struct lt_free_node { struct lt_free_node *next; } lt_free_node;
-static lt_free_node *lt_free_lists[LT_CLASSES];
-static char *lt_arena_cur, *lt_arena_end;
+static LT_TLS lt_free_node *lt_free_lists[LT_CLASSES];
+static LT_TLS char *lt_arena_cur, *lt_arena_end;
 
 LT_NOINLINE void lt_oom(void) {
     fflush(stdout);
@@ -92,15 +107,15 @@ static void lt_report_leaks(void) {
     fprintf(stderr, "debug: %lld allocations, %lld not freed\n", (long long)lt_total_objects, (long long)lt_live_objects);
 }
 LT_INLINE void *lt_alloc(size_t n) {
-    lt_live_objects++;
-    lt_total_objects++;
+    __atomic_fetch_add(&lt_live_objects, 1, __ATOMIC_RELAXED);
+    __atomic_fetch_add(&lt_total_objects, 1, __ATOMIC_RELAXED);
     void *p = malloc(n);
     if (!p) lt_oom();
     return p;
 }
 LT_INLINE void lt_free(void *p, size_t n) {
     (void)n;
-    lt_live_objects--;
+    __atomic_fetch_sub(&lt_live_objects, 1, __ATOMIC_RELAXED);
     free(p);
 }
 LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
@@ -221,21 +236,21 @@ typedef struct lt_fn {
 } lt_fn;
 
 LT_INLINE void lt_fn_dup(lt_fn f) {
-    if (f.env && f.env->rc > 0) f.env->rc++;
+    if (f.env) LT_INC(f.env);
 }
 LT_INLINE void lt_fn_drop(lt_fn f) {
-    if (f.env && f.env->rc > 0 && --f.env->rc == 0) f.env->drop(f.env);
+    if (f.env && LT_DEC_ZERO(f.env)) f.env->drop(f.env);
 }
 
 LT_INLINE void lt_iface_dup(lt_iface x) {
-    if (x.obj && x.obj->rc > 0) x.obj->rc++;
+    if (x.obj) LT_INC(x.obj);
 }
 LT_INLINE void lt_iface_drop(lt_iface x) {
-    if (x.obj && x.obj->rc > 0 && --x.obj->rc == 0) x.vt->drop(x.obj);
+    if (x.obj && LT_DEC_ZERO(x.obj)) x.vt->drop(x.obj);
 }
 // before calling a mutating method through an interface
 LT_INLINE void lt_iface_unique(lt_iface *x) {
-    if (x->obj->rc != 1) {
+    if (!LT_UNIQUE(x->obj)) {
         lt_obj *c = x->vt->clone(x->obj);
         lt_iface_drop(*x);
         x->obj = c;
@@ -249,10 +264,10 @@ static lt_err lt_make_failure(lt_text *msg);
 #define LT_TEXT_SIZE(n) (sizeof(lt_text) + (size_t)(n) + 1)
 
 LT_INLINE void lt_text_dup(lt_text *t) {
-    if (t && t->rc > 0) t->rc++;
+    if (t) LT_INC(t);
 }
 LT_INLINE void lt_text_drop(lt_text *t) {
-    if (t && t->rc > 0 && --t->rc == 0) lt_free(t, LT_TEXT_SIZE(t->len));
+    if (t && LT_DEC_ZERO(t)) lt_free(t, LT_TEXT_SIZE(t->len));
 }
 LT_INLINE lt_text *lt_text_ret(lt_text *t) {
     lt_text_dup(t);
@@ -767,11 +782,22 @@ static lt_err lt_text_to_float(lt_text *t, double *out) {
     return (lt_err){ 0 };
 }
 
+// ---------------------------------------------------------------- time
+
+#include <time.h>
+static int64_t lt_monotonic_nanos(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
 // ---------------------------------------------------------------- output
 
 static void lt_print(lt_text *t) {
+    flockfile(stdout);
     fwrite(t->data, 1, (size_t)t->len, stdout);
-    putc('\n', stdout);
+    putc_unlocked('\n', stdout);
+    funlockfile(stdout);
 }
 
 LT_NOINLINE _Noreturn void lt_panic_text(lt_text *msg, int line) {

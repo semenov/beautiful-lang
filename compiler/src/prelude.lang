@@ -214,6 +214,23 @@ builtin type List<T> {
     return best
   }
   fn join(self, separator: Text) -> Text
+  fn parallel_map<R>(self, limit: Int, transform: fn(T) throws -> R) rethrows -> List<R> {
+    var out: List<R> = __list_with_capacity(self.length)
+    var start = 0
+    let step = max(limit, 1)
+    while start < self.length {
+      let end = min(start + step, self.length)
+      var batch: List<Task<R>> = []
+      for i in start..<end {
+        batch.append(spawn transform(self[i]))
+      }
+      for task in batch {
+        out.append(try task.wait())
+      }
+      start = end
+    }
+    return out
+  }
   fn group_by<K>(self, key: fn(T) throws -> K) rethrows -> Map<K, List<T>> {
     var groups: Map<K, List<T>> = {}
     for x in self {
@@ -267,6 +284,41 @@ builtin type Set<T> {
   mutating fn add(item: T)
   mutating fn remove(item: T)
   mutating fn clear()
+}
+
+// A task started with `spawn`.
+builtin type Task<T> {
+  fn wait(self) throws -> T
+  fn cancel(self)
+}
+
+// State shared between tasks; read and change it inside `with x = s.lock() { ... }`.
+builtin type Shared<T> {
+  fn lock(self) -> Locked<T>
+}
+
+builtin type Locked<T> {
+}
+
+// A queue between tasks.
+builtin type Channel<T> {
+  fn send(self, item: T) throws
+  fn receive(self) throws -> T?
+  fn close(self)
+}
+
+// Raised in a task that was cancelled, at its next wait.
+type Cancelled implements Error {
+  fn message(self) -> Text {
+    return "the task was cancelled"
+  }
+}
+
+// Raised by `send` on a closed channel.
+type ChannelClosed implements Error {
+  fn message(self) -> Text {
+    return "the channel is closed"
+  }
 }
 
 type Entry<K, V> {

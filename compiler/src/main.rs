@@ -51,6 +51,14 @@ fn parse_args() -> Option<Opts> {
     Some(Opts { cmd, path: path?, out, emit_c, debug, args: rest })
 }
 
+// Standard library modules, embedded in the compiler.
+fn std_module(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "time" => include_str!("std/time.lang"),
+        _ => return None,
+    })
+}
+
 // Parses and checks; prints errors. Returns the program on success.
 fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)> {
     let text = match std::fs::read_to_string(path) {
@@ -60,21 +68,38 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
             return None;
         }
     };
-    let prelude_src = include_str!("prelude.lang");
-    let pf = sources.add("<prelude>".into(), prelude_src.into());
-    let uf = sources.add(path.to_string(), text.clone());
-    let parsed = lexer::lex(prelude_src, pf)
-        .and_then(|t| parser::parse_module(t, true))
-        .and_then(|p| lexer::lex(&text, uf).and_then(|t| parser::parse_module(t, false)).map(|u| (p, u)));
-    let (pm, um) = match parsed {
-        Ok(x) => x,
-        Err(d) => {
-            eprint!("{}", sources.render(&d));
-            return None;
-        }
+    let parse = |sources: &mut Sources, name: &str, src: &str, privileged: bool| -> Result<ast::Module, ()> {
+        let f = sources.add(name.to_string(), src.to_string());
+        lexer::lex(src, f).and_then(|t| parser::parse_module(t, privileged)).map_err(|d| eprint!("{}", sources.render(&d)))
     };
+    let prelude = parse(sources, "<prelude>", include_str!("prelude.lang"), true).ok()?;
+    let uf = sources.files.len() as u32;
+    let user = parse(sources, path, &text, false).ok()?;
+    // standard library modules the program uses, and the ones they use
+    let mut mods: Vec<(String, ast::Module, bool)> = vec![("<prelude>".into(), prelude, true)];
+    let mut pending: Vec<(String, diag::Span)> = user.imports.clone();
+    let mut loaded: Vec<String> = vec![];
+    while let Some((name, span)) = pending.pop() {
+        if loaded.contains(&name) {
+            continue;
+        }
+        match std_module(&name) {
+            Some(src) => {
+                let m = parse(sources, &format!("<{}>", name), src, true).ok()?;
+                pending.extend(m.imports.iter().cloned());
+                loaded.push(name.clone());
+                mods.push((name, m, true));
+            }
+            None => {
+                let d = diag::Diag::new(span, format!("unknown module `{}`", name));
+                eprint!("{}", sources.render(&d));
+                return None;
+            }
+        }
+    }
+    mods.push((path.to_string(), user, false));
     let mut c = check::Checker::new();
-    c.check_program(&pm, &um);
+    c.check_program(&mods);
     if !c.diags.is_empty() {
         let mut ds = c.diags.clone();
         ds.sort_by_key(|d| (d.span.file, d.span.lo));

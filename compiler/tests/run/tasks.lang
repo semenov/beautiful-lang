@@ -1,0 +1,77 @@
+import time
+
+fn slow_square(n: Int) throws -> Int {
+  try time.sleep(time.millis(100))
+  return n * n
+}
+
+fn fails(n: Int) throws -> Int {
+  try time.sleep(time.millis(20))
+  throw Failure(message: "task ${n} failed")
+}
+
+fn sum_squares(ns: List<Int>) throws -> Int {
+  var pending: List<Task<Int>> = []
+  for n in ns {
+    pending.append(spawn slow_square(n))
+  }
+  var total = 0
+  for t in pending {
+    total += try t.wait()
+  }
+  return total
+}
+
+fn main() throws {
+  let start = time.now()
+  let total = try sum_squares([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  let ms = start.elapsed().millis()
+  print("sum of squares: ${total}")
+  print(if ms < 500 { "ran in parallel" } else { "too slow: ${ms} ms" })
+
+  let doubled = try [1, 2, 3, 4].parallel_map(limit: 2, transform: n => try slow_square(n))
+  print("parallel_map: ${doubled}")
+
+  let hits = Shared(0)
+  var workers: List<Task<Int>> = []
+  for w in 0..<8 {
+    workers.append(spawn count_up(hits, 1000))
+  }
+  for t in workers {
+    let _ = try t.wait()
+  }
+  with n = hits.lock() {
+    print("hits: ${n}")
+  }
+
+  let jobs = Channel<Int>(capacity: 10)
+  let results = Shared<List<Int>>([])
+  spawn consumer(jobs, results)
+  spawn consumer(jobs, results)
+  for i in 1..=20 {
+    try jobs.send(i)
+  }
+  jobs.close()
+  let err = try fails(1) catch e {
+    print("caught: ${e.message()}")
+    0
+  }
+  print("after catch: ${err}")
+}
+
+fn count_up(hits: Shared<Int>, times: Int) -> Int {
+  for i in 0..<times {
+    with n = hits.lock() {
+      n += 1
+    }
+  }
+  return times
+}
+
+fn consumer(jobs: Channel<Int>, results: Shared<List<Int>>) {
+  for j in jobs {
+    with r = results.lock() {
+      r.append(j * 10)
+    }
+  }
+}

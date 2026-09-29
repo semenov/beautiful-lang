@@ -107,6 +107,8 @@ pub struct TypeDef {
     pub implements: Vec<DefId>,
     pub span: Span,
     pub is_prelude: bool,
+    pub module: usize,
+    pub is_pub: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -131,6 +133,8 @@ pub struct FnDef {
     pub body: Option<TBody>,
     pub span: Span,
     pub is_prelude: bool,
+    pub module: usize,
+    pub is_pub: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -207,6 +211,7 @@ pub enum TK {
     Is(Box<TExpr>, TPat),
     Try { call: Box<TExpr>, catch: Option<(LocalId, TBlock)> },
     ExpectThrows(Box<TExpr>),
+    Spawn(Box<TExpr>),
     Interp(Vec<TExpr>),
     ToText(Box<TExpr>),
     List(Vec<TExpr>),
@@ -275,6 +280,9 @@ pub enum TStmt {
     ForRange { var: LocalId, lo: TExpr, hi: TExpr, inclusive: bool, body: TBlock },
     ForMap { var: LocalId, map: TExpr, body: TBlock },
     ForSet { var: LocalId, set: TExpr, body: TBlock },
+    ForChannel { var: LocalId, chan: TExpr, body: TBlock },
+    // `with x = shared.lock() { ... }`: `x` is a mutable copy of the value
+    WithLock { var: LocalId, shared: TExpr, body: TBlock },
     Expect { cond: TExpr, text: String, span: Span },
 }
 
@@ -290,6 +298,12 @@ pub struct Builtins {
     pub indexed: DefId,
     pub error: DefId,
     pub failure: DefId,
+    pub task: DefId,
+    pub shared: DefId,
+    pub locked: DefId,
+    pub channel: DefId,
+    pub cancelled: DefId,
+    pub channel_closed: DefId,
 }
 
 pub struct Program {

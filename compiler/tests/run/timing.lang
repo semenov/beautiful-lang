@@ -1,0 +1,20 @@
+import time
+
+fn fib(n: Int) -> Int {
+  if n < 2 {
+    return n
+  }
+  return fib(n - 1) + fib(n - 2)
+}
+
+fn main() {
+  let start = time.now()
+  let r = fib(30)
+  let took = start.elapsed()
+  print("fib(30) = ${r}")
+  if took.millis() < 5000 {
+    print("fast enough")
+  }
+  let d = time.seconds(2)
+  print("${d.millis()} ms")
+}

@@ -35,6 +35,9 @@ enum Kind {
     Func,
     Iface,
     Never,
+    Task(usize),
+    Shared(usize),
+    Channel(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -79,6 +82,8 @@ pub struct CGen<'a> {
     cur_fn: usize,
     vt_index: HashMap<(Ty, Vec<DefId>), usize>,
     file: String,
+    // the program uses tasks: atomic reference counts and the scheduler
+    threads: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -146,6 +151,7 @@ impl<'a> CGen<'a> {
             cur_fn: 0,
             vt_index,
             file,
+            threads: false,
         }
     }
 
@@ -253,6 +259,18 @@ impl<'a> CGen<'a> {
                         } else if *d == self.prog.b.set {
                             let e = self.tid(&args[0]);
                             (format!("T{}", id), Kind::Set(e))
+                        } else if *d == self.prog.b.task {
+                            self.threads = true;
+                            let e = self.tid(&args[0]);
+                            ("lt_task*".to_string(), Kind::Task(e))
+                        } else if *d == self.prog.b.shared {
+                            self.threads = true;
+                            let e = self.tid(&args[0]);
+                            (format!("T{}", id), Kind::Shared(e))
+                        } else if *d == self.prog.b.channel {
+                            self.threads = true;
+                            let e = self.tid(&args[0]);
+                            ("lt_chan*".to_string(), Kind::Channel(e))
                         } else {
                             panic!("unexpected builtin type {}", def.name)
                         }
@@ -321,7 +339,7 @@ impl<'a> CGen<'a> {
         match &self.tys[id].kind {
             Kind::Int | Kind::Float => "0".into(),
             Kind::Bool => "false".into(),
-            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) => "NULL".into(),
+            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "NULL".into(),
             Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => "NULL".into(),
             Kind::Opt { niche: Niche::Ptr, .. } => "NULL".into(),
             _ => format!("(({}){{0}})", c),
@@ -397,15 +415,21 @@ impl<'a> CGen<'a> {
         let mut b = String::new();
         let obj_rc = |free: &str| {
             if dup {
-                "if (x && x->rc > 0) x->rc++;".to_string()
+                "if (x) LT_INC(x);".to_string()
             } else {
-                format!("if (x && x->rc > 0 && --x->rc == 0) {}(x);", free)
+                format!("if (x && LT_DEC_ZERO(x)) {}(x);", free)
             }
         };
         match &kind {
             Kind::Text => b = if dup { "lt_text_dup(x);".into() } else { "lt_text_drop(x);".into() },
             Kind::Func => b = if dup { "lt_fn_dup(x);".into() } else { "lt_fn_drop(x);".into() },
             Kind::Iface => b = if dup { "lt_iface_dup(x);".into() } else { "lt_iface_drop(x);".into() },
+            Kind::Task(_) => b = if dup { "lt_task_dup(x);".into() } else { "lt_task_drop(x);".into() },
+            Kind::Channel(_) => b = if dup { "lt_chan_dup(x);".into() } else { "lt_chan_drop(x);".into() },
+            Kind::Shared(_) => {
+                self.need(H::Ops, id);
+                b = obj_rc(&format!("{}_free", c));
+            }
             Kind::List(_) | Kind::Map(..) | Kind::Set(_) => {
                 self.need(H::Ops, id);
                 b = obj_rc(&format!("{}_free", c));
@@ -570,6 +594,7 @@ impl<'a> CGen<'a> {
                 format!("if (a == b) return true; if (a->len != b->len) return false; for (int64_t i = 0; i < a->n; i++) {{ if (!a->e[i].h) continue; if ({c}_find(b, a->e[i].k, a->e[i].h) < 0) return false; }} return true;", c = c)
             }
             Kind::Iface => "if (a.obj == b.obj) return true; if (a.vt->type_id != b.vt->type_id) return false; return a.vt->eq(a.obj, b.obj);".into(),
+            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "return a == b;".into(),
             Kind::Func => "(void)a; (void)b; lt_panic_at(\"functions can't be compared\", 0);".into(),
             Kind::Int | Kind::Float | Kind::Bool => "return a == b;".into(),
             Kind::Text => "return lt_text_eq(a, b);".into(),
@@ -632,6 +657,7 @@ impl<'a> CGen<'a> {
                 format!("uint64_t h = 9; for (int64_t i = 0; i < a->n; i++) if (a->e[i].h) h += {}; return lt_mix(h);", hk)
             }
             Kind::Iface => "return a.vt->hash(a.obj);".into(),
+            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "return lt_int_hash((int64_t)(intptr_t)a);".into(),
             Kind::Int => "return lt_int_hash(a);".into(),
             Kind::Float => "return lt_float_hash(a);".into(),
             Kind::Bool => "return lt_int_hash(a);".into(),
@@ -733,6 +759,9 @@ impl<'a> CGen<'a> {
             Kind::Func => {
                 lit(self, &mut s, "<function>");
             }
+            Kind::Task(_) => lit(self, &mut s, "<task>"),
+            Kind::Shared(_) => lit(self, &mut s, "<shared>"),
+            Kind::Channel(_) => lit(self, &mut s, "<channel>"),
             Kind::Int => s += " lt_texts_push(&p, lt_int_to_text(a));",
             Kind::Float => s += " lt_texts_push(&p, lt_float_to_text(a));",
             Kind::Bool => s += " lt_texts_push(&p, lt_bool_to_text(a));",
@@ -753,6 +782,14 @@ impl<'a> CGen<'a> {
             Kind::List(e) => self.gen_list(id, e),
             Kind::Map(k, v) => self.gen_map(id, k, Some(v)),
             Kind::Set(e) => self.gen_map(id, e, None),
+            Kind::Shared(e) => {
+                let c = self.tys[id].c.clone();
+                let ec = self.tys[e].c.clone();
+                let de = self.drop_(e, "x->v");
+                let z = self.zero(e);
+                let _ = writeln!(self.helper_types, "struct {c}_s {{ int64_t rc; lt_lock lock; {ec} v; }};", c = c, ec = ec);
+                let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {de} free(x); }}\nstatic {c} {c}_new({ec} v) {{ {c} x = ({c})calloc(1, sizeof(struct {c}_s)); x->rc = 1; lt_lock_init(&x->lock); x->v = v; return x; }}\nstatic {ec} {c}_acquire({c} x) {{ lt_lock_acquire(&x->lock); {ec} v = x->v; x->v = {z}; return v; }}\nstatic void {c}_release({c} x, {ec} v) {{ x->v = v; lt_lock_release(&x->lock); }}", c = c, ec = ec, de = de, z = z);
+            }
             Kind::Record { boxed: true, fields, .. } => self.gen_box(id, fields.iter().map(|f| f.1).collect(), None),
             Kind::Enum { boxed: true, variants, .. } => {
                 let vs: Vec<Vec<usize>> = variants.iter().map(|v| v.1.iter().map(|f| f.1).collect()).collect();
@@ -793,7 +830,8 @@ impl<'a> CGen<'a> {
         let _ = writeln!(self.protos, "static void {c}_free({c} x);", c = c);
         let _ = writeln!(self.helpers, "static void {c}_free({c} x) {{ {d} lt_free(x, sizeof(*x)); }}", c = c, d = drops);
         let _ = writeln!(self.helpers, "static inline {c} {c}_box({c}_v v) {{ {c} n = ({c})lt_alloc(sizeof(*n)); n->rc = 1; n->v = v; return n; }}", c = c);
-        let _ = writeln!(self.helpers, "static inline void {c}_unique({c} *p) {{ {c} x = *p; if (x->rc == 1) return; {c} n = ({c})lt_alloc(sizeof(*n)); n->rc = 1; n->v = x->v; {dups} if (x->rc > 0) x->rc--; *p = n; }}", c = c, dups = dups);
+        let drop_old = self.drop_(id, "x");
+        let _ = writeln!(self.helpers, "static inline void {c}_unique({c} *p) {{ {c} x = *p; if (LT_UNIQUE(x)) return; {c} n = ({c})lt_alloc(sizeof(*n)); n->rc = 1; n->v = x->v; {dups} {drop_old} *p = n; }}", c = c, dups = dups, drop_old = drop_old);
         let _ = writeln!(self.protos, "static inline {c} {c}_box({c}_v v);\nstatic inline void {c}_unique({c} *p);", c = c);
     }
 
@@ -825,11 +863,11 @@ static void {l}_free({l} l) {{ for (int64_t i = 0; i < l->len; i++) {{ {drop_e} 
 static {l} {l}_clone({l} l, int64_t cap) {{ {l} n = {l}_new(cap); memcpy(n->items, l->items, sizeof({ec}) * (size_t)l->len); n->len = l->len; for (int64_t i = 0; i < n->len; i++) {{ {dup_e} }} return n; }}
 static void {l}_grow({l} *p, int64_t need) {{
   {l} l = *p; int64_t nc = l->cap * 2; if (nc < need) nc = need; if (nc < 4) nc = 4;
-  if (l->rc == 1) {{ l = ({l})lt_realloc(l, {l}_SIZE(l->cap), {l}_SIZE(nc)); l->cap = nc; *p = l; }}
-  else {{ {l} n = {l}_clone(l, nc); if (l->rc > 0) l->rc--; *p = n; }}
+  if (LT_UNIQUE(l)) {{ l = ({l})lt_realloc(l, {l}_SIZE(l->cap), {l}_SIZE(nc)); l->cap = nc; *p = l; }}
+  else {{ {l} n = {l}_clone(l, nc); drop_{id}(l); *p = n; }}
 }}
-static inline void {l}_unique({l} *p) {{ {l} l = *p; if (l->rc != 1 && l->len > 0) {{ {l} n = {l}_clone(l, l->len); if (l->rc > 0) l->rc--; *p = n; }} }}
-static inline void {l}_push({l} *p, {ec} v) {{ {l} l = *p; if (LT_UNLIKELY(l->rc != 1 || l->len == l->cap)) {{ {l}_grow(p, l->len + 1); l = *p; }} l->items[l->len++] = v; }}
+static inline void {l}_unique({l} *p) {{ {l} l = *p; if (!LT_UNIQUE(l) && l->len > 0) {{ {l} n = {l}_clone(l, l->len); drop_{id}(l); *p = n; }} }}
+static inline void {l}_push({l} *p, {ec} v) {{ {l} l = *p; if (LT_UNLIKELY(!LT_UNIQUE(l) || l->len == l->cap)) {{ {l}_grow(p, l->len + 1); l = *p; }} l->items[l->len++] = v; }}
 static {l} {l}_lit(int64_t n, {ec} *items) {{ {l} l = {l}_new(n); memcpy(l->items, items, sizeof({ec}) * (size_t)n); l->len = n; return l; }}
 static inline {ec} *{l}_at({l} l, int64_t i, int line) {{ if (LT_UNLIKELY((uint64_t)i >= (uint64_t)l->len)) lt_index_panic(i, l->len, line); return &l->items[i]; }}
 static inline {ec} {l}_get({l} l, int64_t i, int line) {{ {ec} v = *{l}_at(l, i, line); {dup_v} return v; }}
@@ -837,14 +875,14 @@ static inline {ec} {l}_get_unchecked({l} l, int64_t i) {{ {ec} v = l->items[i]; 
 static {l} {l}_slice({l} l, int64_t from, int64_t to) {{ if (from < 0) from = 0; if (to > l->len) to = l->len; if (to <= from) return ({l})&lt_empty_list; {l} n = {l}_new(to - from); memcpy(n->items, l->items + from, sizeof({ec}) * (size_t)(to - from)); n->len = to - from; for (int64_t i = 0; i < n->len; i++) {{ {dup_e} }} return n; }}
 static void {l}_append_all({l} *p, {l} o) {{
   if (o->len == 0) {{ drop_{id}(o); return; }}
-  {l} l = *p; if (l->rc != 1 || l->len + o->len > l->cap) {{ {l}_grow(p, l->len + o->len); l = *p; }}
+  {l} l = *p; if (!LT_UNIQUE(l) || l->len + o->len > l->cap) {{ {l}_grow(p, l->len + o->len); l = *p; }}
   memcpy(l->items + l->len, o->items, sizeof({ec}) * (size_t)o->len);
-  if (o->rc == 1) {{ l->len += o->len; lt_free(o, {l}_SIZE(o->cap)); }}
+  if (LT_UNIQUE(o)) {{ l->len += o->len; lt_free(o, {l}_SIZE(o->cap)); }}
   else {{ int64_t start = l->len; l->len += o->len; for (int64_t k = start; k < l->len; k++) {{ {ec} v = l->items[k]; {dup_v} }} drop_{id}(o); }}
 }}
 static void {l}_insert({l} *p, {ec} v, int64_t at, int line) {{
   {l} l = *p; if (at < 0 || at > l->len) lt_index_panic(at, l->len, line);
-  if (l->rc != 1 || l->len == l->cap) {{ {l}_grow(p, l->len + 1); l = *p; }}
+  if (!LT_UNIQUE(l) || l->len == l->cap) {{ {l}_grow(p, l->len + 1); l = *p; }}
   memmove(l->items + at + 1, l->items + at, sizeof({ec}) * (size_t)(l->len - at)); l->items[at] = v; l->len++;
 }}
 static void {l}_remove_at({l} *p, int64_t at, int line) {{
@@ -853,7 +891,7 @@ static void {l}_remove_at({l} *p, int64_t at, int line) {{
 }}
 static {oc} {l}_pop({l} *p) {{ if ((*p)->len == 0) return {none}; {l}_unique(p); {l} l = *p; {ec} v = l->items[--l->len]; return {some_v}; }}
 static void {l}_reverse({l} *p) {{ {l}_unique(p); {l} l = *p; for (int64_t i = 0, j = l->len - 1; i < j; i++, j--) {{ {ec} t = l->items[i]; l->items[i] = l->items[j]; l->items[j] = t; }} }}
-static void {l}_clear({l} *p) {{ {l} l = *p; if (l->rc == 1) {{ for (int64_t i = 0; i < l->len; i++) {{ {drop_e} }} l->len = 0; }} else {{ drop_{id}(l); *p = ({l})&lt_empty_list; }} }}
+static void {l}_clear({l} *p) {{ {l} l = *p; if (LT_UNIQUE(l)) {{ for (int64_t i = 0; i < l->len; i++) {{ {drop_e} }} l->len = 0; }} else {{ drop_{id}(l); *p = ({l})&lt_empty_list; }} }}
 static inline int64_t {l}_cmp({ec} a, {ec} b) {{ return {cmp}; }}
 static void {l}_msort({ec} *a, int64_t n, {ec} *tmp) {{
   if (n <= 16) {{ for (int64_t i = 1; i < n; i++) {{ {ec} x = a[i]; int64_t j = i - 1; while (j >= 0 && {l}_cmp(a[j], x) > 0) {{ a[j + 1] = a[j]; j--; }} a[j + 1] = x; }} return; }}
@@ -943,14 +981,14 @@ static {m} {m}_rebuild({m} m, int64_t cap, bool owned) {{
     uint64_t mask = (uint64_t)n->icap - 1; uint64_t j = n->e[n->n].h & mask; while (n->idx[j] >= 0) j = (j + 1) & mask; n->idx[j] = (int32_t)n->n; n->n++;
   }}
   n->len = n->n;
-  if (owned) {{ free(m->e); free(m->idx); lt_free(m, sizeof(struct {m}_s)); }} else if (m->rc > 0) m->rc--;
+  if (owned) {{ free(m->e); free(m->idx); lt_free(m, sizeof(struct {m}_s)); }} else drop_{id}(m);
   return n;
 }}
-static inline void {m}_unique({m} *p) {{ {m} m = *p; if (m->rc != 1) *p = {m}_rebuild(m, m->len, false); }}
+static inline void {m}_unique({m} *p) {{ {m} m = *p; if (!LT_UNIQUE(m)) *p = {m}_rebuild(m, m->len, false); }}
 // the value slot for `key` (borrowed), adding a zeroed entry if missing
 static {vc} *{m}_slot_insert({m} *p, {kc} key) {{
   {m} m = *p; uint64_t h = {m}_hash(key);
-  if (m->rc == 1) {{ int64_t f = {m}_find(m, key, h); if (f >= 0) return &m->e[f].v; }}
+  if (LT_UNIQUE(m)) {{ int64_t f = {m}_find(m, key, h); if (f >= 0) return &m->e[f].v; }}
   else {{ int64_t f = {m}_find(m, key, h); m = *p = {m}_rebuild(m, m->len + (f < 0), false); if (f >= 0) return &m->e[{m}_find(m, key, h)].v; }}
   if (m->n == m->cap || (m->n + 1) * 2 > m->icap) {{ m = *p = {m}_rebuild(m, m->len < m->n / 2 ? m->cap : m->cap * 2, true); }}
   {m}_e *e = &m->e[m->n]; e->h = h; e->k = key; {dupk_key} memset(&e->v, 0, sizeof(e->v));
@@ -1084,7 +1122,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 Kind::List(e) if matches!(self.tys[*e].kind, Kind::Text) => {
                     let _ = writeln!(out, "typedef lt_texts *{};", c);
                 }
-                Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => {
+                Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Shared(_) | Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => {
                     let _ = writeln!(out, "typedef struct {}_s *{};", c, c);
                 }
                 _ => {}
@@ -1688,6 +1726,21 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 let vals: Vec<String> = ops.iter().map(|o| self.op(o)).collect();
                 let c = self.tys[did].c.clone();
                 match &self.tys[did].kind {
+                    Kind::Shared(_) => {
+                        self.need(H::Ops, did);
+                        set(out, format!("{}_new({})", c, vals[0]));
+                        return;
+                    }
+                    Kind::Channel(e) => {
+                        let e = *e;
+                        let dp = self.drop_ptr(e);
+                        let ec = self.tys[e].c.clone();
+                        set(out, format!("lt_chan_new({}, sizeof({}), {}, {})", vals[0], ec, dp, line));
+                        return;
+                    }
+                    _ => {}
+                }
+                match &self.tys[did].kind {
                     Kind::Record { boxed: true, .. } => {
                         self.need(H::Ops, did);
                         let body = if vals.is_empty() { "0".into() } else { vals.join(", ") };
@@ -1780,6 +1833,37 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
     }
 
     fn need_box(&mut self, _tid: usize) {}
+
+    // `void f(void *p)` that drops the value at p
+    fn drop_ptr(&mut self, e: usize) -> String {
+        let name = format!("dropp_{}", e);
+        if !self.done.contains(&(H::Ops, usize::MAX / 4 + e)) {
+            self.done.insert((H::Ops, usize::MAX / 4 + e));
+            let ec = self.tys[e].c.clone();
+            let d = self.drop_(e, &format!("*({} *)p", ec));
+            let _ = writeln!(self.helpers, "static void {}(void *p) {{ (void)p; {} }}", name, d);
+        }
+        name
+    }
+
+    // the runner of a task whose call returns `r` (maybe throwing)
+    fn task_run_fn(&mut self, r: &Ty, throws: bool) -> String {
+        let unit = self.is_unit(r);
+        let rid = if unit { usize::MAX } else { self.tid(r) };
+        let name = format!("run_{}{}", if unit { "unit".to_string() } else { rid.to_string() }, if throws { "t" } else { "" });
+        let key = (H::Ops, usize::MAX / 8 + if unit { 0 } else { rid * 2 + 2 } + throws as usize);
+        if !self.done.contains(&key) {
+            self.done.insert(key);
+            let body = match (unit, throws) {
+                (true, false) => "((void (*)(lt_env *))t->fn.fn)(t->fn.env);".to_string(),
+                (true, true) => "t->error = ((lt_err (*)(lt_env *))t->fn.fn)(t->fn.env);".to_string(),
+                (false, false) => format!("*({rc} *)t->result = (({rc} (*)(lt_env *))t->fn.fn)(t->fn.env);", rc = self.tys[rid].c),
+                (false, true) => format!("t->error = ((lt_err (*)(lt_env *, {rc} *))t->fn.fn)(t->fn.env, ({rc} *)t->result);", rc = self.tys[rid].c),
+            };
+            let _ = writeln!(self.helpers, "static void {}(lt_task *t) {{ {} }}", name, body);
+        }
+        name
+    }
 
     fn term(&mut self, fi: usize, t: &Term, out: &mut String) {
         let f = &self.m.funcs[fi];
@@ -1895,6 +1979,79 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 self.totext_expr(t, &a[0], name == "debug_text")
             }
             "print" => format!("lt_print({})", a[0]),
+            "scope_new" => {
+                self.threads = true;
+                "((int64_t)(intptr_t)lt_scope_new())".to_string()
+            }
+            "scope_end" => format!("lt_scope_end((lt_scope *)(intptr_t){}, false)", a[0]),
+            "scope_cancel" => format!("lt_iface_drop(lt_scope_end((lt_scope *)(intptr_t){}, true))", a[0]),
+            "spawn" => {
+                self.threads = true;
+                let r = tys[0].clone();
+                let throws = a[2] == "true";
+                let run = self.task_run_fn(&r, throws);
+                let (size, dropr) = if self.is_unit(&r) {
+                    ("0".to_string(), "NULL".to_string())
+                } else {
+                    let rid = self.tid(&r);
+                    (format!("sizeof({})", self.tys[rid].c), self.drop_ptr(rid))
+                };
+                format!("lt_spawn((lt_scope *)(intptr_t){}, {}, {}, {}, {})", a[0], a[1], size, run, dropr)
+            }
+            "Task.wait" => {
+                let e = match &self.tys[tid0.unwrap()].kind {
+                    Kind::Task(e) => *e,
+                    _ => unreachable!(),
+                };
+                if matches!(self.tys[e].kind, Kind::Unit) {
+                    format!("lt_task_outcome({})", a[0])
+                } else {
+                    let ec = self.tys[e].c.clone();
+                    let d = self.dup(e, "*o_");
+                    format!("({{ lt_task *t_ = {t}; lt_err e_ = lt_task_outcome(t_); if (!e_.obj) {{ {ec} *o_ = {out}; *o_ = *({ec} *)t_->result; {d} }} e_; }})", t = a[0], ec = ec, out = a[1], d = d)
+                }
+            }
+            "Task.cancel" => format!("lt_task_cancel({})", a[0]),
+            "Shared.acquire" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_acquire({})", self.tys[st].c, a[0])
+            }
+            "Shared.release" => {
+                let st = self.tid(&Ty::Adt(self.prog.b.shared, vec![tys[0].clone()]));
+                self.need(H::Ops, st);
+                format!("{}_release({}, {})", self.tys[st].c, a[0], a[1])
+            }
+            "Channel.send" => {
+                let e = match &self.tys[tid0.unwrap()].kind {
+                    Kind::Channel(e) => *e,
+                    _ => unreachable!(),
+                };
+                let ec = self.tys[e].c.clone();
+                format!("({{ {ec} it_ = {x}; lt_chan_send({c}, &it_); }})", ec = ec, x = a[1], c = a[0])
+            }
+            "Channel.next" | "Channel.receive" => {
+                let e = match &self.tys[tid0.unwrap()].kind {
+                    Kind::Channel(e) => *e,
+                    _ => unreachable!(),
+                };
+                let ety = self.ty_of(e);
+                let opt = self.opt_tid_of(&ety);
+                let ec = self.tys[e].c.clone();
+                let some = self.opt_some(opt, "v_");
+                let none = self.opt_none(opt);
+                if name == "Channel.next" {
+                    format!("({{ {ec} v_; lt_chan_recv({c}, &v_) ? {some} : {none}; }})", ec = ec, c = a[0], some = some, none = none)
+                } else {
+                    format!("({{ {ec} v_; int g_ = lt_chan_recv({c}, &v_); *{out} = g_ ? {some} : {none}; (!g_ && lt_is_cancelled()) ? lt_make_cancelled() : (lt_err){{0}}; }})", ec = ec, c = a[0], out = a[1], some = some, none = none)
+                }
+            }
+            "Channel.close" => format!("lt_chan_close({})", a[0]),
+            "__sleep_nanos" => {
+                self.threads = true;
+                format!("lt_sleep_nanos({})", a[0])
+            }
+            "__monotonic_nanos" => "lt_monotonic_nanos()".to_string(),
             "assert" => format!("lt_assert({}, {})", a[0], line),
             "panic" => format!("lt_panic_text({}, {})", a[0], line),
             "min" | "max" => {
@@ -2199,7 +2356,14 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         let failure_ty = Ty::Adt(self.prog.b.failure, vec![]);
         let ftid = self.tid(&failure_ty);
         let fc = self.tys[ftid].c.clone();
-        let make_failure = format!("static lt_err lt_make_failure(lt_text *msg) {{ return to_iface_vt{}(({}){{ msg, (lt_iface){{0}} }}); }}\n", fv, fc);
+        let mut make_failure = format!("static lt_err lt_make_failure(lt_text *msg) {{ return to_iface_vt{}(({}){{ msg, (lt_iface){{0}} }}); }}\n", fv, fc);
+        {
+            let ct = Ty::Adt(self.prog.b.cancelled, vec![]);
+            let cc = self.cty(&ct);
+            let xt = Ty::Adt(self.prog.b.channel_closed, vec![]);
+            let xc = self.cty(&xt);
+            let _ = write!(make_failure, "static lt_err lt_make_cancelled(void) {{ return to_iface_vt{}(({}){{0}}); }}\nstatic lt_err lt_make_channel_closed(void) {{ return to_iface_vt{}(({}){{0}}); }}\n", self.m.cancelled_vtable, cc, self.m.closed_vtable, xc);
+        }
         // error message: Error.message is slot 0 of the Error interface
         let err_msg = "static lt_text *lt_error_message(lt_err e) { return ((lt_text *(*)(lt_obj *))e.vt->m[0])(e.obj); }\n\
 static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e); lt_panic_text(m, line); }\n";
@@ -2209,7 +2373,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         // entry point
         let mut main = String::new();
         if tests {
-            main += "int main(void) {\n  lt_init();\n  int failed = 0, passed = 0;\n";
+            main += "static int lt_tests_failed;\nstatic void lt_tests_run(void *self_task) {\n  (void)self_task;\n  int failed = 0, passed = 0;\n";
             for (i, t) in self.m.tests.iter().enumerate() {
                 let f = &self.m.funcs[*t];
                 let name = match &f.kind {
@@ -2219,22 +2383,34 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
                 let _ = writeln!(main, "  {{ lt_err e = {}(); if (e.obj) {{ failed++; lt_text *m = lt_error_message(e); printf(\"FAIL  %s\\n      %.*s\\n\", {}, (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); }} else {{ passed++; printf(\"ok    %s\\n\", {}); }} }}", f.name, c_str(&name), c_str(&name));
                 let _ = i;
             }
-            main += "  printf(\"\\n%d passed, %d failed\\n\", passed, failed);\n  fflush(stdout);\n  return failed ? 1 : 0;\n}\n";
+            main += "  printf(\"\\n%d passed, %d failed\\n\", passed, failed);\n  lt_tests_failed = failed;\n}\n";
+            if self.threads {
+                main += "int main(void) {\n  lt_init();\n  lt_run_main((lt_fn){0}, 0, (void (*)(lt_task *))lt_tests_run);\n  fflush(stdout);\n  return lt_tests_failed ? 1 : 0;\n}\n";
+            } else {
+                main += "int main(void) {\n  lt_init();\n  lt_tests_run(NULL);\n  fflush(stdout);\n  return lt_tests_failed ? 1 : 0;\n}\n";
+            }
         } else if let Some(m) = self.m.main {
             let f = &self.m.funcs[m];
-            main += "int main(void) {\n  lt_init();\n";
-            if f.throws {
-                let _ = writeln!(main, "  lt_err e = {}();\n  if (e.obj) {{ fflush(stdout); lt_text *m = lt_error_message(e); fprintf(stderr, \"error: %.*s\\n\", (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); return 1; }}", f.name);
+            let call = if f.throws { format!("lt_err e = {}();", f.name) } else { format!("{}(); lt_err e = {{0}};", f.name) };
+            let report = "if (e.obj) { fflush(stdout); lt_text *m = lt_error_message(e); fprintf(stderr, \"error: %.*s\\n\", (int)m->len, m->data); lt_text_drop(m); lt_iface_drop(e); return 1; }";
+            if self.threads {
+                let _ = writeln!(main, "static void lt_main_run(lt_task *t) {{ {} t->error = e; }}", call);
+                let _ = writeln!(main, "int main(void) {{\n  lt_init();\n  lt_task *mt = lt_run_main((lt_fn){{0}}, 0, lt_main_run);\n  lt_err e = mt->error;\n  lt_iface_dup(e);\n  lt_task_drop(mt);\n  {}\n  fflush(stdout);\n  return 0;\n}}", report);
             } else {
-                let _ = writeln!(main, "  {}();", f.name);
+                let _ = writeln!(main, "int main(void) {{\n  lt_init();\n  {}\n  {}\n  fflush(stdout);\n  return 0;\n}}", call, report);
             }
-            main += "  fflush(stdout);\n  return 0;\n}\n";
         } else {
             main += "int main(void) { fprintf(stderr, \"this program has no `fn main()`\\n\"); return 1; }\n";
         }
         let types = self.emit_types();
         let mut out = String::new();
+        if self.threads {
+            out += "#define LT_THREADS 1\n";
+        }
         out += include_str!("runtime/rt.h");
+        if self.threads {
+            out += include_str!("runtime/sched.h");
+        }
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";
         out += "static void lt_panic_error(lt_err e, int line);\n";

@@ -41,18 +41,30 @@ struct FnCtx {
     in_try: bool,
     // the expression is a statement: `if`/`match` produce no value
     stmt_pos: bool,
-    prelude: bool,
+    // set by `spawn` for the call right below it
+    in_spawn: bool,
+    spawn_call: bool,
+    lock_depth: usize,
+    module: usize,
+}
+
+pub struct ModScope {
+    pub name: String,
+    globals: HashMap<String, Global>,
+    // imported module names -> module index
+    imports: HashMap<String, usize>,
+    // the prelude and the standard library: may declare runtime functions
+    privileged: bool,
 }
 
 pub struct Checker {
     pub prog: Program,
     pub diags: Vec<Diag>,
-    user: HashMap<String, Global>,
-    prelude: HashMap<String, Global>,
+    modules: Vec<ModScope>,
     prim: HashMap<DefId, Ty>,
     f: Option<FnCtx>,
     // AST of every function (methods included) by FnId, for body checking
-    fn_asts: Vec<Option<(ast::FnDecl, bool)>>,
+    fn_asts: Vec<Option<(ast::FnDecl, usize)>>,
 }
 
 fn orderable(t: &Ty) -> bool {
@@ -116,12 +128,11 @@ impl Checker {
                 defs: vec![],
                 fns: vec![],
                 tests: vec![],
-                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0 },
+                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0, task: 0, shared: 0, locked: 0, channel: 0, cancelled: 0, channel_closed: 0 },
                 main: None,
             },
             diags: vec![],
-            user: HashMap::new(),
-            prelude: HashMap::new(),
+            modules: vec![],
             prim: HashMap::new(),
             f: None,
             fn_asts: vec![],
@@ -139,21 +150,71 @@ impl Checker {
         self.prog.show(&t)
     }
 
-    fn lookup_global(&self, name: &str, prelude: bool) -> Option<Global> {
-        if !prelude {
-            if let Some(g) = self.user.get(name) {
-                return Some(*g);
+    fn lookup_global(&self, name: &str, md: usize) -> Option<Global> {
+        if let Some(g) = self.modules[md].globals.get(name) {
+            return Some(*g);
+        }
+        self.modules[0].globals.get(name).copied()
+    }
+
+    // `files` in `files.read(...)`: an imported module, unless a local has that name
+    fn module_named(&self, name: &str) -> Option<usize> {
+        let md = self.f.as_ref().map(|f| f.module)?;
+        if self.f.as_ref().unwrap().scopes.iter().any(|s| s.contains_key(name)) {
+            return None;
+        }
+        self.modules[md].imports.get(name).copied()
+    }
+
+    // A name from another module: it must be `pub`.
+    fn lookup_in_module(&mut self, target: usize, name: &str, span: Span) -> Option<Global> {
+        let g = self.modules[target].globals.get(name).copied();
+        let mname = self.modules[target].name.clone();
+        match g {
+            None => {
+                let cands: Vec<String> = self.modules[target].globals.keys().cloned().collect();
+                match suggest(name, cands.iter()) {
+                    Some(s) => self.err_help(span, format!("module `{}` has no `{}`", mname, name), format!("did you mean `{}.{}`?", mname, s)),
+                    None => self.err(span, format!("module `{}` has no `{}`", mname, name)),
+                }
+                None
+            }
+            Some(g) => {
+                let public = match g {
+                    Global::Fn(f) => self.prog.fns[f].is_pub,
+                    Global::Type(d) => self.prog.defs[d].is_pub,
+                };
+                if !public {
+                    self.err(span, format!("`{}.{}` is private to its module", mname, name));
+                }
+                Some(g)
             }
         }
-        self.prelude.get(name).copied()
     }
 
     // ================= declaration collection =================
 
-    pub fn check_program(&mut self, prelude: &ast::Module, user: &ast::Module) {
-        self.collect_types(prelude, true);
-        self.collect_types(user, false);
-        let pl = |c: &Checker, n: &str| match c.prelude.get(n) {
+    // `modules[0]` is the prelude, the last one is the user's file; the rest
+    // are standard library modules. Each comes with the names it imports.
+    pub fn check_program(&mut self, mods: &[(String, ast::Module, bool)]) {
+        for (name, m, privileged) in mods {
+            let _ = m;
+            self.modules.push(ModScope { name: name.clone(), globals: HashMap::new(), imports: HashMap::new(), privileged: *privileged });
+        }
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            for (imp, sp) in &m.imports {
+                match mods.iter().position(|x| x.0 == *imp) {
+                    Some(j) if j != 0 => {
+                        self.modules[i].imports.insert(imp.clone(), j);
+                    }
+                    _ => self.err(*sp, format!("unknown module `{}`", imp)),
+                }
+            }
+        }
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            self.collect_types(m, i);
+        }
+        let pl = |c: &Checker, n: &str| match c.modules[0].globals.get(n) {
             Some(Global::Type(d)) => *d,
             _ => panic!("prelude type {} missing", n),
         };
@@ -169,34 +230,46 @@ impl Checker {
             indexed: pl(self, "Indexed"),
             error: pl(self, "Error"),
             failure: pl(self, "Failure"),
+            task: pl(self, "Task"),
+            shared: pl(self, "Shared"),
+            locked: pl(self, "Locked"),
+            channel: pl(self, "Channel"),
+            cancelled: pl(self, "Cancelled"),
+            channel_closed: pl(self, "ChannelClosed"),
         };
         let b = &self.prog.b;
         self.prim.insert(b.int, Ty::Int);
         self.prim.insert(b.float, Ty::Float);
         self.prim.insert(b.bool_, Ty::Bool);
         self.prim.insert(b.text, Ty::Text);
-        self.resolve_type_bodies(prelude, true);
-        self.resolve_type_bodies(user, false);
-        self.collect_fns(prelude, true);
-        self.collect_fns(user, false);
-        self.check_implements(prelude, true);
-        self.check_implements(user, false);
-        self.check_defaults(prelude, true);
-        self.check_defaults(user, false);
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            self.resolve_type_bodies(m, i);
+        }
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            self.collect_fns(m, i);
+        }
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            self.check_implements(m, i);
+        }
+        self.check_task_escapes();
+        for (i, (_, m, _)) in mods.iter().enumerate() {
+            self.check_defaults(m, i);
+        }
         // bodies
         for id in 0..self.fn_asts.len() {
-            if let Some((decl, is_prelude)) = self.fn_asts[id].clone() {
+            if let Some((decl, md)) = self.fn_asts[id].clone() {
                 if decl.body.is_some() {
-                    self.check_fn_body(id, &decl, is_prelude);
+                    self.check_fn_body(id, &decl, md);
                 }
             }
         }
-        for item in &user.items {
+        let user = mods.len() - 1;
+        for item in &mods[user].1.items {
             if let ast::Item::Test(t) = item {
-                self.check_test(t);
+                self.check_test(t, user);
             }
         }
-        if let Some(Global::Fn(id)) = self.user.get("main").copied() {
+        if let Some(Global::Fn(id)) = self.modules[user].globals.get("main").copied() {
             let f = &self.prog.fns[id];
             if !f.params.is_empty() || f.ret != Ty::Unit {
                 let sp = f.span;
@@ -206,7 +279,7 @@ impl Checker {
         }
     }
 
-    fn add_def(&mut self, name: &str, generics: Vec<String>, span: Span, prelude: bool) -> DefId {
+    fn add_def(&mut self, name: &str, generics: Vec<String>, span: Span, md: usize, is_pub: bool) -> DefId {
         self.prog.defs.push(TypeDef {
             name: name.to_string(),
             generics,
@@ -215,56 +288,58 @@ impl Checker {
             props: vec![],
             implements: vec![],
             span,
-            is_prelude: prelude,
+            is_prelude: md == 0,
+            module: md,
+            is_pub: is_pub || md == 0,
         });
         let id = self.prog.defs.len() - 1;
-        let map = if prelude { &mut self.prelude } else { &mut self.user };
+        let map = &mut self.modules[md].globals;
         if map.insert(name.to_string(), Global::Type(id)).is_some() {
             self.err(span, format!("`{}` is declared twice", name));
         }
         id
     }
 
-    fn collect_types(&mut self, m: &ast::Module, prelude: bool) {
-        for item in &m.items {
+    fn collect_types(&mut self, astm: &ast::Module, md: usize) {
+        for item in &astm.items {
             match item {
                 ast::Item::Record(r) => {
-                    self.add_def(&r.name, r.generics.clone(), r.span, prelude);
+                    self.add_def(&r.name, r.generics.clone(), r.span, md, r.is_pub);
                 }
                 ast::Item::Enum(e) => {
-                    self.add_def(&e.name, e.generics.clone(), e.span, prelude);
+                    self.add_def(&e.name, e.generics.clone(), e.span, md, e.is_pub);
                 }
                 ast::Item::Newtype(n) => {
-                    self.add_def(&n.name, vec![], n.span, prelude);
+                    self.add_def(&n.name, vec![], n.span, md, n.is_pub);
                 }
                 ast::Item::Interface(i) => {
-                    self.add_def(&i.name, vec![], i.span, prelude);
+                    self.add_def(&i.name, vec![], i.span, md, i.is_pub);
                 }
                 _ => {}
             }
         }
     }
 
-    fn def_id(&self, name: &str, prelude: bool) -> DefId {
-        match self.lookup_global(name, prelude) {
+    fn def_id(&self, name: &str, md: usize) -> DefId {
+        match self.lookup_global(name, md) {
             Some(Global::Type(d)) => d,
             _ => unreachable!(),
         }
     }
 
-    pub fn resolve_texpr(&mut self, t: &TypeExpr, generics: &[String], prelude: bool) -> Ty {
+    pub fn resolve_texpr(&mut self, t: &TypeExpr, generics: &[String], md: usize) -> Ty {
         match t {
             TypeExpr::Optional(inner, sp) => {
-                let i = self.resolve_texpr(inner, generics, prelude);
+                let i = self.resolve_texpr(inner, generics, md);
                 if matches!(i, Ty::Opt(_)) {
                     self.err(*sp, "`T??` is not a type: a value is either missing or not");
                 }
                 Ty::opt(i)
             }
             TypeExpr::Func { params, ret, throws, .. } => {
-                let ps = params.iter().map(|p| self.resolve_texpr(p, generics, prelude)).collect();
+                let ps = params.iter().map(|p| self.resolve_texpr(p, generics, md)).collect();
                 let r = match ret {
-                    Some(r) => self.resolve_texpr(r, generics, prelude),
+                    Some(r) => self.resolve_texpr(r, generics, md),
                     None => Ty::Unit,
                 };
                 Ty::func(ps, r, *throws)
@@ -272,7 +347,7 @@ impl Checker {
             TypeExpr::Combo(parts, sp) => {
                 let mut ids = vec![];
                 for p in parts {
-                    match self.resolve_texpr(p, generics, prelude) {
+                    match self.resolve_texpr(p, generics, md) {
                         Ty::Iface(v) => ids.extend(v),
                         Ty::Err => return Ty::Err,
                         other => {
@@ -287,23 +362,41 @@ impl Checker {
                 Ty::Iface(ids)
             }
             TypeExpr::Named { path, args, span } => {
-                if path.len() > 1 {
+                if path.len() > 2 {
                     self.err(*span, format!("unknown type `{}`", path.join(".")));
                     return Ty::Err;
                 }
-                let name = &path[0];
+                // `http.Request`: a type from an imported module
+                let (md, name) = if path.len() == 2 {
+                    match self.modules[md].imports.get(&path[0]).copied() {
+                        Some(target) => match self.lookup_in_module(target, &path[1], *span) {
+                            Some(Global::Type(_)) => (target, &path[1]),
+                            Some(_) => {
+                                self.err(*span, format!("`{}` is not a type", path.join(".")));
+                                return Ty::Err;
+                            }
+                            None => return Ty::Err,
+                        },
+                        None => {
+                            self.err_help(*span, format!("unknown module `{}`", path[0]), format!("add `import {}` at the top of the file", path[0]));
+                            return Ty::Err;
+                        }
+                    }
+                } else {
+                    (md, &path[0])
+                };
                 if let Some(i) = generics.iter().position(|g| g == name) {
                     if !args.is_empty() {
                         self.err(*span, "a type parameter takes no type arguments");
                     }
                     return Ty::Param(i as u32);
                 }
-                let targs: Vec<Ty> = args.iter().map(|a| self.resolve_texpr(a, generics, prelude)).collect();
+                let targs: Vec<Ty> = args.iter().map(|a| self.resolve_texpr(a, generics, md)).collect();
                 match name.as_str() {
-                    "Never" if prelude => return Ty::Never,
+                    "Never" if self.modules[md].privileged => return Ty::Never,
                     _ => {}
                 }
-                match self.lookup_global(name, prelude) {
+                match self.lookup_global(name, md) {
                     Some(Global::Type(d)) => {
                         if let Some(p) = self.prim.get(&d) {
                             return p.clone();
@@ -350,18 +443,18 @@ impl Checker {
         }
     }
 
-    fn resolve_type_bodies(&mut self, m: &ast::Module, prelude: bool) {
+    fn resolve_type_bodies(&mut self, astm: &ast::Module, md: usize) {
         // interfaces first so that fields can mention them
-        for item in &m.items {
+        for item in &astm.items {
             if let ast::Item::Interface(i) = item {
-                let d = self.def_id(&i.name, prelude);
+                let d = self.def_id(&i.name, md);
                 self.prog.defs[d].kind = TypeKind::Interface { methods: vec![] };
             }
         }
-        for item in &m.items {
+        for item in &astm.items {
             match item {
                 ast::Item::Record(r) => {
-                    let d = self.def_id(&r.name, prelude);
+                    let d = self.def_id(&r.name, md);
                     let mut fields = vec![];
                     let mut props = vec![];
                     let mut seen = HashSet::new();
@@ -369,7 +462,7 @@ impl Checker {
                         if !seen.insert(f.name.clone()) {
                             self.err(f.span, format!("field `{}` is declared twice", f.name));
                         }
-                        let ty = self.resolve_texpr(&f.ty, &r.generics, prelude);
+                        let ty = self.resolve_texpr(&f.ty, &r.generics, md);
                         if r.builtin {
                             props.push((f.name.clone(), ty));
                         } else {
@@ -383,7 +476,7 @@ impl Checker {
                     }
                 }
                 ast::Item::Enum(e) => {
-                    let d = self.def_id(&e.name, prelude);
+                    let d = self.def_id(&e.name, md);
                     let mut variants = vec![];
                     let mut seen = HashSet::new();
                     for v in &e.variants {
@@ -395,7 +488,7 @@ impl Checker {
                             .iter()
                             .map(|f| FieldDef {
                                 name: f.name.clone(),
-                                ty: self.resolve_texpr(&f.ty, &e.generics, prelude),
+                                ty: self.resolve_texpr(&f.ty, &e.generics, md),
                                 default: None,
                                 span: f.span,
                             })
@@ -405,8 +498,8 @@ impl Checker {
                     self.prog.defs[d].kind = TypeKind::Enum { variants };
                 }
                 ast::Item::Newtype(n) => {
-                    let d = self.def_id(&n.name, prelude);
-                    let ty = self.resolve_texpr(&n.ty, &[], prelude);
+                    let d = self.def_id(&n.name, md);
+                    let ty = self.resolve_texpr(&n.ty, &[], md);
                     if let Ty::Adt(inner, _) = &ty {
                         if let TypeKind::Newtype(_) = self.prog.defs[*inner].kind {
                             self.err(n.span, "a new type can't wrap another new type");
@@ -419,7 +512,7 @@ impl Checker {
         }
     }
 
-    fn new_fn(&mut self, decl: &ast::FnDecl, owner: Option<DefId>, owner_generics: &[String], prelude: bool) -> FnId {
+    fn new_fn(&mut self, decl: &ast::FnDecl, owner: Option<DefId>, owner_generics: &[String], md: usize) -> FnId {
         let mut generics: Vec<String> = owner_generics.to_vec();
         for g in &decl.generics {
             if generics.contains(g) {
@@ -433,10 +526,10 @@ impl Checker {
             if !seen.insert(p.name.clone()) {
                 self.err(p.span, format!("parameter `{}` is declared twice", p.name));
             }
-            params.push((p.name.clone(), self.resolve_texpr(&p.ty, &generics, prelude)));
+            params.push((p.name.clone(), self.resolve_texpr(&p.ty, &generics, md)));
         }
         let ret = match &decl.ret {
-            Some(t) => self.resolve_texpr(t, &generics, prelude),
+            Some(t) => self.resolve_texpr(t, &generics, md),
             None => Ty::Unit,
         };
         let self_mode = if decl.mutating {
@@ -461,50 +554,52 @@ impl Checker {
             intrinsic: decl.intrinsic,
             body: None,
             span: decl.span,
-            is_prelude: prelude,
+            is_prelude: md == 0,
+            module: md,
+            is_pub: decl.is_pub || md == 0,
         });
-        self.fn_asts.push(Some((decl.clone(), prelude)));
+        self.fn_asts.push(Some((decl.clone(), md)));
         self.prog.fns.len() - 1
     }
 
-    fn add_methods(&mut self, d: DefId, methods: &[ast::FnDecl], generics: &[String], prelude: bool) {
+    fn add_methods(&mut self, d: DefId, methods: &[ast::FnDecl], generics: &[String], md: usize) {
         for m in methods {
-            let id = self.new_fn(m, Some(d), generics, prelude);
+            let id = self.new_fn(m, Some(d), generics, md);
             if self.prog.defs[d].methods.insert(m.name.clone(), id).is_some() {
                 self.err(m.span, format!("method `{}` is declared twice (there is no overloading)", m.name));
             }
         }
     }
 
-    fn collect_fns(&mut self, m: &ast::Module, prelude: bool) {
-        for item in &m.items {
+    fn collect_fns(&mut self, astm: &ast::Module, md: usize) {
+        for item in &astm.items {
             match item {
                 ast::Item::Fn(f) => {
-                    let id = self.new_fn(f, None, &[], prelude);
-                    let map = if prelude { &mut self.prelude } else { &mut self.user };
+                    let id = self.new_fn(f, None, &[], md);
+                    let map = &mut self.modules[md].globals;
                     if map.insert(f.name.clone(), Global::Fn(id)).is_some() {
                         self.err(f.span, format!("`{}` is declared twice (there is no overloading)", f.name));
                     }
-                    if f.body.is_none() && !prelude {
+                    if f.body.is_none() && !self.modules[md].privileged {
                         self.err(f.span, "a function needs a body: `{ ... }`");
                     }
                 }
                 ast::Item::Record(r) => {
-                    let d = self.def_id(&r.name, prelude);
-                    self.add_methods(d, &r.methods, &r.generics, prelude);
+                    let d = self.def_id(&r.name, md);
+                    self.add_methods(d, &r.methods, &r.generics, md);
                 }
                 ast::Item::Enum(e) => {
-                    let d = self.def_id(&e.name, prelude);
-                    self.add_methods(d, &e.methods, &e.generics, prelude);
+                    let d = self.def_id(&e.name, md);
+                    self.add_methods(d, &e.methods, &e.generics, md);
                 }
                 ast::Item::Interface(i) => {
-                    let d = self.def_id(&i.name, prelude);
+                    let d = self.def_id(&i.name, md);
                     let mut ids = vec![];
-                    for m in &i.methods {
-                        let id = self.new_fn(m, Some(d), &[], prelude);
+                    for im in &i.methods {
+                        let id = self.new_fn(im, Some(d), &[], md);
                         // interface methods have no body to check
                         self.fn_asts[id] = None;
-                        self.prog.defs[d].methods.insert(m.name.clone(), id);
+                        self.prog.defs[d].methods.insert(im.name.clone(), id);
                         ids.push(id);
                     }
                     self.prog.defs[d].kind = TypeKind::Interface { methods: ids };
@@ -514,16 +609,16 @@ impl Checker {
         }
     }
 
-    fn check_implements(&mut self, m: &ast::Module, prelude: bool) {
-        for item in &m.items {
+    fn check_implements(&mut self, astm: &ast::Module, md: usize) {
+        for item in &astm.items {
             let (name, impls, generics) = match item {
                 ast::Item::Record(r) => (&r.name, &r.implements, &r.generics),
                 ast::Item::Enum(e) => (&e.name, &e.implements, &e.generics),
                 _ => continue,
             };
-            let d = self.def_id(name, prelude);
+            let d = self.def_id(name, md);
             for (iname, isp) in impls {
-                let iface = match self.lookup_global(iname, prelude) {
+                let iface = match self.lookup_global(iname, md) {
                     Some(Global::Type(i)) if matches!(self.prog.defs[i].kind, TypeKind::Interface { .. }) => i,
                     _ => {
                         self.err(*isp, format!("`{}` is not an interface", iname));
@@ -564,6 +659,38 @@ impl Checker {
         }
     }
 
+    fn contains_task(&self, t: &Ty) -> bool {
+        match t {
+            Ty::Adt(d, a) => *d == self.prog.b.task || a.iter().any(|x| self.contains_task(x)),
+            Ty::Opt(x) => self.contains_task(x),
+            Ty::Func(f) => f.params.iter().any(|x| self.contains_task(x)) || self.contains_task(&f.ret),
+            _ => false,
+        }
+    }
+
+    fn check_task_escapes(&mut self) {
+        let task = self.prog.b.task;
+        for i in 0..self.prog.fns.len() {
+            let f = &self.prog.fns[i];
+            if !f.is_prelude && self.contains_task(&f.ret) {
+                let sp = f.span;
+                self.err_help(sp, "a task can't be returned", "a task belongs to the function that started it: `try task.wait()` there and return the result");
+            }
+        }
+        for d in 0..self.prog.defs.len() {
+            let def = &self.prog.defs[d];
+            let bad = match &def.kind {
+                TypeKind::Record { fields } => fields.iter().any(|f| self.contains_task(&f.ty)),
+                TypeKind::Enum { variants } => variants.iter().any(|v| v.fields.iter().any(|f| self.contains_task(&f.ty))),
+                _ => false,
+            };
+            if bad && d != task {
+                let sp = def.span;
+                self.err_help(sp, "a task can't be stored in a type", "a task belongs to the function that started it");
+            }
+        }
+    }
+
     fn sig_text(&self, f: &FnDef) -> String {
         let mut ps = vec![];
         if f.self_mode != SelfMode::None {
@@ -582,16 +709,16 @@ impl Checker {
         s
     }
 
-    fn check_defaults(&mut self, m: &ast::Module, prelude: bool) {
-        for item in &m.items {
+    fn check_defaults(&mut self, astm: &ast::Module, md: usize) {
+        for item in &astm.items {
             if let ast::Item::Record(r) = item {
                 if r.builtin {
                     continue;
                 }
-                let d = self.def_id(&r.name, prelude);
+                let d = self.def_id(&r.name, md);
                 for (i, f) in r.fields.iter().enumerate() {
                     if let Some(def) = &f.default {
-                        self.begin_fn(r.generics.clone(), Ty::Unit, false, prelude);
+                        self.begin_fn(r.generics.clone(), Ty::Unit, false, md);
                         let fty = match &self.prog.defs[d].kind {
                             TypeKind::Record { fields } => fields[i].ty.clone(),
                             _ => Ty::Err,
@@ -613,7 +740,7 @@ impl Checker {
 
     // ================= function bodies =================
 
-    fn begin_fn(&mut self, generics: Vec<String>, ret: Ty, throws_ok: bool, prelude: bool) {
+    fn begin_fn(&mut self, generics: Vec<String>, ret: Ty, throws_ok: bool, md: usize) {
         self.f = Some(FnCtx {
             locals: vec![],
             level: vec![],
@@ -630,7 +757,10 @@ impl Checker {
             self_mutable: false,
             in_try: false,
             stmt_pos: false,
-            prelude,
+            in_spawn: false,
+            spawn_call: false,
+            lock_depth: 0,
+            module: md,
         });
     }
 
@@ -656,9 +786,9 @@ impl Checker {
         TBody { locals, params, block }
     }
 
-    fn check_fn_body(&mut self, id: FnId, decl: &ast::FnDecl, prelude: bool) {
+    fn check_fn_body(&mut self, id: FnId, decl: &ast::FnDecl, md: usize) {
         let f = self.prog.fns[id].clone();
-        self.begin_fn(f.generics.clone(), f.ret.clone(), f.throws, prelude);
+        self.begin_fn(f.generics.clone(), f.ret.clone(), f.throws, md);
         let mut params = vec![];
         if f.self_mode != SelfMode::None {
             let owner = f.owner.unwrap();
@@ -686,7 +816,7 @@ impl Checker {
         let uses_throw = self.fc().uses_throw;
         let mut tb = self.end_fn(block);
         tb.params = params;
-        if f.throws && !uses_throw && !prelude && !f.intrinsic {
+        if f.throws && !uses_throw && !f.intrinsic {
             // a `throws` function that can never fail is allowed (interfaces), no error
         }
         self.prog.fns[id].body = Some(tb);
@@ -711,8 +841,8 @@ impl Checker {
         }
     }
 
-    fn check_test(&mut self, t: &ast::TestDecl) {
-        self.begin_fn(vec![], Ty::Unit, true, false);
+    fn check_test(&mut self, t: &ast::TestDecl, md: usize) {
+        self.begin_fn(vec![], Ty::Unit, true, md);
         self.fcx().in_test = true;
         let block = self.block(&t.body, false, None);
         let body = self.end_fn(block);
@@ -1023,6 +1153,15 @@ impl Checker {
         if matches!(t, Ty::Unit | Ty::Never | Ty::Err) {
             return;
         }
+        if matches!(e.kind, TK::Spawn(_)) {
+            if let Ty::Adt(_, a) = &t {
+                if a[0] == Ty::Unit {
+                    return;
+                }
+            }
+            self.err_help(e.span, "the task's result is never waited for", "keep the task and `try task.wait()` for its result");
+            return;
+        }
         let mut help = "use the result, or write `let _ = ...` if you really don't need it".to_string();
         if let ExprKind::Call { callee, .. } = &src.kind {
             if let ExprKind::Field(_, name, _) = &callee.kind {
@@ -1052,11 +1191,11 @@ impl Checker {
                     let v = self.expr(value, None);
                     return TStmt::Discard(v);
                 }
-                let prelude = self.fc().prelude;
+                let md = self.fc().module;
                 let generics = self.fc().generics.clone();
                 let v = match ty {
                     Some(t) => {
-                        let t = self.resolve_texpr(t, &generics, prelude);
+                        let t = self.resolve_texpr(t, &generics, md);
                         self.expr_coerce(value, &t)
                     }
                     None => self.expr(value, None),
@@ -1064,6 +1203,9 @@ impl Checker {
                 let vt = self.resolve(&v.ty);
                 if vt == Ty::Unit {
                     self.err(value.span, "this produces no value");
+                }
+                if matches!(&vt, Ty::Adt(d, _) if *d == self.prog.b.locked) {
+                    self.err_help(value.span, "a lock is taken with `with`", format!("write `with {} = ... {{ ... }}`: the lock is released at the end of the block", name));
                 }
                 if vt == Ty::Never {
                     self.err(value.span, "this never produces a value");
@@ -1181,6 +1323,7 @@ impl Checker {
                     Ty::Adt(d, a) if *d == self.prog.b.list => (0, a[0].clone()),
                     Ty::Adt(d, a) if *d == self.prog.b.map => (1, Ty::Adt(self.prog.b.entry, a.clone())),
                     Ty::Adt(d, a) if *d == self.prog.b.set => (2, a[0].clone()),
+                    Ty::Adt(d, a) if *d == self.prog.b.channel => (3, a[0].clone()),
                     Ty::Err => (0, Ty::Err),
                     Ty::Text => {
                         self.err_help(iter.span, "can't loop over `Text` directly", "use `text.chars()`, `text.words()` or `text.lines()`");
@@ -1202,12 +1345,36 @@ impl Checker {
                 match kind {
                     0 => TStmt::ForList { var: v, list: it, body: b },
                     1 => TStmt::ForMap { var: v, map: it, body: b },
-                    _ => TStmt::ForSet { var: v, set: it, body: b },
+                    2 => TStmt::ForSet { var: v, set: it, body: b },
+                    _ => TStmt::ForChannel { var: v, chan: it, body: b },
                 }
             }
-            Stmt::With { span, value, .. } => {
+            Stmt::With { name, value, body, span } => {
+                // `with x = shared.lock() { ... }`
+                if let ExprKind::Call { callee, args, .. } = &value.kind {
+                    if let ExprKind::Field(recv, m, _) = &callee.kind {
+                        if m == "lock" && args.is_empty() {
+                            let sh = self.expr(recv, None);
+                            let st = self.resolve(&sh.ty);
+                            if let Ty::Adt(d, a) = &st {
+                                if *d == self.prog.b.shared {
+                                    if self.fc().lock_depth > 0 {
+                                        self.err_help(*span, "a lock inside another lock can deadlock", "take the locks one after another, or keep both values in one `Shared`");
+                                    }
+                                    self.fcx().scopes.push(HashMap::new());
+                                    let v = self.declare(*span, name, a[0].clone(), true);
+                                    self.fcx().lock_depth += 1;
+                                    let b = self.block(body, false, None);
+                                    self.fcx().lock_depth -= 1;
+                                    self.fcx().scopes.pop();
+                                    return TStmt::WithLock { var: v, shared: sh, body: b };
+                                }
+                            }
+                        }
+                    }
+                }
                 let _ = self.expr(value, None);
-                self.err(*span, "`with` is not supported by this compiler yet");
+                self.err_help(*span, "`with` needs something that must be closed", "for example `with x = shared.lock() { ... }`");
                 TStmt::Expr(TExpr { kind: TK::Unit, ty: Ty::Unit, span: *span })
             }
             Stmt::Expect { cond, span } => {
@@ -1399,6 +1566,10 @@ impl Checker {
         // `try` applies only to the call right below it
         let in_try = std::mem::replace(&mut self.fcx().in_try, false);
         let stmt_pos = std::mem::replace(&mut self.fcx().stmt_pos, false);
+        let in_spawn = std::mem::replace(&mut self.fcx().in_spawn, false);
+        if in_spawn {
+            self.fcx().spawn_call = true;
+        }
         if in_try && !matches!(e.kind, ExprKind::Call { .. }) {
             self.err_help(span, "`try` goes right before a call that can fail", "write `try f(x)`");
         }
@@ -1500,7 +1671,7 @@ impl Checker {
                 mk(TK::Map(out), Ty::Adt(self.prog.b.map, vec![k, v]))
             }
             ExprKind::Field(base, name, nsp) => self.field(base, name, *nsp, span),
-            ExprKind::Call { callee, type_args, args } => self.call(e, callee, type_args, args, expected, in_try),
+            ExprKind::Call { callee, type_args, args } => self.call(e, callee, type_args, args, expected, in_try || in_spawn),
             ExprKind::Index(base, idx) => {
                 let b = self.expr(base, None);
                 let bt = self.resolve(&b.ty);
@@ -1641,6 +1812,28 @@ impl Checker {
                     }
                 }
             }
+            ExprKind::Spawn(x) => {
+                if !matches!(x.kind, ExprKind::Call { .. }) {
+                    self.err_help(x.span, "`spawn` goes right before a call", "write `spawn f(x)`");
+                    return self.expr(x, None);
+                }
+                self.fcx().in_spawn = true;
+                let call = self.expr(x, None);
+                let throws = matches!(call.kind, TK::Call { throws: true, .. });
+                if matches!(call.kind, TK::MutCall { .. } | TK::IfaceMutCall { .. }) {
+                    self.err(span, "a method that changes its value can't be spawned");
+                }
+                if throws {
+                    // an error nobody waits for comes out of the function
+                    self.note_throw(span);
+                }
+                let rt = self.resolve(&call.ty);
+                if rt == Ty::Never {
+                    self.err(span, "this call never finishes");
+                }
+                let tty = Ty::Adt(self.prog.b.task, vec![rt]);
+                mk(TK::Spawn(Box::new(call)), tty)
+            }
             ExprKind::ExpectThrows(x) => {
                 if !self.fc().in_test {
                     self.err(span, "`expect throws` is only allowed in tests");
@@ -1666,8 +1859,8 @@ impl Checker {
             let ty = self.fc().locals[id].ty.clone();
             return mk(TK::Local(id), ty);
         }
-        let prelude = self.fc().prelude;
-        match self.lookup_global(name, prelude) {
+        let md = self.fc().module;
+        match self.lookup_global(name, md) {
             Some(Global::Fn(id)) => {
                 let f = self.prog.fns[id].clone();
                 let targs: Vec<Ty> = f.generics.iter().map(|_| self.fresh()).collect();
@@ -1681,6 +1874,10 @@ impl Checker {
                 return mk(TK::Unit, Ty::Err);
             }
             None => {}
+        }
+        if self.module_named(name).is_some() {
+            self.err_help(span, format!("`{}` is a module", name), format!("use something from it: `{}.name`", name));
+            return mk(TK::Unit, Ty::Err);
         }
         // an enum variant without fields
         if let Some((d, idx)) = self.find_variant(name, expected, span) {
@@ -1699,6 +1896,7 @@ impl Checker {
             return mk(TK::Variant { def: d, idx, fields: vec![] }, ty);
         }
         let hint = match name {
+            "files" | "json" | "http" | "db" | "time" | "env" | "cli" | "log" | "process" | "text" => Some(format!("add `import {}` at the top of the file", name)),
             "null" | "nil" | "None" | "undefined" => Some("use `none`".to_string()),
             "True" | "False" => Some(format!("use `{}`", name.to_lowercase())),
             "this" => Some("use `self`".into()),
@@ -1722,10 +1920,10 @@ impl Checker {
                 }
             }
         }
-        let prelude = self.fc().prelude;
+        let md = self.fc().module;
         let mut found = vec![];
         for (d, def) in self.prog.defs.iter().enumerate() {
-            if def.is_prelude != prelude && !(!prelude && def.is_prelude) {
+            if def.module != md && def.module != 0 {
                 continue;
             }
             if let TypeKind::Enum { variants } = &def.kind {
@@ -1747,11 +1945,30 @@ impl Checker {
 
     fn field(&mut self, base: &Expr, name: &str, nsp: Span, span: Span) -> TExpr {
         let mk = |kind, ty| TExpr { kind, ty, span };
+        if let ExprKind::Ident(alias) = &base.kind {
+            if let Some(target) = self.module_named(alias) {
+                match self.lookup_in_module(target, name, nsp) {
+                    Some(Global::Fn(id)) => {
+                        let f = self.prog.fns[id].clone();
+                        let targs: Vec<Ty> = f.generics.iter().map(|_| self.fresh()).collect();
+                        let ps = f.params.iter().map(|p| p.1.subst(&targs)).collect();
+                        let ty = Ty::func(ps, f.ret.subst(&targs), f.throws);
+                        return mk(TK::FnRef(id, targs), ty);
+                    }
+                    Some(Global::Type(d)) => {
+                        let n = self.prog.defs[d].name.clone();
+                        self.err_help(span, format!("`{}.{}` is a type, not a value", alias, n), format!("build a value with `{}.{}(...)`", alias, n));
+                        return mk(TK::Unit, Ty::Err);
+                    }
+                    None => return mk(TK::Unit, Ty::Err),
+                }
+            }
+        }
         // `Status.Draft`
         if let ExprKind::Ident(tn) = &base.kind {
             if self.lookup_local(tn).is_none() {
-                let prelude = self.fc().prelude;
-                if let Some(Global::Type(d)) = self.lookup_global(tn, prelude) {
+                let md = self.fc().module;
+                if let Some(Global::Type(d)) = self.lookup_global(tn, md) {
                     if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
                         if let Some(i) = variants.iter().position(|v| v.name == name) {
                             let ng = self.prog.defs[d].generics.len();
@@ -1893,15 +2110,34 @@ impl Checker {
 
     fn call(&mut self, e: &Expr, callee: &Expr, type_args: &[TypeExpr], args: &[ast::Arg], expected: Option<&Ty>, in_try: bool) -> TExpr {
         let span = e.span;
+        let spawned_here = std::mem::replace(&mut self.fcx().spawn_call, false);
         let generics = self.fc().generics.clone();
-        let prelude = self.fc().prelude;
-        let explicit: Vec<Ty> = type_args.iter().map(|t| self.resolve_texpr(t, &generics, prelude)).collect();
+        let md = self.fc().module;
+        let explicit: Vec<Ty> = type_args.iter().map(|t| self.resolve_texpr(t, &generics, md)).collect();
         let result = match &callee.kind {
+            // `files.read(...)`: a function or type from an imported module
+            ExprKind::Field(recv, name, nsp) if matches!(&recv.kind, ExprKind::Ident(a) if self.module_named(a).is_some()) => {
+                let alias = match &recv.kind {
+                    ExprKind::Ident(a) => a.clone(),
+                    _ => unreachable!(),
+                };
+                let target = self.module_named(&alias).unwrap();
+                match self.lookup_in_module(target, name, *nsp) {
+                    Some(Global::Fn(id)) => self.fn_call(id, None, &explicit, args, span, in_try, expected),
+                    Some(Global::Type(d)) => self.ctor(d, &explicit, args, span, expected),
+                    None => {
+                        for a in args {
+                            let _ = self.expr(&a.value, None);
+                        }
+                        TExpr { kind: TK::Unit, ty: Ty::Err, span }
+                    }
+                }
+            }
             ExprKind::Field(recv, name, nsp) => {
                 // `Status.Circle(...)`
                 if let ExprKind::Ident(tn) = &recv.kind {
                     if self.lookup_local(tn).is_none() {
-                        if let Some(Global::Type(d)) = self.lookup_global(tn, prelude) {
+                        if let Some(Global::Type(d)) = self.lookup_global(tn, md) {
                             if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
                                 if let Some(i) = variants.iter().position(|v| v.name == *name) {
                                     return self.variant_ctor(d, i, args, span, expected);
@@ -1928,7 +2164,7 @@ impl Checker {
                     let f = TExpr { kind: TK::Local(id), ty, span: callee.span };
                     self.value_call(f, args, span, in_try)
                 } else {
-                    match self.lookup_global(name, prelude) {
+                    match self.lookup_global(name, md) {
                         Some(Global::Fn(id)) => self.fn_call(id, None, &explicit, args, span, in_try, expected),
                         Some(Global::Type(d)) => self.ctor(d, &explicit, args, span, expected),
                         None => {
@@ -1948,7 +2184,7 @@ impl Checker {
                             match hint {
                                 Some(h) => self.err_help(callee.span, format!("unknown function `{}`", name), h),
                                 None => {
-                                    let cands: Vec<String> = self.user.keys().chain(self.prelude.keys()).cloned().collect();
+                                    let cands: Vec<String> = self.modules[md].globals.keys().chain(self.modules[0].globals.keys()).cloned().collect();
                                     match suggest(name, cands.iter()) {
                                         Some(s) => self.err_help(callee.span, format!("unknown function `{}`", name), format!("did you mean `{}`?", s)),
                                         None => self.err(callee.span, format!("unknown function `{}`", name)),
@@ -1968,7 +2204,10 @@ impl Checker {
                 self.value_call(f, args, span, in_try)
             }
         };
-        // `try` rules
+        // `try` rules (a spawned call's errors arrive at `wait`)
+        if spawned_here {
+            return result;
+        }
         let throws = match &result.kind {
             TK::Call { throws, .. } | TK::MutCall { throws, .. } | TK::IfaceMutCall { throws, .. } => *throws,
             _ => false,
@@ -2403,6 +2642,22 @@ impl Checker {
                 let v = self.expr_coerce(&args[0].value, inner);
                 TExpr { kind: TK::Wrap(Box::new(v)), ty, span }
             }
+            TypeKind::Builtin if d == self.prog.b.shared => {
+                if args.len() != 1 || args[0].name.is_some() {
+                    self.err_help(span, "`Shared` wraps one value", "write `Shared(value)`");
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+                let v = self.expr_coerce(&args[0].value, &targs[0]);
+                TExpr { kind: TK::Record { def: d, fields: vec![v] }, ty, span }
+            }
+            TypeKind::Builtin if d == self.prog.b.channel => {
+                if args.len() != 1 || args[0].name.as_deref() != Some("capacity") {
+                    self.err_help(span, "a channel needs a capacity", "write `Channel<T>(capacity: 100)`");
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+                let v = self.expr_coerce(&args[0].value, &Ty::Int);
+                TExpr { kind: TK::Record { def: d, fields: vec![v] }, ty, span }
+            }
             TypeKind::Builtin if d == self.prog.b.set || d == self.prog.b.map || d == self.prog.b.list => {
                 if !args.is_empty() {
                     self.err(span, format!("`{}<...>()` takes no arguments", def.name));
@@ -2610,6 +2865,13 @@ impl Checker {
         }
         // captures that belong to this lambda (declared outside of it)
         let captures: Vec<LocalId> = lc.captures.iter().copied().filter(|c| self.fc().level[*c] < level).collect();
+        for c in &captures {
+            let ct = self.resolve(&self.fc().locals[*c].ty);
+            if self.contains_task(&ct) {
+                let n = self.fc().locals[*c].name.clone();
+                self.err_help(span, format!("a lambda can't capture the task `{}`", n), "a task belongs to the function that started it: wait for it there");
+            }
+        }
         let fty = Ty::func(ptys, ret, lc.throws);
         TExpr { kind: TK::Lambda { params: pids, captures, body: Box::new(b) }, ty: fty, span }
     }
@@ -2920,8 +3182,8 @@ impl Checker {
                         }
                     }
                     Ty::Iface(ids) => {
-                        let prelude = self.fc().prelude;
-                        let d = match self.lookup_global(name, prelude) {
+                        let md = self.fc().module;
+                        let d = match self.lookup_global(name, md) {
                             Some(Global::Type(d)) => d,
                             _ => {
                                 self.err(*span, format!("unknown type `{}`", name));
@@ -3009,7 +3271,7 @@ impl Checker {
                 self.zonk_expr(c, un);
                 self.zonk_block(b, un);
             }
-            TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } => {
+            TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } => {
                 self.zonk_expr(e, un);
                 self.zonk_block(body, un);
             }
@@ -3079,7 +3341,7 @@ impl Checker {
                     self.zonk_expr(v, un);
                 }
             }
-            TK::Wrap(x) | TK::Unwrap(x) | TK::Field(x, _) | TK::Prop(x, _) | TK::Unary(_, x) | TK::Some(x) | TK::ToIface(x) | TK::ToText(x) | TK::ExpectThrows(x) => {
+            TK::Wrap(x) | TK::Unwrap(x) | TK::Field(x, _) | TK::Prop(x, _) | TK::Unary(_, x) | TK::Some(x) | TK::ToIface(x) | TK::ToText(x) | TK::ExpectThrows(x) | TK::Spawn(x) => {
                 self.zonk_expr(x, un)
             }
             TK::Index(a, b) | TK::MapGet(a, b) | TK::Binary(_, a, b) | TK::Coalesce(a, b) => {
