@@ -281,6 +281,9 @@ with conn = try postgres.connect(url) catch err {     // handle failure to open
 ```
 
 - `let f = try files.open(p)` is an error: use `with`.
+- A lambda that uses the resource can't be kept after the block (put in
+  a variable from outside, passed to `router.get` of an outside router,
+  returned): it would find the resource closed.
 - A record with a `close(self)` method is a resource too. Its fields may
   take other resources: `Client(conn: try net.connect(host, port))`.
 - A function may return a new resource (`fn open_db() throws -> db.Connection`).
