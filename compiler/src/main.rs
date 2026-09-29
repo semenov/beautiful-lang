@@ -65,6 +65,8 @@ fn std_module(name: &str) -> Option<&'static str> {
         "env" => include_str!("std/env.lang"),
         "log" => include_str!("std/log.lang"),
         "random" => include_str!("std/random.lang"),
+        "json" => include_str!("std/json.lang"),
+        "cli" => include_str!("std/cli.lang"),
         _ => return None,
     })
 }

@@ -78,6 +78,8 @@ pub enum Rv {
     EmptySet,
     Closure(FnIdx, Vec<Op>),
     ToIface(Op, Ty), // from type
+    // the all-zero value of the destination's type (filled in later)
+    Zero,
     // calls
     Call(Callee, Vec<Op>),
 }
@@ -161,6 +163,8 @@ pub struct Module {
     pub failure_vtable: usize,
     pub cancelled_vtable: usize,
     pub closed_vtable: usize,
+    // records with field defaults -> a function building one with the defaults
+    pub default_fns: Vec<(Ty, FnIdx)>,
 }
 
 impl Stmt {
@@ -216,7 +220,7 @@ impl Stmt {
                     op(a, true, out);
                     op(b, true, out);
                 }),
-                Rv::None | Rv::EmptySet | Rv::EnvField(_) => {}
+                Rv::None | Rv::EmptySet | Rv::EnvField(_) | Rv::Zero => {}
                 Rv::Call(c, args) => callee_args(c, args, out),
             },
             Stmt::CallT { callee, args, .. } => callee_args(callee, args, out),

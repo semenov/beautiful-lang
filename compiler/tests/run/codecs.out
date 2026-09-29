@@ -1,0 +1,19 @@
+{"id":1,"name":"Ada \"Countess\"","role":"Admin","tags":["math","code"],"address":{"city":"London","zip":null},"scores":{"chess":3}}
+round trip equal: true
+{
+  "city": "Paris",
+  "zip": "75001"
+}
+Bob: role Member, 0 tags, address none
+[Circle(radius: 1.5), Square(side: 2.0)]
+[{"type":"Circle","radius":1.5},{"type":"Square","side":2.0}]
+error: json: at $.id: expected a whole number, found "x"
+error: json: at $: the field `id` is missing
+error: json: at $.tags[0]: expected text, found 1
+error: json: expected `,` or `]` at line 1, column 6
+error: json: at $.role: expected one of: Admin, Member, found "Boss"
+object with 2 fields: {"a":[1,2.5,true,null,"x"],"b":{"c":1}}
+env: the environment variable NAME is not set
+config 8080 false fallback
+cli: the option --input is required (see --help)
+options: input=none top=10 verbose=false args=[]

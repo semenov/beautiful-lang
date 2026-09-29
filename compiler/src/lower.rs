@@ -89,6 +89,8 @@ pub struct Lowerer<'a> {
     thunks: HashMap<(FnId, Vec<Ty>), usize>,
     fbs: Vec<Fb<'a>>,
     user_file: u32,
+    default_fns: Vec<(Ty, usize)>,
+    decoded: std::collections::HashSet<Ty>,
 }
 
 pub fn iface_methods(prog: &Program, ids: &[DefId]) -> Vec<FnId> {
@@ -114,6 +116,8 @@ impl<'a> Lowerer<'a> {
             thunks: HashMap::new(),
             fbs: vec![],
             user_file,
+            default_fns: vec![],
+            decoded: std::collections::HashSet::new(),
         }
     }
 
@@ -132,7 +136,7 @@ impl<'a> Lowerer<'a> {
         let cancelled_vtable = self.vtable(Ty::Adt(self.prog.b.cancelled, vec![]), vec![self.prog.b.error]);
         let closed_vtable = self.vtable(Ty::Adt(self.prog.b.channel_closed, vec![]), vec![self.prog.b.error]);
         self.drain();
-        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable }
+        mir::Module { funcs: self.funcs, vtables: self.vtables, main, tests, failure_vtable, cancelled_vtable, closed_vtable, default_fns: self.default_fns }
     }
 
     fn drain(&mut self) {
@@ -1417,6 +1421,11 @@ impl<'a> Lowerer<'a> {
                 itys.extend(arg_tys.iter().cloned());
             }
         }
+        if matches!(name.as_str(), "json.decode" | "env.decode" | "cli.decode") {
+            if let Some(t) = itys.first().cloned() {
+                self.ensure_defaults(&t);
+            }
+        }
         let panics = matches!(name.as_str(), "assert" | "Int.div" | "panic" | "Text.slice" | "List.get");
         if panics {
             // the panic message needs the line; `Line` markers carry it
@@ -1428,6 +1437,78 @@ impl<'a> Lowerer<'a> {
         }
         let throws = throws && f.throws && !f.rethrows || (f.rethrows && arg_tys.iter().any(|t| matches!(t, Ty::Func(ft) if ft.throws)));
         self.emit_call(MCallee::Intrinsic(name, itys), args, ty, throws)
+    }
+
+    // ---- field defaults for decoders ----
+
+    // Every record reachable from `t` that has field defaults gets a function
+    // that builds it with those defaults (other fields zero).
+    fn ensure_defaults(&mut self, t: &Ty) {
+        if !self.decoded.insert(t.clone()) {
+            return;
+        }
+        match t {
+            Ty::Opt(x) => self.ensure_defaults(x),
+            Ty::Adt(d, args) => {
+                let def = &self.prog.defs[*d];
+                match &def.kind {
+                    TypeKind::Builtin | TypeKind::Newtype(_) => {
+                        let inner: Vec<Ty> = match &def.kind {
+                            TypeKind::Newtype(i) => vec![i.clone()],
+                            _ => args.clone(),
+                        };
+                        for a in inner {
+                            self.ensure_defaults(&a);
+                        }
+                    }
+                    TypeKind::Enum { variants } => {
+                        let fts: Vec<Ty> = variants.iter().flat_map(|v| v.fields.iter().map(|f| f.ty.subst(args))).collect();
+                        for f in fts {
+                            self.ensure_defaults(&f);
+                        }
+                    }
+                    TypeKind::Record { fields } => {
+                        let fts: Vec<Ty> = fields.iter().map(|f| f.ty.subst(args)).collect();
+                        let has_defaults = fields.iter().any(|f| f.default.is_some());
+                        for f in fts {
+                            self.ensure_defaults(&f);
+                        }
+                        if has_defaults {
+                            let idx = self.build_defaults(*d, args.clone());
+                            self.default_fns.push((t.clone(), idx));
+                        }
+                    }
+                    TypeKind::Interface { .. } => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn build_defaults(&mut self, d: DefId, args: Vec<Ty>) -> usize {
+        let prog = self.prog;
+        let fields = match &prog.defs[d].kind {
+            TypeKind::Record { fields } => fields,
+            _ => unreachable!(),
+        };
+        let ty = Ty::Adt(d, args.clone());
+        let func = Func { name: format!("defaults{}", self.funcs.len()), kind: FnKind::Normal, params: vec![], ret: ty.clone(), throws: false, mutating: false, locals: vec![], blocks: vec![], source_name: format!("defaults of {}", prog.defs[d].name) };
+        static NO_LOCALS: [LocalDef; 0] = [];
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst: args, no_throw_fns: false, body_locals: &NO_LOCALS, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
+        self.new_block();
+        let mut ops = vec![];
+        for f in fields {
+            let fty = self.ty(&f.ty);
+            match &f.default {
+                Some(e) => ops.push(self.expr(e)),
+                None => ops.push(self.assign(fty, Rv::Zero)),
+            }
+        }
+        let r = self.assign(ty, Rv::Record(ops));
+        self.term(Term::Return(r));
+        let f = self.fbs.pop().unwrap().f;
+        self.funcs.push(f);
+        self.funcs.len() - 1
     }
 
     // ---- closures ----

@@ -1,0 +1,80 @@
+import json
+import env
+import cli
+
+enum Role {
+  Admin
+  Member
+}
+
+enum Shape {
+  Circle(radius: Float)
+  Square(side: Float)
+}
+
+type Address {
+  city: Text
+  zip: Text? = none
+}
+
+type User {
+  id: Int
+  name: Text
+  role: Role = Member
+  tags: List<Text> = []
+  address: Address?
+  scores: Map<Text, Int> = {}
+}
+
+type Config {
+  port: Int = 8080
+  debug: Bool = false
+  name: Text
+}
+
+type Options {
+  input: Text
+  top: Int = 10
+  verbose: Bool = false
+  args: List<Text> = []
+}
+
+fn main() throws {
+  let u = User(id: 1, name: "Ada \"Countess\"", role: Admin, tags: ["math", "code"], address: Address(city: "London"), scores: {"chess": 3})
+  let text = json.encode(u)
+  print(text)
+  let back = try json.decode<User>(text)
+  print("round trip equal: ${back == u}")
+  print(json.encode_pretty(Address(city: "Paris", zip: "75001")))
+
+  let minimal = try json.decode<User>("{\"id\": 7, \"name\": \"Bob\"}")
+  print("${minimal.name}: role ${minimal.role}, ${minimal.tags.length} tags, address ${minimal.address}")
+
+  let shapes = try json.decode<List<Shape>>("[{\"type\": \"Circle\", \"radius\": 1.5}, {\"type\": \"Square\", \"side\": 2}]")
+  print("${shapes}")
+  print(json.encode(shapes))
+
+  for bad in ["{\"id\": \"x\", \"name\": \"B\"}", "{\"name\": \"B\"}", "{\"id\": 1, \"name\": \"B\", \"tags\": [1]}", "[1, 2", "{\"id\": 1, \"name\": \"B\", \"role\": \"Boss\"}"] {
+    let r = try json.decode<User>(bad) catch err {
+      print("error: ${err.message()}")
+      minimal
+    }
+  }
+
+  let v = try json.parse("{\"a\": [1, 2.5, true, null, \"x\"], \"b\": {\"c\": 1}}")
+  match v {
+    json.Value.Object(fields) => print("object with ${fields.length} fields: ${json.encode(v)}")
+    _ => print("not an object")
+  }
+
+  let cfg = try env.decode<Config>() catch err {
+    print("env: ${err.message()}")
+    Config(name: "fallback")
+  }
+  print("config ${cfg.port} ${cfg.debug} ${cfg.name}")
+  let opts = try cli.decode<Options>() catch err {
+    print("cli: ${err.message()}")
+    Options(input: "none")
+  }
+  print("options: input=${opts.input} top=${opts.top} verbose=${opts.verbose} args=${opts.args}")
+}

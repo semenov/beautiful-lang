@@ -66,6 +66,8 @@ enum H {
     ToText,
     Ops, // list / map / set operations, record/enum boxes
     SortBy(usize, bool),
+    Dec,
+    Enc,
 }
 
 pub struct CGen<'a> {
@@ -405,6 +407,8 @@ impl<'a> CGen<'a> {
                 H::ToText => self.gen_totext(id),
                 H::Ops => self.gen_ops(id),
                 H::SortBy(k, throws) => self.gen_sort_by(id, k, throws),
+                H::Dec => self.gen_dec(id),
+                H::Enc => self.gen_enc(id),
             }
         }
     }
@@ -1102,6 +1106,421 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             drop_k = drop_k,
             ret_ok = ret_ok
         );
+    }
+
+    fn defaults_fn(&mut self, id: usize) -> Option<String> {
+        let dfs = self.m.default_fns.clone();
+        for (t, f) in dfs {
+            if self.tid(&t) == id {
+                return Some(self.m.funcs[f].name.clone());
+            }
+        }
+        None
+    }
+
+    fn is_json_value(&self, id: usize) -> bool {
+        let t = self.ty_of(id);
+        match t {
+            Ty::Adt(d, _) => {
+                let def = &self.prog.defs[d];
+                def.name == "Value" && self.prog.module_names.get(def.module).map(|m| m == "json").unwrap_or(false)
+            }
+            _ => false,
+        }
+    }
+
+    fn is_opt(&self, id: usize) -> bool {
+        matches!(self.tys[id].kind, Kind::Opt { .. })
+    }
+
+    // decode the fields of a record or enum variant from the object `d`
+    // into `r` (accessed as `acc{i}`); on error drop `cleanup` and return
+    fn dec_fields(&mut self, fields: &[(String, usize)], acc: &str, has_default: &[bool], cleanup: &str) -> String {
+        let mut s = String::new();
+        for (i, (fname, fid)) in fields.iter().enumerate() {
+            let fid = *fid;
+            self.need(H::Dec, fid);
+            let opt = self.is_opt(fid);
+            let fc = self.tys[fid].c.clone();
+            let drop_old = self.drop_(fid, &format!("{}{}", acc, i));
+            let missing = if opt || has_default.get(i).copied().unwrap_or(false) {
+                String::new()
+            } else {
+                format!(" else {{ {} return lt_dec_missing(src, p, \"{}\"); }}", cleanup, fname)
+            };
+            let _ = write!(
+                s,
+                " {{ const lt_dyn *f_ = lt_dyn_get(d, \"{n}\", {nl}); if (f_ && !(f_->kind == LT_D_NULL && {opt})) {{ lt_path q_ = {{ p, \"{n}\", {nl}, 0 }}; {fc} v_; lt_err e_ = dec_{fid}(src, f_, &q_, lenient, &v_); if (e_.obj) {{ {cleanup} return e_; }} {drop_old} {acc}{i} = v_; }}{missing} }}",
+                n = fname,
+                nl = fname.len(),
+                opt = opt,
+                fc = fc,
+                fid = fid,
+                cleanup = cleanup,
+                drop_old = drop_old,
+                acc = acc,
+                i = i,
+                missing = missing
+            );
+        }
+        s
+    }
+
+    fn gen_dec(&mut self, id: usize) {
+        let c = self.tys[id].c.clone();
+        let kind = self.tys[id].kind.clone();
+        let _ = writeln!(self.protos, "static lt_err dec_{}(const char *src, const lt_dyn *d, const lt_path *p, int lenient, {} *out);", id, c);
+        let ok = "return (lt_err){0};";
+        let body: String = match &kind {
+            Kind::Int => "return lt_dec_int(src, d, p, lenient, out);".into(),
+            Kind::Float => "return lt_dec_float(src, d, p, lenient, out);".into(),
+            Kind::Bool => "return lt_dec_bool(src, d, p, lenient, out);".into(),
+            Kind::Text => "return lt_dec_text(src, d, p, lenient, out);".into(),
+            Kind::Opt { inner, .. } => {
+                let inner = *inner;
+                self.need(H::Dec, inner);
+                let ic = self.tys[inner].c.clone();
+                let some = self.opt_some(id, "v");
+                let none = self.opt_none(id);
+                format!("if (d->kind == LT_D_NULL) {{ *out = {none}; {ok} }} {ic} v; lt_err e = dec_{inner}(src, d, p, lenient, &v); if (e.obj) return e; *out = {some}; {ok}", none = none, ok = ok, ic = ic, inner = inner, some = some)
+            }
+            Kind::List(e) => {
+                let e = *e;
+                self.need(H::Dec, e);
+                self.need(H::Ops, id);
+                self.need(H::Drop, id);
+                let ec = self.tys[e].c.clone();
+                format!("if (d->kind != LT_D_ARR) return lt_dec_error(src, p, \"a list\", d); {c} l = {c}_new(d->n); for (int64_t i = 0; i < d->n; i++) {{ lt_path q = {{ p, NULL, 0, i }}; {ec} v; lt_err e = dec_{e}(src, &d->items[i], &q, lenient, &v); if (e.obj) {{ drop_{id}(l); return e; }} l->items[l->len++] = v; }} *out = l; {ok}", c = c, ec = ec, e = e, id = id, ok = ok)
+            }
+            Kind::Set(e) => {
+                let e = *e;
+                self.need(H::Dec, e);
+                self.need(H::Ops, id);
+                self.need(H::Drop, id);
+                let ec = self.tys[e].c.clone();
+                let de = self.drop_(e, "v");
+                format!("if (d->kind != LT_D_ARR) return lt_dec_error(src, p, \"a list\", d); {c} s = {c}_new(d->n); for (int64_t i = 0; i < d->n; i++) {{ lt_path q = {{ p, NULL, 0, i }}; {ec} v; lt_err e = dec_{e}(src, &d->items[i], &q, lenient, &v); if (e.obj) {{ drop_{id}(s); return e; }} *{c}_slot_insert(&s, v) = true; {de} }} *out = s; {ok}", c = c, ec = ec, e = e, id = id, de = de, ok = ok)
+            }
+            Kind::Map(k, v) => {
+                let (k, v) = (*k, *v);
+                self.need(H::Dec, k);
+                self.need(H::Dec, v);
+                self.need(H::Ops, id);
+                self.need(H::Drop, id);
+                let (kc, vc) = (self.tys[k].c.clone(), self.tys[v].c.clone());
+                let dk = self.drop_(k, "kv");
+                format!("if (d->kind != LT_D_OBJ) return lt_dec_error(src, p, \"an object\", d); {c} m = {c}_new(d->n); for (int64_t i = 0; i < d->n; i++) {{ lt_path q = {{ p, d->keys[i], d->klens[i], 0 }}; lt_dyn kd; memset(&kd, 0, sizeof kd); kd.kind = LT_D_STR; kd.s = d->keys[i]; kd.slen = d->klens[i]; {kc} kv; lt_err e = dec_{k}(src, &kd, &q, 1, &kv); if (e.obj) {{ drop_{id}(m); return e; }} {vc} vv; e = dec_{v}(src, &d->items[i], &q, lenient, &vv); if (e.obj) {{ {dk} drop_{id}(m); return e; }} {c}_put(&m, kv, vv); }} *out = m; {ok}", c = c, kc = kc, vc = vc, k = k, v = v, id = id, dk = dk, ok = ok)
+            }
+            Kind::Record { fields, boxed, .. } => {
+                let ty = self.ty_of(id);
+                let has_default: Vec<bool> = match &ty {
+                    Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
+                        TypeKind::Record { fields } => fields.iter().map(|f| f.default.is_some()).collect(),
+                        _ => vec![],
+                    },
+                    _ => vec![],
+                };
+                let defaults = self.defaults_fn(id);
+                self.need(H::Drop, id);
+                if *boxed {
+                    self.need(H::Ops, id);
+                    let start = match &defaults {
+                        Some(f) => format!("{c} b0 = {f}(); {c}_unique(&b0); {c}_v r = b0->v; memset(&b0->v, 0, sizeof b0->v); drop_{id}(b0);", c = c, f = f, id = id),
+                        None => format!("{c}_v r; memset(&r, 0, sizeof r);", c = c),
+                    };
+                    let cleanup = format!("drop_{}({}_box(r));", id, c);
+                    let fs = self.dec_fields(fields, "r.f", &has_default, &cleanup);
+                    format!("if (d->kind != LT_D_OBJ) return lt_dec_error(src, p, \"an object\", d); {start}{fs} *out = {c}_box(r); {ok}", start = start, fs = fs, c = c, ok = ok)
+                } else {
+                    let start = match &defaults {
+                        Some(f) => format!("{} r = {}();", c, f),
+                        None => format!("{} r; memset(&r, 0, sizeof r);", c),
+                    };
+                    let cleanup = format!("drop_{}(r);", id);
+                    let fs = self.dec_fields(fields, "r.f", &has_default, &cleanup);
+                    format!("if (d->kind != LT_D_OBJ) return lt_dec_error(src, p, \"an object\", d); {start}{fs} *out = r; {ok}", start = start, fs = fs, ok = ok)
+                }
+            }
+            Kind::Enum { variants, boxed, .. } if self.is_json_value(id) => {
+                // the dynamic JSON value mirrors the tree
+                let arr = variants[4].1[0].1;
+                let obj = variants[5].1[0].1;
+                self.need(H::Dec, arr);
+                self.need(H::Dec, obj);
+                if *boxed {
+                    self.need(H::Ops, id);
+                }
+                let mk = |vi: usize, inner: &str| {
+                    if *boxed {
+                        format!("{c}_box(({c}_v){{ .tag = {vi}{inner} }})", c = c, vi = vi, inner = inner)
+                    } else {
+                        format!("(({c}){{ .tag = {vi}{inner} }})", c = c, vi = vi, inner = inner)
+                    }
+                };
+                let (ac, oc) = (self.tys[arr].c.clone(), self.tys[obj].c.clone());
+                format!("switch (d->kind) {{ case LT_D_NULL: *out = {n0}; {ok} case LT_D_BOOL: *out = {n1}; {ok} case LT_D_NUM: *out = {n2}; {ok} case LT_D_STR: *out = {n3}; {ok} case LT_D_ARR: {{ {ac} a; lt_err e = dec_{arr}(src, d, p, lenient, &a); if (e.obj) return e; *out = {n4}; {ok} }} default: {{ {oc} o; lt_err e = dec_{obj}(src, d, p, lenient, &o); if (e.obj) return e; *out = {n5}; {ok} }} }}",
+                    n0 = mk(0, ""), n1 = mk(1, ", .u.v1 = { d->b }"), n2 = mk(2, ", .u.v2 = { d->is_int ? (double)d->i : d->num }"), n3 = mk(3, ", .u.v3 = { lt_text_from(d->s, d->slen) }"), n4 = mk(4, ", .u.v4 = { a }"), n5 = mk(5, ", .u.v5 = { o }"),
+                    ok = ok, ac = ac, oc = oc, arr = arr, obj = obj)
+            }
+            Kind::Enum { variants, boxed, .. } => {
+                let names: Vec<String> = variants.iter().map(|v| v.0.clone()).collect();
+                let expected = format!("one of: {}", names.join(", "));
+                let mk = |vi: usize, inner: &str| {
+                    if *boxed {
+                        format!("{c}_box(({c}_v){{ .tag = {vi}{inner} }})", c = c, vi = vi, inner = inner)
+                    } else {
+                        format!("(({c}){{ .tag = {vi}{inner} }})", c = c, vi = vi, inner = inner)
+                    }
+                };
+                if *boxed {
+                    self.need(H::Ops, id);
+                }
+                let mut s = String::from("if (d->kind == LT_D_STR) {");
+                for (vi, (vname, fs)) in variants.iter().enumerate() {
+                    if fs.is_empty() {
+                        let _ = write!(s, " if (d->slen == {} && memcmp(d->s, \"{}\", {}) == 0) {{ *out = {}; {} }}", vname.len(), vname, vname.len(), mk(vi, ""), ok);
+                    }
+                }
+                let _ = write!(s, " return lt_dec_error(src, p, \"{}\", d); }}", expected);
+                let _ = write!(s, " if (d->kind != LT_D_OBJ) return lt_dec_error(src, p, \"{}\", d); const lt_dyn *ty = lt_dyn_get(d, \"type\", 4); if (!ty || ty->kind != LT_D_STR) return lt_dec_missing(src, p, \"type\");", expected);
+                for (vi, (vname, fs)) in variants.iter().enumerate() {
+                    let _ = write!(s, " if (ty->slen == {} && memcmp(ty->s, \"{}\", {}) == 0) {{", vname.len(), vname, vname.len());
+                    if fs.is_empty() {
+                        let _ = write!(s, " *out = {}; {} }}", mk(vi, ""), ok);
+                    } else {
+                        let mut decl = String::new();
+                        for (fi, (_, fid)) in fs.iter().enumerate() {
+                            let _ = write!(decl, " {} x{}; memset(&x{}, 0, sizeof x{});", self.tys[*fid].c, fi, fi, fi);
+                        }
+                        let mut cleanup = String::new();
+                        for (fi, (_, fid)) in fs.iter().enumerate() {
+                            cleanup += &self.drop_(*fid, &format!("x{}", fi));
+                        }
+                        let dec = self.dec_fields(fs, "x", &vec![false; fs.len()], &cleanup);
+                        let vals: Vec<String> = (0..fs.len()).map(|fi| format!("x{}", fi)).collect();
+                        let inner = format!(", .u.v{} = {{ {} }}", vi, vals.join(", "));
+                        let _ = write!(s, "{}{} *out = {}; {} }}", decl, dec, mk(vi, &inner), ok);
+                    }
+                }
+                let _ = write!(s, " return lt_dec_error(src, p, \"{}\", ty);", expected);
+                s
+            }
+            _ => "(void)src; (void)d; (void)lenient; (void)out; return lt_dec_error(src, p, \"a value that can't be read from text\", NULL);".into(),
+        };
+        let _ = writeln!(self.helpers, "static lt_err dec_{}(const char *src, const lt_dyn *d, const lt_path *p, int lenient, {} *out) {{ {} }}", id, c, body);
+    }
+
+    fn enc_list(&mut self, open: char, close: char, n: &str, item: &str) -> String {
+        format!("lt_buf_c(b, '{open}'); b->level++; for (int64_t i = 0; i < {n}; i++) {{ if (i) lt_buf_c(b, ','); lt_buf_newline(b); {item} }} b->level--; if ({n}) lt_buf_newline(b); lt_buf_c(b, '{close}');", open = open, close = close, n = n, item = item)
+    }
+
+    fn gen_enc(&mut self, id: usize) {
+        let c = self.tys[id].c.clone();
+        let kind = self.tys[id].kind.clone();
+        let _ = writeln!(self.protos, "static void enc_{}({} v, lt_buf *b);", id, c);
+        let body: String = match &kind {
+            Kind::Int => "lt_json_int(b, v);".into(),
+            Kind::Float => "lt_json_float(b, v);".into(),
+            Kind::Bool => "if (v) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5);".into(),
+            Kind::Text => "lt_json_str(b, v->data, v->len);".into(),
+            Kind::Opt { inner, .. } => {
+                let inner = *inner;
+                self.need(H::Enc, inner);
+                let s = self.opt_is_some(id, "v");
+                let val = self.opt_val(id, "v");
+                format!("if ({}) enc_{}({}, b); else lt_buf_put(b, \"null\", 4);", s, inner, val)
+            }
+            Kind::List(e) => {
+                let e = *e;
+                self.need(H::Enc, e);
+                self.enc_list('[', ']', "v->len", &format!("enc_{}(v->items[i], b);", e))
+            }
+            Kind::Set(e) => {
+                let e = *e;
+                self.need(H::Enc, e);
+                "lt_buf_c(b, '['); b->level++; bool first = true; for (int64_t i = 0; i < v->n; i++) { if (!v->e[i].h) continue; if (!first) lt_buf_c(b, ','); first = false; lt_buf_newline(b); enc_E(v->e[i].k, b); } b->level--; if (!first) lt_buf_newline(b); lt_buf_c(b, ']');".replace("enc_E", &format!("enc_{}", e))
+            }
+            Kind::Map(k, vv) => {
+                let (k, vv) = (*k, *vv);
+                self.need(H::Enc, vv);
+                let key = match self.tys[k].kind {
+                    Kind::Text => "lt_json_str(b, v->e[i].k->data, v->e[i].k->len);".to_string(),
+                    _ => {
+                        let t = self.totext_expr(k, "v->e[i].k", false);
+                        format!("{{ lt_text *kt = {}; lt_json_str(b, kt->data, kt->len); lt_text_drop(kt); }}", t)
+                    }
+                };
+                format!("lt_buf_c(b, '{{'); b->level++; bool first = true; for (int64_t i = 0; i < v->n; i++) {{ if (!v->e[i].h) continue; if (!first) lt_buf_c(b, ','); first = false; lt_buf_newline(b); {key} lt_buf_c(b, ':'); if (b->indent >= 0) lt_buf_c(b, ' '); enc_{vv}(v->e[i].v, b); }} b->level--; if (!first) lt_buf_newline(b); lt_buf_c(b, '}}');", key = key, vv = vv)
+            }
+            Kind::Record { fields, boxed, .. } => {
+                let acc = if *boxed { "v->v.f" } else { "v.f" };
+                let mut s = String::from("lt_buf_c(b, '{'); b->level++;");
+                for (i, (fname, fid)) in fields.iter().enumerate() {
+                    self.need(H::Enc, *fid);
+                    let _ = write!(s, " lt_json_key(b, \"{}\", {}); enc_{}({}{}, b);", fname, i == 0, fid, acc, i);
+                }
+                if !fields.is_empty() {
+                    s += " b->level--; lt_buf_newline(b); lt_buf_c(b, '}');";
+                } else {
+                    s += " b->level--; lt_buf_c(b, '}');";
+                }
+                s
+            }
+            Kind::Enum { variants, boxed, .. } if self.is_json_value(id) => {
+                let p = if *boxed { "v->v." } else { "v." };
+                let (arr, obj) = (variants[4].1[0].1, variants[5].1[0].1);
+                self.need(H::Enc, arr);
+                self.need(H::Enc, obj);
+                format!("switch ({p}tag) {{ case 0: lt_buf_put(b, \"null\", 4); break; case 1: if ({p}u.v1.f0) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5); break; case 2: lt_json_num(b, {p}u.v2.f0); break; case 3: lt_json_str(b, {p}u.v3.f0->data, {p}u.v3.f0->len); break; case 4: enc_{arr}({p}u.v4.f0, b); break; default: enc_{obj}({p}u.v5.f0, b); }}", p = p, arr = arr, obj = obj)
+            }
+            Kind::Enum { variants, boxed, .. } => {
+                let p = if *boxed { "v->v." } else { "v." };
+                let mut s = format!("switch ({}tag) {{", p);
+                for (vi, (vname, fs)) in variants.iter().enumerate() {
+                    if fs.is_empty() {
+                        let _ = write!(s, " case {}: lt_json_str(b, \"{}\", {}); break;", vi, vname, vname.len());
+                    } else {
+                        let _ = write!(s, " case {}: lt_buf_c(b, '{{'); b->level++; lt_json_key(b, \"type\", true); lt_json_str(b, \"{}\", {});", vi, vname, vname.len());
+                        for (fi, (fname, fid)) in fs.iter().enumerate() {
+                            self.need(H::Enc, *fid);
+                            let _ = write!(s, " lt_json_key(b, \"{}\", false); enc_{}({}u.v{}.f{}, b);", fname, fid, p, vi, fi);
+                        }
+                        s += " b->level--; lt_buf_newline(b); lt_buf_c(b, '}'); break;";
+                    }
+                }
+                s + " default: break; }"
+            }
+            _ => "(void)v; lt_buf_put(b, \"null\", 4);".into(),
+        };
+        let _ = writeln!(self.helpers, "static void enc_{}({} v, lt_buf *b) {{ {} }}", id, c, body);
+    }
+
+    // env.decode / cli.decode: builds an object from environment variables or
+    // command-line arguments, then decodes it leniently
+    fn gen_args_reader(&mut self, id: usize, cli: bool) -> String {
+        let name = format!("{}dec_{}", if cli { "cli" } else { "env" }, id);
+        if self.done.contains(&(H::Ops, usize::MAX / 16 + id * 2 + cli as usize)) {
+            return name;
+        }
+        self.done.insert((H::Ops, usize::MAX / 16 + id * 2 + cli as usize));
+        let c = self.tys[id].c.clone();
+        let fields: Vec<(String, usize)> = match &self.tys[id].kind {
+            Kind::Record { fields, .. } => fields.clone(),
+            _ => vec![],
+        };
+        let ty = self.ty_of(id);
+        let has_default: Vec<bool> = match &ty {
+            Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
+                TypeKind::Record { fields } => fields.iter().map(|f| f.default.is_some()).collect(),
+                _ => vec![],
+            },
+            _ => vec![],
+        };
+        let n = fields.len().max(1);
+        if !cli {
+            let mut s = format!("static lt_err {}({} *out) {{ lt_arena ar = {{0}}; lt_dyn o; memset(&o, 0, sizeof o); o.kind = LT_D_OBJ; o.items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * {n}); o.keys = (const char **)lt_arena_alloc(&ar, sizeof(char *) * {n}); o.klens = (int64_t *)lt_arena_alloc(&ar, sizeof(int64_t) * {n});", name, c, n = n);
+            for (fname, _) in &fields {
+                let up = fname.to_uppercase();
+                let _ = write!(s, " {{ const char *v = getenv(\"{up}\"); if (v) {{ memset(&o.items[o.n], 0, sizeof(lt_dyn)); o.items[o.n].kind = LT_D_STR; o.items[o.n].s = v; o.items[o.n].slen = (int64_t)strlen(v); o.keys[o.n] = \"{f}\"; o.klens[o.n] = {fl}; o.n++; }} }}", up = up, f = fname, fl = fname.len());
+            }
+            let _ = write!(s, " lt_err e = dec_{}(\"env\", &o, NULL, 1, out); lt_arena_free(&ar); return e; }}", id);
+            self.helpers += &s;
+            self.helpers += "\n";
+            let _ = writeln!(self.protos, "static lt_err {}({} *out);", name, c);
+            return name;
+        }
+        // command-line options
+        let mut kinds = vec![];
+        let mut usage = String::new();
+        for (i, (fname, fid)) in fields.iter().enumerate() {
+            let flag = fname.replace('_', "-");
+            let inner = match &self.tys[*fid].kind {
+                Kind::Opt { inner, .. } => *inner,
+                _ => *fid,
+            };
+            let kind = match &self.tys[inner].kind {
+                Kind::Bool => 1,
+                Kind::List(_) if fname == "args" => 2,
+                Kind::List(_) => 3,
+                _ => 0,
+            };
+            kinds.push(kind);
+            let what = match &self.tys[inner].kind {
+                Kind::Int => " <whole number>",
+                Kind::Float => " <number>",
+                Kind::Bool | Kind::List(_) if kind == 1 || kind == 2 => "",
+                _ => " <text>",
+            };
+            let req = if self.is_opt(*fid) || has_default[i] || kind == 1 || kind == 2 { "" } else { "  (required)" };
+            if kind != 2 {
+                usage += &format!("  --{}{}{}{}\\n", flag, what, req, if kind == 3 { "  (can repeat)" } else { "" });
+            }
+        }
+        let has_args = kinds.contains(&2);
+        let names: Vec<String> = fields.iter().map(|f| format!("\"{}\"", f.0)).collect();
+        let ks: Vec<String> = kinds.iter().map(|k| k.to_string()).collect();
+        let s = format!(
+            r#"
+static void {name}_usage(FILE *f) {{
+  const char *prog = lt_argc > 0 ? strrchr(lt_argv[0], '/') : NULL; prog = prog ? prog + 1 : (lt_argc > 0 ? lt_argv[0] : "program");
+  fprintf(f, "usage: %s [options]{args_hint}\noptions:\n{usage}  --help\n", prog);
+}}
+static lt_err {name}_fail(const char *msg, const char *arg) {{
+  char buf[512]; snprintf(buf, sizeof buf, "%s%s (see --help)", msg, arg); return lt_make_failure(lt_text_cstr(buf));
+}}
+static lt_err {name}({c} *out) {{
+  static const char *names[] = {{ {names} }}; static const int kinds[] = {{ {kinds} }}; int nf = {nf};
+  lt_arena ar = {{0}}; lt_dyn o; memset(&o, 0, sizeof o); o.kind = LT_D_OBJ;
+  o.items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * {n}); o.keys = (const char **)lt_arena_alloc(&ar, sizeof(char *) * {n}); o.klens = (int64_t *)lt_arena_alloc(&ar, sizeof(int64_t) * {n});
+  int slot[{n}]; for (int i = 0; i < {n}; i++) slot[i] = -1;
+  int only_pos = 0;
+  for (int i = 1; i < lt_argc; i++) {{
+    const char *a = lt_argv[i];
+    if (!only_pos && strcmp(a, "--") == 0) {{ only_pos = 1; continue; }}
+    if (!only_pos && (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0)) {{ {name}_usage(stdout); lt_arena_free(&ar); lt_process_exit(0); }}
+    int fi = -1; const char *val = NULL;
+    if (!only_pos && a[0] == '-' && a[1] == '-') {{
+      const char *nm = a + 2; const char *eq = strchr(nm, '='); size_t nl = eq ? (size_t)(eq - nm) : strlen(nm);
+      for (int k = 0; k < nf; k++) {{
+        const char *fn = names[k]; if (strlen(fn) != nl || kinds[k] == 2) continue;
+        size_t j = 0; for (; j < nl; j++) {{ char x = nm[j] == '-' ? '_' : nm[j]; if (x != fn[j]) break; }}
+        if (j == nl) {{ fi = k; break; }}
+      }}
+      if (fi < 0) {{ lt_arena_free(&ar); return {name}_fail("unknown option ", a); }}
+      if (eq) val = eq + 1;
+      else if (kinds[fi] != 1) {{ if (i + 1 >= lt_argc) {{ lt_arena_free(&ar); return {name}_fail("a value is missing after ", a); }} val = lt_argv[++i]; }}
+    }} else {{
+      for (int k = 0; k < nf; k++) if (kinds[k] == 2) fi = k;
+      if (fi < 0) {{ lt_arena_free(&ar); return {name}_fail("unexpected argument ", a); }}
+      val = a;
+    }}
+    lt_dyn *node;
+    if (kinds[fi] >= 2) {{
+      if (slot[fi] < 0) {{ slot[fi] = (int)o.n; memset(&o.items[o.n], 0, sizeof(lt_dyn)); o.items[o.n].kind = LT_D_ARR; o.items[o.n].items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * (size_t)lt_argc); o.keys[o.n] = names[fi]; o.klens[o.n] = (int64_t)strlen(names[fi]); o.n++; }}
+      lt_dyn *arr = &o.items[slot[fi]]; node = &arr->items[arr->n++];
+    }} else {{
+      if (slot[fi] < 0) {{ slot[fi] = (int)o.n; o.keys[o.n] = names[fi]; o.klens[o.n] = (int64_t)strlen(names[fi]); o.n++; }}
+      node = &o.items[slot[fi]];
+    }}
+    memset(node, 0, sizeof *node);
+    if (val) {{ node->kind = LT_D_STR; node->s = val; node->slen = (int64_t)strlen(val); }} else {{ node->kind = LT_D_BOOL; node->b = true; }}
+  }}
+  lt_err e = dec_{id}("cli", &o, NULL, 1, out); lt_arena_free(&ar); return e;
+}}
+"#,
+            name = name,
+            c = c,
+            names = if names.is_empty() { "\"\"".to_string() } else { names.join(", ") },
+            kinds = if ks.is_empty() { "0".to_string() } else { ks.join(", ") },
+            nf = fields.len(),
+            n = n,
+            id = id,
+            usage = usage,
+            args_hint = if has_args { " [args...]" } else { "" }
+        );
+        self.helpers += &s;
+        let _ = writeln!(self.protos, "static lt_err {}({} *out);", name, c);
+        name
     }
 
     fn ty_of(&self, id: usize) -> Ty {
@@ -1831,6 +2250,10 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 let vt = self.vt_index[&(from.clone(), ids)];
                 set(out, format!("to_iface_vt{}({})", vt, e));
             }
+            Rv::Zero => {
+                let z = self.zero(did);
+                set(out, z);
+            }
             Rv::Call(callee, args) => {
                 let argv = self.call_args(fi, callee, args);
                 let e = self.callee_expr(fi, callee, &argv, args, false);
@@ -2092,6 +2515,23 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             "random.between" => format!("lt_random_between({}, {}, {})", a[0], a[1], line),
             "random.fraction" => "lt_random_fraction()".to_string(),
             "random.token" => format!("lt_random_token({})", a[0]),
+            "json.encode" | "json.encode_pretty" => {
+                let id = tid0.unwrap();
+                self.need(H::Enc, id);
+                let indent = if name == "json.encode" { -1 } else { 2 };
+                format!("({{ lt_buf b_ = {{0}}; b_.indent = {}; enc_{}({}, &b_); lt_buf_text(&b_); }})", indent, id, a[0])
+            }
+            "json.decode" => {
+                let id = tid0.unwrap();
+                self.need(H::Dec, id);
+                format!("({{ lt_arena ar_ = {{0}}; lt_dyn d_; lt_err e_ = lt_json_parse({}, &ar_, &d_); if (!e_.obj) e_ = dec_{}(\"json\", &d_, NULL, 0, {}); lt_arena_free(&ar_); e_; }})", a[0], id, a[1])
+            }
+            "env.decode" | "cli.decode" => {
+                let id = tid0.unwrap();
+                self.need(H::Dec, id);
+                let f = self.gen_args_reader(id, name == "cli.decode");
+                format!("{}({})", f, a[0])
+            }
             "assert" => format!("lt_assert({}, {})", a[0], line),
             "panic" => format!("lt_panic_text({}, {})", a[0], line),
             "min" | "max" => {
@@ -2452,6 +2892,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
             out += include_str!("runtime/sched.h");
         }
         out += include_str!("runtime/std.h");
+        out += include_str!("runtime/json.h");
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";
         out += "static void lt_panic_error(lt_err e, int line);\n";

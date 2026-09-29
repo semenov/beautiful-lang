@@ -1,0 +1,31 @@
+// json: values to JSON text and back.
+//
+// Records become objects with the field names as they are, lists become
+// arrays, a missing optional value becomes null, an enum variant without
+// fields becomes its name ("Draft"), one with fields an object with its
+// name under "type": {"type": "Circle", "radius": 2.0}.
+
+// The value as compact JSON.
+pub fn encode<T>(value: T) -> Text
+// The value as indented JSON, for people.
+pub fn encode_pretty<T>(value: T) -> Text
+
+// Reads JSON into a T, checking every field. A missing field is an error
+// unless it's optional (`T?`) or has a default. Extra fields are ignored.
+// Errors say where: `json: at $.users[2].age: expected a whole number`.
+pub fn decode<T>(text: Text) throws -> T
+
+// JSON of a shape that isn't known in advance.
+pub enum Value {
+  Null
+  Bool(value: Bool)
+  Number(value: Float)
+  String(value: Text)
+  Array(items: List<Value>)
+  Object(fields: Map<Text, Value>)
+}
+
+// Reads any JSON into a `Value`.
+pub fn parse(text: Text) throws -> Value {
+  return try decode<Value>(text)
+}
