@@ -1,0 +1,10 @@
+2026-09-29 at 12..22: ["2026", "09", "29"]
+["2026", "2026"]
+true false
+["a", "b", "c", "d"]
+a b c
+on 29.09.2026
+true
+true false
+regex: lazy quantifiers like *? aren't supported
+regex: parentheses not balanced in "(unclosed"

@@ -1566,6 +1566,31 @@ static lt_err {name}({c} *out) {{
         name
     }
 
+    fn regex_def(&self, name: &str) -> Ty {
+        for (d, def) in self.prog.defs.iter().enumerate() {
+            if def.name == name && self.prog.module_names.get(def.module).map(|m| m == "regex").unwrap_or(false) {
+                return Ty::Adt(d, vec![]);
+            }
+        }
+        panic!("regex.{} missing", name)
+    }
+
+    // builds a `regex.Match` from regexec's offsets
+    fn regex_match_fn(&mut self) -> String {
+        let m = self.regex_def("Match");
+        let mid = self.tid(&m);
+        let name = "lt_regex_make_match".to_string();
+        if self.done.contains(&(H::Ops, usize::MAX / 128)) {
+            return name;
+        }
+        self.done.insert((H::Ops, usize::MAX / 128));
+        let gl = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::opt(Ty::Text)]));
+        self.need(H::Ops, gl);
+        let (mc, glc) = (self.tys[mid].c.clone(), self.tys[gl].c.clone());
+        let _ = writeln!(self.helpers, "static {mc} {name}(lt_handle *h, lt_text *t, regmatch_t *pm) {{ lt_regex *r = (lt_regex *)h; {glc} g = {glc}_new(r->ngroups); for (int i = 1; i <= r->ngroups && i < LT_RE_GROUPS; i++) {{ lt_text *x = pm[i].rm_so >= 0 ? lt_text_from(t->data + pm[i].rm_so, pm[i].rm_eo - pm[i].rm_so) : NULL; {glc}_push(&g, x); }} return ({mc}){{ lt_text_from(t->data + pm[0].rm_so, pm[0].rm_eo - pm[0].rm_so), lt_char_index(t, pm[0].rm_so), lt_char_index(t, pm[0].rm_eo), g }}; }}", mc = mc, name = name, glc = glc);
+        name
+    }
+
     fn http_def(&self, name: &str) -> Ty {
         for (d, def) in self.prog.defs.iter().enumerate() {
             if def.name == name && self.prog.module_names.get(def.module).map(|m| m == "http").unwrap_or(false) {
@@ -2671,6 +2696,33 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
             "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
+            n if n.starts_with("regex.") => {
+                match n {
+                    "regex.compile" => format!("lt_regex_compile({}, {})", a[0], a[1]),
+                    "regex.Regex.matches" => format!("lt_regex_matches({}, {})", a[0], a[1]),
+                    "regex.Regex.replace" => format!("lt_regex_replace({}, {}, {})", a[0], a[1], a[2]),
+                    "regex.Regex.split" => format!("lt_regex_split({}, {})", a[0], a[1]),
+                    "regex.Regex.find" | "regex.Regex.find_all" => {
+                        let mk = self.regex_match_fn();
+                        let m = self.regex_def("Match");
+                        let mid = self.tid(&m);
+                        if n == "regex.Regex.find" {
+                            let opt = self.opt_tid_of(&m);
+                            let (oc, mc) = (self.tys[opt].c.clone(), self.tys[mid].c.clone());
+                            let some = self.opt_some(opt, "m_");
+                            let none = self.opt_none(opt);
+                            format!("({{ regmatch_t pm_[LT_RE_GROUPS]; lt_text *t_ = {t}; {oc} r_; if (lt_regex_at({h}, t_, 0, pm_)) {{ {mc} m_ = {mk}({h}, t_, pm_); r_ = {some}; }} else r_ = {none}; r_; }})", t = a[1], h = a[0], oc = oc, mc = mc, mk = mk, some = some, none = none)
+                        } else {
+                            let lt = Ty::Adt(self.prog.b.list, vec![m]);
+                            let lid = self.tid(&lt);
+                            self.need(H::Ops, lid);
+                            let lc = self.tys[lid].c.clone();
+                            format!("({{ regmatch_t pm_[LT_RE_GROUPS]; lt_text *t_ = {t}; {lc} r_ = {lc}_new(0); int64_t p_ = 0; while (p_ <= t_->len && lt_regex_at({h}, t_, p_, pm_)) {{ {lc}_push(&r_, {mk}({h}, t_, pm_)); p_ = pm_[0].rm_eo > pm_[0].rm_so ? pm_[0].rm_eo : pm_[0].rm_eo + 1; }} r_; }})", t = a[1], h = a[0], lc = lc, mk = mk)
+                        }
+                    }
+                    _ => panic!("unknown intrinsic {}", n),
+                }
+            }
             n if n.starts_with("db.") => {
                 self.sqlite = true;
                 let params = |g: &mut CGen, list_op: &str, list_ty: &Ty| -> String {

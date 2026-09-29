@@ -1,0 +1,32 @@
+// regex: patterns for finding and replacing text.
+//
+//   let date = try regex.compile("(\\d{4})-(\\d{2})-(\\d{2})")
+//   if date.find(line) is some(m) {
+//     print("year ${m.groups[0] ?? "?"}")
+//   }
+//
+// Extended regular expressions (POSIX), plus \d \w \s (and \D \W \S);
+// `(?i)` at the start ignores case. Positions are character indices.
+
+pub type Match {
+  // the matched text
+  text: Text
+  start: Int
+  end: Int
+  // the parenthesized groups; none for a group that didn't take part
+  groups: List<Text?>
+}
+
+pub builtin type Regex {
+  // Does the whole text match?
+  fn matches(self, text: Text) -> Bool
+  // The first match anywhere in the text.
+  fn find(self, text: Text) -> Match?
+  fn find_all(self, text: Text) -> List<Match>
+  // Replaces every match; "$1" in `replacement` is the first group, "$0" the match.
+  fn replace(self, text: Text, replacement: Text) -> Text
+  // The pieces between matches.
+  fn split(self, text: Text) -> List<Text>
+}
+
+pub fn compile(pattern: Text) throws -> Regex

@@ -653,3 +653,193 @@ static lt_err lt_files_write_bytes(lt_text *path, lt_bytes *b) {
     if (fclose(f) != 0 || n != (size_t)b->len) return lt_os_error("can't write", path);
     return (lt_err){ 0 };
 }
+
+// ---------------------------------------------------------------- regular expressions
+
+#include <regex.h>
+
+typedef struct {
+    lt_handle h;
+    regex_t re;
+    int ngroups;
+} lt_regex;
+
+static void lt_regex_free(lt_handle *h) {
+    lt_regex *r = (lt_regex *)h;
+    regfree(&r->re);
+    free(r);
+}
+
+// translates \d \w \s (and capitals) to POSIX classes; rejects what POSIX
+// regular expressions can't do instead of silently doing something else
+static lt_err lt_regex_translate(lt_text *p, char **out, int *icase) {
+    size_t cap = (size_t)p->len * 12 + 16;
+    char *o = (char *)malloc(cap), *w = o;
+    const char *s = p->data, *e = p->data + p->len;
+    *icase = 0;
+    if (e - s >= 4 && memcmp(s, "(?i)", 4) == 0) {
+        *icase = 1;
+        s += 4;
+    }
+    bool in_class = false;
+    for (; s < e; s++) {
+        char c = *s;
+        if (c == '\\' && s + 1 < e) {
+            char n = *++s;
+            const char *rep = NULL;
+            switch (n) {
+            case 'd': rep = in_class ? "0-9" : "[0-9]"; break;
+            case 'D': rep = in_class ? NULL : "[^0-9]"; break;
+            case 'w': rep = in_class ? "[:alnum:]_" : "[[:alnum:]_]"; break;
+            case 'W': rep = in_class ? NULL : "[^[:alnum:]_]"; break;
+            case 's': rep = in_class ? "[:space:]" : "[[:space:]]"; break;
+            case 'S': rep = in_class ? NULL : "[^[:space:]]"; break;
+            case 'n': rep = "\n"; break;
+            case 't': rep = "\t"; break;
+            case 'b': case 'B': case 'A': case 'z': case 'Z':
+                free(o);
+                return lt_make_failure(lt_text_cstr("regex: \\b and other anchors except ^ and $ aren't supported"));
+            default:
+                if (in_class) {
+                    *w++ = n;
+                } else {
+                    *w++ = '\\';
+                    *w++ = n;
+                }
+                continue;
+            }
+            if (!rep) {
+                free(o);
+                return lt_make_failure(lt_text_cstr("regex: \\D, \\W and \\S can't be used inside [...]"));
+            }
+            size_t l = strlen(rep);
+            memcpy(w, rep, l);
+            w += l;
+            continue;
+        }
+        if (!in_class && (c == '*' || c == '+' || c == '?' || c == '}') && s + 1 < e && s[1] == '?') {
+            free(o);
+            return lt_make_failure(lt_text_cstr("regex: lazy quantifiers like *? aren't supported"));
+        }
+        if (!in_class && c == '(' && s + 1 < e && s[1] == '?') {
+            free(o);
+            return lt_make_failure(lt_text_cstr("regex: (?...) groups aren't supported, except (?i) at the start"));
+        }
+        if (c == '[' && !in_class) {
+            in_class = true;
+            *w++ = c;
+            if (s + 1 < e && s[1] == '^') *w++ = *++s;
+            if (s + 1 < e && s[1] == ']') *w++ = *++s;
+            continue;
+        }
+        if (c == '[' && in_class && s + 1 < e && s[1] == ':') {
+            const char *end = strstr(s, ":]");
+            if (end) {
+                memcpy(w, s, (size_t)(end - s) + 2);
+                w += end - s + 2;
+                s = end + 1;
+                continue;
+            }
+        }
+        if (c == ']' && in_class) in_class = false;
+        *w++ = c;
+    }
+    *w = 0;
+    *out = o;
+    return (lt_err){ 0 };
+}
+
+static lt_err lt_regex_compile(lt_text *pat, lt_handle **out) {
+    char *tr;
+    int icase;
+    lt_err e = lt_regex_translate(pat, &tr, &icase);
+    if (e.obj) return e;
+    lt_regex *r = (lt_regex *)calloc(1, sizeof(lt_regex));
+    r->h.rc = 1;
+    r->h.free = lt_regex_free;
+    int rc = regcomp(&r->re, tr, REG_EXTENDED | (icase ? REG_ICASE : 0));
+    free(tr);
+    if (rc != 0) {
+        char msg[256], buf[512];
+        regerror(rc, &r->re, msg, sizeof msg);
+        snprintf(buf, sizeof buf, "regex: %s in \"%.*s\"", msg, (int)pat->len, pat->data);
+        free(r);
+        return lt_make_failure(lt_text_cstr(buf));
+    }
+    r->ngroups = (int)r->re.re_nsub;
+    *out = &r->h;
+    return (lt_err){ 0 };
+}
+
+#define LT_RE_GROUPS 10
+
+// a match at or after byte `from`; pm offsets are absolute
+static bool lt_regex_at(lt_handle *h, lt_text *t, int64_t from, regmatch_t *pm) {
+    lt_regex *r = (lt_regex *)h;
+    pm[0].rm_so = (regoff_t)from;
+    pm[0].rm_eo = (regoff_t)t->len;
+    int flags = REG_STARTEND | (from > 0 ? REG_NOTBOL : 0);
+    return regexec(&r->re, t->data, LT_RE_GROUPS, pm, flags) == 0;
+}
+
+static int64_t lt_char_index(lt_text *t, int64_t byte) {
+    int64_t n = 0;
+    for (int64_t i = 0; i < byte && i < t->len; i++)
+        if (((unsigned char)t->data[i] & 0xC0) != 0x80) n++;
+    return n;
+}
+
+static bool lt_regex_matches(lt_handle *h, lt_text *t) {
+    regmatch_t pm[LT_RE_GROUPS];
+    return lt_regex_at(h, t, 0, pm) && pm[0].rm_so == 0 && pm[0].rm_eo == t->len;
+}
+
+static lt_text *lt_regex_replace(lt_handle *h, lt_text *t, lt_text *with) {
+    lt_regex *r = (lt_regex *)h;
+    lt_texts *parts = lt_texts_new(8);
+    regmatch_t pm[LT_RE_GROUPS];
+    int64_t pos = 0;
+    while (pos <= t->len && lt_regex_at(h, t, pos, pm)) {
+        lt_texts_push(&parts, lt_text_from(t->data + pos, pm[0].rm_so - pos));
+        for (int64_t i = 0; i < with->len; i++) {
+            char c = with->data[i];
+            if (c == '$' && i + 1 < with->len && with->data[i + 1] >= '0' && with->data[i + 1] <= '9') {
+                int g = with->data[++i] - '0';
+                if (g <= r->ngroups && pm[g].rm_so >= 0) lt_texts_push(&parts, lt_text_from(t->data + pm[g].rm_so, pm[g].rm_eo - pm[g].rm_so));
+            } else {
+                int64_t j = i;
+                while (j < with->len && !(with->data[j] == '$' && j + 1 < with->len && with->data[j + 1] >= '0' && with->data[j + 1] <= '9')) j++;
+                lt_texts_push(&parts, lt_text_from(with->data + i, j - i));
+                i = j - 1;
+            }
+        }
+        if (pm[0].rm_eo == pm[0].rm_so) {
+            // an empty match: keep one character and move on
+            if (pm[0].rm_eo < t->len) lt_texts_push(&parts, lt_text_from(t->data + pm[0].rm_eo, 1));
+            pos = pm[0].rm_eo + 1;
+        } else {
+            pos = pm[0].rm_eo;
+        }
+    }
+    if (pos < t->len) lt_texts_push(&parts, lt_text_from(t->data + pos, t->len - pos));
+    lt_text *res = lt_text_concat_n((int)parts->len, parts->items);
+    for (int64_t i = 0; i < parts->len; i++) lt_text_drop(parts->items[i]);
+    lt_free(parts, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)parts->cap);
+    return res;
+}
+
+static lt_texts *lt_regex_split(lt_handle *h, lt_text *t) {
+    lt_texts *parts = lt_texts_new(8);
+    regmatch_t pm[LT_RE_GROUPS];
+    int64_t pos = 0, piece = 0;
+    while (pos <= t->len && lt_regex_at(h, t, pos, pm)) {
+        if (pm[0].rm_eo == pm[0].rm_so) {
+            pos = pm[0].rm_eo + 1;
+            continue;
+        }
+        lt_texts_push(&parts, lt_text_from(t->data + piece, pm[0].rm_so - piece));
+        piece = pos = pm[0].rm_eo;
+    }
+    lt_texts_push(&parts, lt_text_from(t->data + piece, t->len - piece));
+    return parts;
+}

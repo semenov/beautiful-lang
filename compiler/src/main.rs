@@ -72,6 +72,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "encoding" => include_str!("std/encoding.lang"),
         "net" => include_str!("std/net.lang"),
         "db" => include_str!("std/db.lang"),
+        "regex" => include_str!("std/regex.lang"),
         _ => return None,
     })
 }

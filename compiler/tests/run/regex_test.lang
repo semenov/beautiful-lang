@@ -1,0 +1,26 @@
+import regex
+
+fn main() throws {
+  let date = try regex.compile("(\\d{4})-(\\d{2})-(\\d{2})")
+  if date.find("released on 2026-09-29, fixed 2026-10-01") is some(m) {
+    print("${m.text} at ${m.start}..${m.end}: ${m.groups}")
+  }
+  print("${date.find_all("2026-09-29 and 2026-10-01").map(m => m.groups[0] ?? "?")}")
+  print("${date.matches("2026-09-29")} ${date.matches("x2026-09-29")}")
+  let ws = try regex.compile("\\s+")
+  print("${ws.split("a  b\tc\n d")}")
+  print(ws.replace("a  b   c", " "))
+  print(date.replace("on 2026-09-29", "$3.$2.$1"))
+  let word = try regex.compile("(?i)hello")
+  print("${word.matches("HeLLo")}")
+  let email = try regex.compile("^[\\w.+-]+@[\\w-]+\\.[\\w.]+$")
+  print("${email.matches("ada@example.com")} ${email.matches("not an email")}")
+  let bad = try regex.compile("a*?") catch err {
+    print(err.message())
+    word
+  }
+  let broken = try regex.compile("(unclosed") catch err {
+    print(err.message())
+    word
+  }
+}
