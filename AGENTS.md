@@ -165,9 +165,18 @@ let text = try files.read(path) catch err {     // handle it here
   `continue`.
 - `try` covers the whole expression after it: `try (try f()).text()` is
   needless; `try f().text()` checks both calls.
-- Your own errors: `type NotFound implements Error { id: Int  fn message(self)
-  -> String { return "no ${self.id}" } }`, or `Failure(message: "...")` from
-  the prelude.
+- Your own errors: a type with `fn message(self) -> String`, or
+  `Failure(message: "...")` from the prelude:
+
+```
+type NotFound implements Error {
+  id: Int
+
+  fn message(self) -> String {
+    return "no ${self.id}"
+  }
+}
+```
 - Bugs (`panic("...")`, `assert`, overflow, a bad index) can't be caught.
 
 ## Functions

@@ -3010,6 +3010,19 @@ impl Checker {
 
     fn ctor(&mut self, d: DefId, explicit: &[Ty], args: &[ast::Arg], span: Span, expected: Option<&Ty>) -> TExpr {
         let def = self.prog.defs[d].clone();
+        // a variant named like a built-in type (`String(value: x)` of an
+        // enum Value): the expected enum decides
+        if self.prim.contains_key(&d) {
+            if let Some(exp) = expected {
+                if let Ty::Adt(ed, _) = self.resolve(exp) {
+                    if let TypeKind::Enum { variants } = &self.prog.defs[ed].kind {
+                        if let Some(i) = variants.iter().position(|v| v.name == def.name) {
+                            return self.variant_ctor(ed, i, args, span, expected);
+                        }
+                    }
+                }
+            }
+        }
         let targs: Vec<Ty> = if !explicit.is_empty() {
             if explicit.len() != def.generics.len() {
                 self.err(span, format!("`{}` takes {} type argument(s)", def.name, def.generics.len()));
@@ -3153,7 +3166,15 @@ impl Checker {
                 TExpr { kind: TK::Unit, ty: Ty::Err, span }
             }
             _ => {
-                self.err(span, format!("`{}` can't be built this way", def.name));
+                // an enum with a variant of this name: say how to reach it
+                let owner = self.prog.defs.iter().find(|e| matches!(&e.kind, TypeKind::Enum { variants } if variants.iter().any(|v| v.name == def.name))).map(|e| e.name.clone());
+                match owner {
+                    Some(e) => self.err_help(span, format!("`{}` here is the built-in type, which can't be built this way", def.name), format!("for the variant, name its enum: `{}.{}(...)`", e, def.name)),
+                    None => self.err(span, format!("`{}` can't be built this way", def.name)),
+                }
+                for a in args {
+                    let _ = self.expr(&a.value, None);
+                }
                 TExpr { kind: TK::Unit, ty: Ty::Err, span }
             }
         }

@@ -38,9 +38,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] Float text like JS (`12345678901234567000`, not `1.2345678901234567e+19`)
     - [x] sorting by a list key (lexicographic); `<` on lists. A comparator: not needed so far
     - [x] or-patterns in `match`: `"a" | "b" => ...`
-    - [ ] `Duration` in interpolation shows its fields
-    - [ ] a variant named `String` can't be built by its bare name: suggest `Value.String(...)`
-    - [ ] guide: a one-line record example doesn't parse
+    - [ ] `Duration` in interpolation shows its fields: needs types to choose their text (a `to_string` method used by `${}`): to raise with Vlad
+    - [x] a variant named `String` can't be built by its bare name: now it can where the enum is expected, else the error names `Value.String(...)`
+    - [x] guide: a one-line record example doesn't parse
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
         108/146 answers identical to Go's, 2552 lines vs 4099, throughput
         on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).
