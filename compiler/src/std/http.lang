@@ -21,7 +21,7 @@ pub type Request {
   path: Text
   // header names in lower case
   headers: Map<Text, Text>
-  body: Text
+  body: Bytes
   // from the route pattern: "/notes/:id" gives "id"
   params: Map<Text, Text> = {}
   // from "?q=word&page=2"
@@ -41,12 +41,24 @@ pub type Request {
   pub fn header(self, name: Text) -> Text? {
     return self.headers[name.lower()]
   }
+
+  // The body as text; an error if it isn't valid UTF-8.
+  pub fn text(self) throws -> Text {
+    return try self.body.text()
+  }
 }
 
 pub type Response {
   status: Int
-  body: Text
+  body: Bytes
   headers: Map<Text, Text> = {}
+  // When set, the server sends this file as the body (see `file`).
+  file: Text = ""
+
+  // The body as text; an error if it isn't valid UTF-8.
+  pub fn text(self) throws -> Text {
+    return try self.body.text()
+  }
 
   // A copy with one more header.
   pub fn with_header(self, name: Text, value: Text) -> Response {
@@ -57,20 +69,34 @@ pub type Response {
 }
 
 pub fn text(status: Int, body: Text) -> Response {
-  return Response(status: status, body: body, headers: {"content-type": "text/plain; charset=utf-8"})
+  return Response(status: status, body: body.bytes(), headers: {"content-type": "text/plain; charset=utf-8"})
 }
 
 pub fn html(status: Int, body: Text) -> Response {
-  return Response(status: status, body: body, headers: {"content-type": "text/html; charset=utf-8"})
+  return Response(status: status, body: body.bytes(), headers: {"content-type": "text/html; charset=utf-8"})
 }
 
 // The value as JSON (see the `json` module).
 pub fn json<T>(status: Int, value: T) -> Response {
-  return Response(status: status, body: json.encode(value), headers: {"content-type": "application/json"})
+  return Response(status: status, body: json.encode(value).bytes(), headers: {"content-type": "application/json"})
+}
+
+// Any bytes: `http.bytes(200, png, content_type: "image/png")`.
+pub fn bytes(status: Int, data: Bytes, content_type: Text) -> Response {
+  return Response(status: status, body: data, headers: {"content-type": content_type})
 }
 
 pub fn redirect(to: Text) -> Response {
-  return Response(status: 302, body: "", headers: {"location": to})
+  return Response(status: 302, body: Bytes(), headers: {"location": to})
+}
+
+// A file from the disk. The server sends it straight from the disk
+// (sendfile), whatever its size; sets the content type from the extension;
+// answers 304 when the client has this version cached and serves parts
+// (`Range`) for resuming downloads and video. 404 if there is no such file;
+// for a directory, its index.html.
+pub fn file(path: Text) -> Response {
+  return Response(status: 200, body: Bytes(), file: path)
 }
 
 type Route {
@@ -98,19 +124,35 @@ pub type Router {
     self.routes.append(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
   }
 
+  // Serves the files in `dir` under `prefix`: files("/static", dir: "public")
+  // answers /static/css/site.css with public/css/site.css. Paths can't leave
+  // `dir`, and hidden files (".env", ".git") are not served.
+  pub mutating fn files(prefix: Text, dir: Text) {
+    self.get("${prefix}/*path", req => file_in(dir, name: req.param("path") ?? ""))
+  }
+
   // Finds the route for a request and runs its handler: 404 when no route
-  // has this path, 405 when one has it for another method.
+  // has this path, 405 when one has it for another method. A pattern part
+  // `*name` matches the rest of the path. HEAD is answered by GET routes.
   pub fn handle(self, request: Request) throws -> Response {
     let parts = split_path(request.path)
     var path_found = false
     for route in self.routes {
-      if route.parts.length != parts.length {
+      let rest = route.parts.any(p => p.starts_with("*"))
+      if rest and parts.length < route.parts.length - 1 {
+        continue
+      }
+      if not rest and route.parts.length != parts.length {
         continue
       }
       var params: Map<Text, Text> = {}
       var same = true
-      for i in 0..<parts.length {
+      for i in 0..<route.parts.length {
         let p = route.parts[i]
+        if p.starts_with("*") {
+          params[p.slice(from: 1, to: p.length)] = parts.drop(i).join("/")
+          break
+        }
         if p.starts_with(":") {
           params[p.slice(from: 1, to: p.length)] = parts[i]
         } else if p != parts[i] {
@@ -122,7 +164,7 @@ pub type Router {
         continue
       }
       path_found = true
-      if route.method != request.method {
+      if route.method != request.method and not (request.method == "HEAD" and route.method == "GET") {
         continue
       }
       var req = request
@@ -141,9 +183,18 @@ fn split_path(path: Text) -> List<Text> {
   return path.split("/").filter(p => not p.is_empty())
 }
 
+fn file_in(dir: Text, name: Text) -> Response {
+  let parts = name.split("/")
+  // "..", ".env", ".git": nothing outside `dir`, nothing hidden
+  if parts.any(p => p.starts_with(".")) {
+    return text(404, "not found")
+  }
+  return file("${dir}/${parts.filter(p => not p.is_empty()).join("/")}")
+}
+
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 pub fn request(method: Text, path: Text) -> Request {
-  return Request(method: method, path: path, headers: {}, body: "")
+  return Request(method: method, path: path, headers: {}, body: Bytes())
 }
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
@@ -174,3 +225,8 @@ pub fn delete(url: Text) throws -> Response {
 }
 
 fn __fetch(method: Text, url: Text, body: Text) throws -> Response
+
+// Saves what `url` answers into the file `to`, without holding it in memory.
+// The response has the status and headers and an empty body. The file is
+// written only for a 2xx status.
+pub fn download(url: Text, to: Text) throws -> Response

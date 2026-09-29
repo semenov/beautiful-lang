@@ -1666,7 +1666,7 @@ static {rsc} lt_http_response_from(lt_http_out *o) {{
   {mc} h = {mc}_new(8);
   for (int64_t i = 0; o->headers && i + 1 < o->headers->len; i += 2) {mc}_put(&h, o->headers->items[i], o->headers->items[i + 1]);
   if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
-  return ({rsc}){{ o->status, o->body, h }};
+  return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0) }};
 }}
 static lt_text *lt_url_decode(const char *s, int64_t n) {{
   lt_text *t = lt_text_new(n); int64_t w = 0;
@@ -1687,7 +1687,7 @@ static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *o
     if (j > i) {mc}_put(&query, lt_url_decode(r->query + i, eq - i), eq < j ? lt_url_decode(r->query + eq + 1, j - eq - 1) : lt_text_from("", 0));
     i = j + 1;
   }}
-  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len), headers, lt_text_from(r->body, r->body_len), {mc}_new(0), query }};
+  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len), headers, lt_bytes_from(r->body, r->body_len), {mc}_new(0), query }};
   {rsc} resp;
   lt_err e = lt_http_call(handler, &req, &resp);
   if (e.obj) {{
@@ -1695,10 +1695,10 @@ static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *o
     char buf[64]; snprintf(buf, sizeof buf, "%.*s %.*s: ", (int)r->method_len, r->method, (int)(r->path_len > 40 ? 40 : r->path_len), r->path);
     lt_text *pre = lt_text_cstr(buf); lt_text *parts[2] = {{ pre, m }}; lt_text *line = lt_text_concat_n(2, parts);
     lt_log("ERROR", line); lt_text_drop(line); lt_text_drop(pre); lt_text_drop(m); lt_iface_drop(e);
-    out->status = 500; out->body = lt_text_cstr("internal server error"); out->headers = NULL;
+    out->status = 500; out->body = lt_bytes_from("internal server error", 21); out->headers = NULL; out->file = NULL;
     return;
   }}
-  out->status = resp.f0; out->body = resp.f1; lt_text_dup(resp.f1);
+  out->status = resp.f0; out->body = resp.f1; lt_bytes_dup(resp.f1); out->file = resp.f3; lt_text_dup(resp.f3);
   lt_texts *hs = lt_texts_new(8);
   for (int64_t i = 0; i < resp.f2->n; i++) {{ if (!resp.f2->e[i].h) continue; lt_text_dup(resp.f2->e[i].k); lt_text_dup(resp.f2->e[i].v); lt_texts_push(&hs, resp.f2->e[i].k); lt_texts_push(&hs, resp.f2->e[i].v); }}
   out->headers = hs;
@@ -2562,6 +2562,16 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
     // ================= intrinsics =================
 
     fn intrinsic(&mut self, fi: usize, name: &str, tys: &[Ty], a: &[String], args: &[Op], throws: bool) -> String {
+        // a process reads from its output and writes to its input
+        fn stream(h: &str, name: &str) -> String {
+            if !name.starts_with("process.") {
+                h.to_string()
+            } else if name.contains(".write") {
+                format!("&((lt_proc *)({}))->in->h", h)
+            } else {
+                format!("&((lt_proc *)({}))->out->h", h)
+            }
+        }
         let line = self.line();
         let t0 = tys.first().cloned();
         let tid0 = t0.as_ref().map(|t| self.tid(t));
@@ -2719,12 +2729,28 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "path.name" => format!("lt_files_name({})", a[0]),
             "path.parent" => format!("lt_files_parent({})", a[0]),
             "path.extension" => format!("lt_files_extension({})", a[0]),
-            "files.open" => format!("lt_files_open_mode({}, \"rb\", {})", a[0], a[1]),
-            "files.create" => format!("lt_files_open_mode({}, \"wb\", {})", a[0], a[1]),
+            "files.open" => format!("lt_stream_open({}, O_RDONLY, {})", a[0], a[1]),
+            "files.create" => format!("lt_stream_open({}, O_WRONLY | O_CREAT | O_TRUNC, {})", a[0], a[1]),
+            "files.open_append" => format!("lt_stream_open({}, O_WRONLY | O_CREAT | O_APPEND, {})", a[0], a[1]),
+            "io.Stream.read" | "process.Process.read" => format!("lt_conn_read({}, {}, {})", stream(a[0].as_str(), name), a[1], a[2]),
+            "io.Stream.read_exact" => format!("lt_conn_read_exact({}, {}, {})", a[0], a[1], a[2]),
+            "io.Stream.read_line" | "process.Process.read_line" => format!("lt_conn_read_line({}, {})", stream(a[0].as_str(), name), a[1]),
+            "io.Stream.read_all" | "process.Process.read_all" => format!("lt_conn_read_all({}, {})", stream(a[0].as_str(), name), a[1]),
+            "io.Stream.write" | "process.Process.write" => format!("({{ lt_bytes *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], stream(a[0].as_str(), name)),
+            "io.Stream.write_text" | "process.Process.write_text" => format!("({{ lt_text *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], stream(a[0].as_str(), name)),
+            "io.Stream.peer" => format!("lt_text_cstr(((lt_conn *){})->peer)", a[0]),
+            "io.Stream.close" => format!("lt_conn_close({})", a[0]),
+            "io.stdin" => "lt_io_stdin()".to_string(),
+            "io.stdout" => "lt_io_std(1)".to_string(),
+            "io.stderr" => "lt_io_std(2)".to_string(),
+            "io.read_line" => format!("lt_io_read_line({})", a[0]),
+            "io.read_all" => format!("lt_io_read_all({})", a[0]),
+            "io.copy" => format!("lt_io_copy({}, {}, {})", a[0], a[1], a[2]),
+            "process.start" => format!("lt_process_start({}, {}, {})", a[0], a[1], a[2]),
+            "process.Process.close_input" => format!("lt_proc_close_input({})", a[0]),
+            "process.Process.wait" => format!("lt_proc_wait({}, {})", a[0], a[1]),
+            "process.Process.close" => format!("lt_proc_close({})", a[0]),
             "files.temp_dir" => format!("lt_files_temp_dir({})", a[0]),
-            "files.File.read_line" => format!("lt_file_read_line({}, {})", a[0], a[1]),
-            "files.File.write" => format!("lt_file_write({}, {})", a[0], a[1]),
-            "files.File.close" => format!("lt_file_close({})", a[0]),
             "files.TempDir.close" => format!("lt_tempdir_close({})", a[0]),
             "files.TempDir.path" => format!("lt_text_ret(((lt_tempdir *){})->path)", a[0]),
             "process.run" => format!("({{ int64_t s_; lt_text *o_, *e_; lt_err r_ = lt_process_run({}, {}, &s_, &o_, &e_); if (!r_.obj) *{out} = (__typeof__(*{out})){{ s_, o_, e_ }}; r_; }})", a[0], a[1], out = a[2]),
@@ -2835,13 +2861,6 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                     }
                     "net.serve" => format!("lt_net_serve({}, {})", a[0], a[1]),
                     "net.udp" => format!("lt_net_udp({}, {})", a[0], a[1]),
-                    "net.Connection.read" => format!("lt_conn_read({}, {}, {})", a[0], a[1], a[2]),
-                    "net.Connection.read_exact" => format!("lt_conn_read_exact({}, {}, {})", a[0], a[1], a[2]),
-                    "net.Connection.read_line" => format!("lt_conn_read_line({}, {})", a[0], a[1]),
-                    "net.Connection.write" => format!("({{ lt_bytes *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], a[0]),
-                    "net.Connection.write_text" => format!("({{ lt_text *d_ = {}; lt_conn_write_raw({}, d_->data, d_->len); }})", a[1], a[0]),
-                    "net.Connection.peer" => format!("lt_text_cstr(((lt_conn *){})->peer)", a[0]),
-                    "net.Connection.close" => format!("lt_conn_close({})", a[0]),
                     "net.UdpSocket.send_to" => format!("lt_udp_send_to({}, {}, {})", a[0], a[1], a[2]),
                     "net.UdpSocket.receive" => format!("({{ lt_bytes *d_; lt_text *f_; lt_err e_ = lt_udp_receive({}, &d_, &f_); if (!e_.obj) *{} = (__typeof__(*{})){{ d_, f_ }}; e_; }})", a[0], a[1], a[1]),
                     "net.UdpSocket.port" => format!("(((lt_udp *){})->port)", a[0]),
@@ -2853,6 +2872,11 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.threads = true;
                 self.gen_http_glue();
                 format!("lt_http_serve({}, {})", a[0], a[1])
+            }
+            "http.download" => {
+                self.curl = true;
+                self.gen_http_glue();
+                format!("({{ lt_http_out o_; memset(&o_, 0, sizeof o_); lt_err e_ = lt_http_download({}, {}, &o_); if (!e_.obj) *{} = lt_http_response_from(&o_); e_; }})", a[0], a[1], a[2])
             }
             "http.__fetch" => {
                 self.curl = true;
@@ -3269,6 +3293,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         }
         out += include_str!("runtime/json.h");
         out += include_str!("runtime/std.h");
+        out += include_str!("runtime/io.h");
         if self.http_glue || self.net {
             if self.curl {
                 out = format!("#define LT_CURL 1\n// link: -lcurl\n{}", out);

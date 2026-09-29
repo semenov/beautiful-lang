@@ -20,7 +20,7 @@ fn main() throws {
       }
     }
     with out = try files.create(path.join(dir.path, "out.txt")) {
-      try out.write("written piece by piece")
+      try out.write_text("written piece by piece")
     }
     try files.make_dir(path.join(dir.path, "a/b/c"))
     print("${try files.list(dir.path)}")

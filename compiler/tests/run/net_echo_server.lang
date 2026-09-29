@@ -1,6 +1,7 @@
+import io
 import net
 
-fn echo(conn: net.Connection) throws {
+fn echo(conn: io.Stream) throws {
   try conn.write_text("hello ${conn.peer().starts_with("127.0.0.1") or conn.peer().starts_with("::1")}\n")
   while try conn.read_line() is some(line) {
     if line == "quit" {

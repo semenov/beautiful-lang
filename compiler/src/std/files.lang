@@ -1,6 +1,8 @@
 // files: read and write files and directories. Paths are text; errors say
 // which path failed and why.
 
+import io
+
 // The whole file as text.
 pub fn read(path: Text) throws -> Text
 // The whole file as bytes.
@@ -22,19 +24,13 @@ pub fn copy(from: Text, to: Text) throws
 pub fn rename(from: Text, to: Text) throws
 // Working with the text of paths: see the `path` module.
 
-// An open file, for reading or writing it piece by piece.
-// Get one with `with f = try files.open(path) { ... }`.
-pub builtin type File {
-  // The next line without its line break; none at the end of the file.
-  fn read_line(self) throws -> Text?
-  fn write(self, text: Text) throws
-  fn close(self) throws
-}
-
-// Opens a file for reading, line by line.
-pub fn open(path: Text) throws -> File
-// Creates (or replaces) a file for writing, piece by piece.
-pub fn create(path: Text) throws -> File
+// A file as a stream (see the `io` module), for reading or writing it
+// piece by piece: `with f = try files.open(path) { ... }`.
+pub fn open(path: Text) throws -> io.Stream
+// Creates (or empties) a file for writing.
+pub fn create(path: Text) throws -> io.Stream
+// Opens a file for writing at its end, creating it if needed.
+pub fn open_append(path: Text) throws -> io.Stream
 
 // A new empty directory, deleted with everything in it at the end of `with`.
 pub builtin type TempDir {

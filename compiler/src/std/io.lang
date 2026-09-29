@@ -1,0 +1,49 @@
+// io: streams of bytes, read and written piece by piece.
+//
+// Files (`files.open`), network connections (`net.connect`) and this
+// program's standard input and output are all a `Stream`:
+//
+//   // a filter: `cat app.log | errors`
+//   while try io.read_line() is some(line) {
+//     if line.contains("ERROR") {
+//       print(line)
+//     }
+//   }
+//
+//   with from = try files.open("big.iso") {
+//     with to = try files.create("copy.iso") {
+//       let _ = try io.copy(from, to)
+//     }
+//   }
+
+pub builtin type Stream {
+  // Up to `max` bytes, as soon as some are there; empty at the end.
+  fn read(self, max: Int) throws -> Bytes
+  // Exactly `count` bytes; an error if the stream ends first.
+  fn read_exact(self, count: Int) throws -> Bytes
+  // The next line without "\n" (or "\r\n"); none at the end.
+  fn read_line(self) throws -> Text?
+  // Everything up to the end.
+  fn read_all(self) throws -> Bytes
+  fn write(self, data: Bytes) throws
+  fn write_text(self, text: Text) throws
+  // For network connections, the other side's address: "93.184.215.14:80";
+  // empty for other streams.
+  fn peer(self) -> Text
+  // Writes what is still buffered and closes the stream.
+  fn close(self) throws
+}
+
+// This program's standard input, output and error output.
+pub fn stdin() -> Stream
+pub fn stdout() -> Stream
+pub fn stderr() -> Stream
+
+// The next line of standard input; none at the end.
+pub fn read_line() throws -> Text?
+// All of standard input.
+pub fn read_all() throws -> Bytes
+
+// Copies everything from one stream to another; returns the number of bytes.
+// A file to a network connection goes straight from the disk (sendfile).
+pub fn copy(from: Stream, to: Stream) throws -> Int

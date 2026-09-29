@@ -19,7 +19,7 @@ type Store {
 }
 
 fn create(store: Shared<Store>, req: http.Request) throws -> http.Response {
-  let input = try json.decode<NewNote>(req.body)
+  let input = try json.decode<NewNote>(try req.text())
   var note = Note(id: 0, title: input.title, text: input.text)
   with s = store.lock() {
     note.id = s.next_id
@@ -64,14 +64,28 @@ test "a note that doesn't exist is a 404" {
 test "created notes can be read back" {
   let r = router(Shared(Store()))
   var req = http.request("POST", "/notes")
-  req.body = "{\"title\": \"a\", \"text\": \"b\"}"
+  req.body = "{\"title\": \"a\", \"text\": \"b\"}".bytes()
   let created = try r.handle(req)
   expect created.status == 201
   let res = try r.handle(http.request("GET", "/notes/1"))
-  expect res.body == "{\"id\":1,\"title\":\"a\",\"text\":\"b\"}"
+  expect try res.text() == "{\"id\":1,\"title\":\"a\",\"text\":\"b\"}"
 }
 
 fn main() throws {
   try http.serve(router(Shared(Store())), port: 18080)
   log.info("bye")
+}
+
+test "files are served from their directory only" {
+  var router = http.Router()
+  router.files("/static", dir: "public")
+  let ok = try router.handle(http.request("GET", "/static/css/site.css"))
+  expect ok.file == "public/css/site.css"
+  let head = try router.handle(http.request("HEAD", "/static/a.txt"))
+  expect head.file == "public/a.txt"
+  for bad in ["/static/../secret.txt", "/static/css/../../x", "/static/.env", "/static/.git/config"] {
+    let res = try router.handle(http.request("GET", bad))
+    expect res.status == 404
+    expect res.file == ""
+  }
 }

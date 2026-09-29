@@ -2,60 +2,6 @@
 
 #include <netdb.h>
 
-static lt_text *lt_error_message(lt_err e);
-
-typedef struct lt_conn {
-    lt_handle h;
-    int fd;
-    char *buf; // bytes read ahead (for read_line)
-    size_t blen, bcap;
-    char peer[64];
-    void *tls; // the TLS session, for connect_tls
-} lt_conn;
-
-static void lt_tls_free(lt_conn *c);
-static ssize_t lt_tls_recv(lt_conn *c, void *d, size_t n, lt_err *err);
-static bool lt_tls_send(lt_conn *c, const void *d, size_t n, lt_err *err);
-
-static void lt_conn_free(lt_handle *h) {
-    lt_conn *c = (lt_conn *)h;
-    if (c->tls) lt_tls_free(c);
-    if (c->fd >= 0) close(c->fd);
-    free(c->buf);
-    free(c);
-}
-
-static lt_conn *lt_conn_new(int fd) {
-    lt_conn *c = (lt_conn *)calloc(1, sizeof(lt_conn));
-    c->h.rc = 1;
-    c->h.free = lt_conn_free;
-    c->fd = fd;
-    struct sockaddr_storage ss;
-    socklen_t sl = sizeof ss;
-    if (getpeername(fd, (struct sockaddr *)&ss, &sl) == 0) {
-        char host[48] = "?";
-        int port = 0;
-        if (ss.ss_family == AF_INET) {
-            struct sockaddr_in *a = (struct sockaddr_in *)&ss;
-            inet_ntop(AF_INET, &a->sin_addr, host, sizeof host);
-            port = ntohs(a->sin_port);
-        } else if (ss.ss_family == AF_INET6) {
-            struct sockaddr_in6 *a = (struct sockaddr_in6 *)&ss;
-            inet_ntop(AF_INET6, &a->sin6_addr, host, sizeof host);
-            port = ntohs(a->sin6_port);
-            if (strncmp(host, "::ffff:", 7) == 0) memmove(host, host + 7, strlen(host + 7) + 1);
-        }
-        snprintf(c->peer, sizeof c->peer, "%s:%d", host, port);
-    }
-    return c;
-}
-
-static lt_err lt_net_error(const char *what, const char *detail) {
-    char buf[512];
-    snprintf(buf, sizeof buf, "net: %s: %s", what, detail);
-    return lt_make_failure(lt_text_cstr(buf));
-}
-
 static lt_err lt_net_connect(lt_text *host, int64_t port, lt_handle **out) {
     char ps[16];
     snprintf(ps, sizeof ps, "%lld", (long long)port);
@@ -95,131 +41,6 @@ static lt_err lt_net_connect(lt_text *host, int64_t port, lt_handle **out) {
     }
     freeaddrinfo(res);
     return lt_net_error(what, strerror(err));
-}
-
-// fills the read-ahead buffer with at least one more byte; false at the end
-static lt_err lt_conn_fill(lt_conn *c, bool *eof) {
-    if (c->fd < 0) return lt_net_error("read", "the connection is closed");
-    if (c->bcap - c->blen < 4096) {
-        c->bcap = c->bcap ? c->bcap * 2 : 8192;
-        c->buf = (char *)realloc(c->buf, c->bcap);
-    }
-    if (c->tls) {
-        lt_err e = { 0 };
-        ssize_t n = lt_tls_recv(c, c->buf + c->blen, c->bcap - c->blen, &e);
-        if (e.obj) return e;
-        c->blen += (size_t)n;
-        *eof = n == 0;
-        return (lt_err){ 0 };
-    }
-    for (;;) {
-        ssize_t n = read(c->fd, c->buf + c->blen, c->bcap - c->blen);
-        if (n > 0) {
-            c->blen += (size_t)n;
-            *eof = false;
-            return (lt_err){ 0 };
-        }
-        if (n == 0) {
-            *eof = true;
-            return (lt_err){ 0 };
-        }
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-            if (lt_is_cancelled()) return lt_make_cancelled();
-            lt_io_wait(c->fd, false);
-            continue;
-        }
-        if (errno == EINTR) continue;
-        return lt_net_error("read", strerror(errno));
-    }
-}
-
-static lt_bytes *lt_conn_take(lt_conn *c, size_t n) {
-    lt_bytes *b = lt_bytes_from(c->buf, (int64_t)n);
-    memmove(c->buf, c->buf + n, c->blen - n);
-    c->blen -= n;
-    return b;
-}
-
-static lt_err lt_conn_read(lt_handle *h, int64_t max, lt_bytes **out) {
-    lt_conn *c = (lt_conn *)h;
-    if (max <= 0) {
-        *out = LT_EMPTY_BYTES;
-        return (lt_err){ 0 };
-    }
-    if (c->blen == 0) {
-        bool eof = false;
-        lt_err e = lt_conn_fill(c, &eof);
-        if (e.obj) return e;
-        if (eof) {
-            *out = LT_EMPTY_BYTES;
-            return (lt_err){ 0 };
-        }
-    }
-    *out = lt_conn_take(c, c->blen < (size_t)max ? c->blen : (size_t)max);
-    return (lt_err){ 0 };
-}
-
-static lt_err lt_conn_read_exact(lt_handle *h, int64_t n, lt_bytes **out) {
-    lt_conn *c = (lt_conn *)h;
-    while (c->blen < (size_t)n) {
-        bool eof = false;
-        lt_err e = lt_conn_fill(c, &eof);
-        if (e.obj) return e;
-        if (eof) return lt_net_error("read", "the connection closed in the middle of a message");
-    }
-    *out = lt_conn_take(c, (size_t)n);
-    return (lt_err){ 0 };
-}
-
-static lt_err lt_conn_read_line(lt_handle *h, lt_text **out) {
-    lt_conn *c = (lt_conn *)h;
-    size_t scanned = 0;
-    for (;;) {
-        char *nl = c->blen > scanned ? memchr(c->buf + scanned, '\n', c->blen - scanned) : NULL;
-        if (nl) {
-            size_t n = (size_t)(nl - c->buf);
-            size_t len = n > 0 && c->buf[n - 1] == '\r' ? n - 1 : n;
-            *out = lt_text_from(c->buf, (int64_t)len);
-            memmove(c->buf, c->buf + n + 1, c->blen - n - 1);
-            c->blen -= n + 1;
-            return (lt_err){ 0 };
-        }
-        scanned = c->blen;
-        bool eof = false;
-        lt_err e = lt_conn_fill(c, &eof);
-        if (e.obj) return e;
-        if (eof) {
-            if (c->blen == 0) {
-                *out = NULL;
-                return (lt_err){ 0 };
-            }
-            *out = lt_text_from(c->buf, (int64_t)c->blen);
-            c->blen = 0;
-            return (lt_err){ 0 };
-        }
-    }
-}
-
-static lt_err lt_conn_write_raw(lt_handle *h, const void *d, int64_t n) {
-    lt_conn *c = (lt_conn *)h;
-    if (c->fd < 0) return lt_net_error("write", "the connection is closed");
-    if (c->tls) {
-        lt_err e = { 0 };
-        lt_tls_send(c, d, (size_t)n, &e);
-        return e;
-    }
-    if (!lt_sock_write_all(c->fd, (const char *)d, (size_t)n)) return lt_net_error("write", strerror(errno));
-    return (lt_err){ 0 };
-}
-
-static lt_err lt_conn_close(lt_handle *h) {
-    lt_conn *c = (lt_conn *)h;
-    if (c->tls) lt_tls_free(c);
-    if (c->fd >= 0) {
-        close(c->fd);
-        c->fd = -1;
-    }
-    return (lt_err){ 0 };
 }
 
 // ---- serve: a task per connection
@@ -441,10 +262,6 @@ static bool lt_tls_wait(lt_conn *c, bool for_write, lt_err *err) {
 
 #if !defined(LT_TLS_ON)
 
-static void lt_tls_free(lt_conn *c) { (void)c; }
-static ssize_t lt_tls_recv(lt_conn *c, void *d, size_t n, lt_err *err) { (void)c; (void)d; (void)n; (void)err; return 0; }
-static bool lt_tls_send(lt_conn *c, const void *d, size_t n, lt_err *err) { (void)c; (void)d; (void)n; (void)err; return false; }
-
 #elif defined(__APPLE__) && !defined(LT_TLS_OPENSSL)
 
 #pragma clang diagnostic push
@@ -646,6 +463,9 @@ static lt_err lt_net_connect_tls(lt_text *host, int64_t port, lt_handle **out) {
     lt_err e = lt_net_connect(host, port, &h);
     if (e.obj) return e;
     lt_conn *c = (lt_conn *)h;
+    c->tls_recv = lt_tls_recv;
+    c->tls_send = lt_tls_send;
+    c->tls_free = lt_tls_free;
     char what[300];
     snprintf(what, sizeof what, "TLS with %s:%lld", host->data, (long long)port);
     e = lt_tls_start(c, host->data, what);

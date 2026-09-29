@@ -1,0 +1,76 @@
+import io
+import files
+import process
+
+fn main() throws {
+  with p = try process.start("sort", []) {
+    try p.write_text("pear\napple\nfig\n")
+    try p.close_input()
+    while try p.read_line() is some(line) {
+      print("sorted: ${line}")
+    }
+    print("status ${try p.wait()}")
+  }
+  // wait with output still unread: kept for reading
+  with p = try process.start("sh", ["-c", "echo one; echo two; exit 3"]) {
+    let status = try p.wait()
+    print("status ${status}: ${try p.read_all().text().trim()}")
+  }
+  // leaving `with` stops a program that runs forever
+  with p = try process.start("sleep", ["100"]) {
+  }
+  print("stopped sleep")
+  // binary chunks and copy
+  var data = Bytes()
+  for i in 0..<300000 {
+    data.append(i % 256)
+  }
+  try files.write_bytes("/tmp/lang-io-test-data.bin", data)
+  var total = 0
+  var chunks = 0
+  with f = try files.open("/tmp/lang-io-test-data.bin") {
+    while true {
+      let chunk = try f.read(65536)
+      if chunk.is_empty() {
+        break
+      }
+      total += chunk.length
+      chunks += 1
+    }
+  }
+  print("${total} bytes in ${chunks} chunks")
+  with from = try files.open("/tmp/lang-io-test-data.bin") {
+    with to = try files.create("/tmp/lang-io-test-copy.bin") {
+      print("copied ${try io.copy(from, to)}")
+    }
+  }
+  print("same: ${try files.read_bytes("/tmp/lang-io-test-copy.bin") == data}")
+  with out = io.stdout() {
+    print("before")
+    try out.write_text("through the stream\n")
+    print("after")
+  }
+  with f = try files.create("/tmp/lang-io-test-lines.txt") {
+    for i in 0..<100000 {
+      try f.write_text("line ${i}\n")
+    }
+  }
+  with f = try files.open_append("/tmp/lang-io-test-lines.txt") {
+    try f.write_text("last\n")
+  }
+  with f = try files.open("/tmp/lang-io-test-lines.txt") {
+    var n = 0
+    var last = ""
+    while try f.read_line() is some(line) {
+      n += 1
+      last = line
+    }
+    print("${n} lines, last ${last}")
+  }
+  with bad = try files.open("/tmp/lang-io-test-nope") catch err {
+    print(err.message())
+    return
+  } {
+    print("opened?!")
+  }
+}

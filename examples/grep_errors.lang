@@ -1,0 +1,12 @@
+import io
+
+fn main() throws {
+  var count = 0
+  while try io.read_line() is some(line) {
+    if line.contains("ERROR") {
+      count += 1
+      print(line)
+    }
+  }
+  print("${count} errors")
+}

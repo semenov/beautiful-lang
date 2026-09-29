@@ -27,9 +27,11 @@ typedef struct {
 
 typedef struct {
     int64_t status;
-    lt_text *body;
+    lt_bytes *body;
     // headers as alternating names and values
     lt_texts *headers;
+    // a file to send as the body (http.file)
+    lt_text *file;
 } lt_http_out;
 
 #ifdef LT_THREADS
@@ -41,23 +43,25 @@ static volatile int lt_http_listen_fd = -1;
 static volatile int lt_http_port;
 
 // Ctrl-C: stop accepting. Connecting to our own port wakes the accept loop
-// (socket and connect are safe to call in a signal handler).
+// (socket and connect are safe to call in a signal handler). The address
+// family is the listener's: another program may hold the same port on the
+// other family.
 static void lt_http_on_signal(int sig) {
     (void)sig;
     lt_http_stop = 1;
-    int s = socket(AF_INET, SOCK_STREAM, 0);
-    if (s >= 0) {
-        struct sockaddr_in a;
-        memset(&a, 0, sizeof a);
-        a.sin_family = AF_INET;
-        a.sin_port = htons((uint16_t)lt_http_port);
-        a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        connect(s, (struct sockaddr *)&a, sizeof a);
-        close(s);
+    struct sockaddr_storage ss;
+    socklen_t sl = sizeof ss;
+    if (lt_http_listen_fd < 0 || getsockname(lt_http_listen_fd, (struct sockaddr *)&ss, &sl) != 0) return;
+    int s = socket(ss.ss_family, SOCK_STREAM, 0);
+    if (s < 0) return;
+    if (ss.ss_family == AF_INET6) {
+        ((struct sockaddr_in6 *)&ss)->sin6_addr = in6addr_loopback;
+    } else {
+        ((struct sockaddr_in *)&ss)->sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     }
+    connect(s, (struct sockaddr *)&ss, sl);
+    close(s);
 }
-
-static void lt_set_nonblocking(int fd) { fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK); }
 
 // read at least one byte into buf; 0 on end of stream / error
 static ssize_t lt_sock_read(int fd, char *buf, size_t cap) {
@@ -71,24 +75,6 @@ static ssize_t lt_sock_read(int fd, char *buf, size_t cap) {
         if (errno == EINTR) continue;
         return 0;
     }
-}
-
-static bool lt_sock_write_all(int fd, const char *buf, size_t len) {
-    while (len > 0) {
-        ssize_t n = write(fd, buf, len);
-        if (n > 0) {
-            buf += n;
-            len -= (size_t)n;
-            continue;
-        }
-        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-            lt_io_wait(fd, true);
-            continue;
-        }
-        if (n < 0 && errno == EINTR) continue;
-        return false;
-    }
-    return true;
 }
 
 static const char *lt_http_reason(int64_t s) {
@@ -133,6 +119,155 @@ typedef struct {
     int fd;
     lt_fn handler;
 } lt_conn_arg;
+
+// Writes the status line and headers: the handler's, then `extra` (lines
+// ending in \r\n), content-length and connection; then `body` if given.
+static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t length, bool keep, lt_bytes *body) {
+    lt_buf b = { 0 };
+    char line[256];
+    int n = snprintf(line, sizeof line, "HTTP/1.1 %lld %s\r\n", (long long)out->status, lt_http_reason(out->status));
+    lt_buf_put(&b, line, n);
+    bool has_type = false;
+    for (int64_t i = 0; out->headers && i + 1 < out->headers->len; i += 2) {
+        lt_text *hn = out->headers->items[i], *hv = out->headers->items[i + 1];
+        if (lt_ieq(hn->data, hn->len, "content-type")) has_type = true;
+        if (lt_ieq(hn->data, hn->len, "content-length") || lt_ieq(hn->data, hn->len, "connection")) continue;
+        lt_buf_put(&b, hn->data, hn->len);
+        lt_buf_put(&b, ": ", 2);
+        lt_buf_put(&b, hv->data, hv->len);
+        lt_buf_put(&b, "\r\n", 2);
+    }
+    if (!has_type && !extra) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
+    if (extra) lt_buf_put(&b, extra, (int64_t)strlen(extra));
+    n = snprintf(line, sizeof line, "content-length: %lld\r\nconnection: %s\r\n\r\n", (long long)length, keep ? "keep-alive" : "close");
+    lt_buf_put(&b, line, n);
+    // small bodies go in the same write
+    if (body && body->len <= 16384) {
+        lt_buf_put(&b, (const char *)body->data, body->len);
+        body = NULL;
+    }
+    bool ok = lt_sock_write_all(fd, b.d, (size_t)b.len) && (!body || lt_sock_write_all(fd, (const char *)body->data, (size_t)body->len));
+    free(b.d);
+    return ok;
+}
+
+static const char *lt_http_header(const lt_http_raw *r, const char *name) {
+    static __thread char v[256];
+    for (int64_t i = 0; i < r->nheaders; i++) {
+        if (lt_ieq(r->hname[i], r->hname_len[i], name)) {
+            snprintf(v, sizeof v, "%.*s", (int)r->hvalue_len[i], r->hvalue[i]);
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static const char *lt_mime_type(const char *path) {
+    const char *dot = strrchr(path, '.');
+    const char *slash = strrchr(path, '/');
+    if (!dot || (slash && dot < slash)) return "application/octet-stream";
+    static const char *types[][2] = {
+        { "html", "text/html; charset=utf-8" }, { "htm", "text/html; charset=utf-8" },
+        { "css", "text/css; charset=utf-8" }, { "js", "text/javascript; charset=utf-8" },
+        { "mjs", "text/javascript; charset=utf-8" }, { "json", "application/json" },
+        { "txt", "text/plain; charset=utf-8" }, { "md", "text/markdown; charset=utf-8" },
+        { "csv", "text/csv; charset=utf-8" }, { "xml", "application/xml" },
+        { "svg", "image/svg+xml" }, { "png", "image/png" }, { "jpg", "image/jpeg" },
+        { "jpeg", "image/jpeg" }, { "gif", "image/gif" }, { "webp", "image/webp" },
+        { "avif", "image/avif" }, { "ico", "image/x-icon" }, { "pdf", "application/pdf" },
+        { "wasm", "application/wasm" }, { "zip", "application/zip" }, { "gz", "application/gzip" },
+        { "tar", "application/x-tar" }, { "mp4", "video/mp4" }, { "webm", "video/webm" },
+        { "mp3", "audio/mpeg" }, { "ogg", "audio/ogg" }, { "wav", "audio/wav" },
+        { "woff", "font/woff" }, { "woff2", "font/woff2" }, { "ttf", "font/ttf" },
+        { "otf", "font/otf" },
+    };
+    for (size_t i = 0; i < sizeof types / sizeof types[0]; i++)
+        if (strcasecmp(dot + 1, types[i][0]) == 0) return types[i][1];
+    return "application/octet-stream";
+}
+
+// http.file: 404, 304, 206 (Range) or 200 with the file sent by sendfile.
+static bool lt_http_send_file(int fd, const lt_http_raw *r, lt_http_out *out, bool keep, bool head_only) {
+    char path[4096];
+    snprintf(path, sizeof path, "%.*s", (int)out->file->len, out->file->data);
+    int f = open(path, O_RDONLY | O_CLOEXEC);
+    struct stat st;
+    if (f >= 0 && fstat(f, &st) == 0 && S_ISDIR(st.st_mode)) {
+        close(f);
+        size_t pl = strlen(path);
+        snprintf(path + pl, sizeof path - pl, "%sindex.html", pl && path[pl - 1] == '/' ? "" : "/");
+        f = open(path, O_RDONLY | O_CLOEXEC);
+    }
+    if (f < 0 || fstat(f, &st) != 0 || !S_ISREG(st.st_mode)) {
+        if (f >= 0) close(f);
+        static struct { int64_t rc, len, cap; char d[9]; } nf = { -1, 9, 9, "not found" };
+        lt_http_out o = { 404, NULL, NULL, NULL };
+        return lt_http_send(fd, &o, NULL, 9, keep, head_only ? NULL : (lt_bytes *)&nf);
+    }
+    char extra[1024];
+    int n = 0;
+    bool has_type = false;
+    for (int64_t i = 0; out->headers && i + 1 < out->headers->len; i += 2)
+        if (lt_ieq(out->headers->items[i]->data, out->headers->items[i]->len, "content-type")) has_type = true;
+    if (!has_type) n += snprintf(extra + n, sizeof extra - (size_t)n, "content-type: %s\r\n", lt_mime_type(path));
+    char modified[64];
+    struct tm tm;
+    time_t mt = st.st_mtime;
+    gmtime_r(&mt, &tm);
+    strftime(modified, sizeof modified, "%a, %d %b %Y %H:%M:%S GMT", &tm);
+    n += snprintf(extra + n, sizeof extra - (size_t)n, "last-modified: %s\r\naccept-ranges: bytes\r\n", modified);
+    const char *since = lt_http_header(r, "if-modified-since");
+    if (since && strcmp(since, modified) == 0) {
+        close(f);
+        lt_http_out o = *out;
+        o.status = 304;
+        return lt_http_send(fd, &o, extra, 0, keep, NULL);
+    }
+    int64_t size = (int64_t)st.st_size, from = 0, count = size;
+    int64_t status = out->status;
+    const char *range = lt_http_header(r, "range");
+    if (range && status == 200 && strncmp(range, "bytes=", 6) == 0 && !strchr(range, ',')) {
+        const char *s = range + 6;
+        char *e;
+        int64_t a = -1, b = -1;
+        if (*s == '-') {
+            b = strtoll(s + 1, &e, 10); // the last b bytes
+            a = size - b < 0 ? 0 : size - b;
+            b = size - 1;
+        } else {
+            a = strtoll(s, &e, 10);
+            b = (*e == '-' && e[1]) ? strtoll(e + 1, NULL, 10) : size - 1;
+            if (b >= size) b = size - 1;
+        }
+        if (a < 0 || a >= size || b < a) {
+            close(f);
+            n += snprintf(extra + n, sizeof extra - (size_t)n, "content-range: bytes */%lld\r\n", (long long)size);
+            lt_http_out o = *out;
+            o.status = 416;
+            return lt_http_send(fd, &o, extra, 0, keep, NULL);
+        }
+        from = a;
+        count = b - a + 1;
+        status = 206;
+        n += snprintf(extra + n, sizeof extra - (size_t)n, "content-range: bytes %lld-%lld/%lld\r\n", (long long)a, (long long)b, (long long)size);
+    }
+    lt_http_out o = *out;
+    o.status = status;
+    bool ok;
+    if (!head_only && count > 0 && count <= 16384) {
+        // small: one write with the headers
+        lt_bytes *small = lt_bytes_new(count);
+        ssize_t got = pread(f, small->data, (size_t)count, (off_t)from);
+        small->len = got > 0 ? got : 0;
+        ok = got == count && lt_http_send(fd, &o, extra, count, keep, small);
+        lt_bytes_drop(small);
+    } else {
+        ok = lt_http_send(fd, &o, extra, count, keep, NULL);
+        if (ok && !head_only && count > 0) ok = lt_sendfile(f, fd, from, count) == count;
+    }
+    close(f);
+    return ok;
+}
 
 #define LT_HTTP_MAX_HEAD (64 * 1024)
 #define LT_HTTP_MAX_BODY (64 * 1024 * 1024)
@@ -251,23 +386,10 @@ static void lt_http_conn(lt_task *t) {
         lt_http_out out;
         memset(&out, 0, sizeof out);
         lt_http_dispatch(a.handler, &r, &out);
-        // the response
-        size_t hcap = 256;
-        for (int64_t i = 0; out.headers && i < out.headers->len; i++) hcap += (size_t)out.headers->items[i]->len + 4;
-        char *head = (char *)malloc(hcap + 128);
-        int hl = snprintf(head, hcap + 128, "HTTP/1.1 %lld %s\r\n", (long long)out.status, lt_http_reason(out.status));
-        bool has_type = false;
-        for (int64_t i = 0; out.headers && i + 1 < out.headers->len; i += 2) {
-            lt_text *hn = out.headers->items[i], *hv = out.headers->items[i + 1];
-            if (lt_ieq(hn->data, hn->len, "content-type")) has_type = true;
-            if (lt_ieq(hn->data, hn->len, "content-length") || lt_ieq(hn->data, hn->len, "connection")) continue;
-            hl += snprintf(head + hl, hcap + 128 - (size_t)hl, "%.*s: %.*s\r\n", (int)hn->len, hn->data, (int)hv->len, hv->data);
-        }
-        if (!has_type) hl += snprintf(head + hl, hcap + 128 - (size_t)hl, "content-type: text/plain; charset=utf-8\r\n");
-        hl += snprintf(head + hl, hcap + 128 - (size_t)hl, "content-length: %lld\r\nconnection: %s\r\n\r\n", (long long)(out.body ? out.body->len : 0), keep ? "keep-alive" : "close");
-        bool ok = lt_sock_write_all(fd, head, (size_t)hl) && (!out.body || lt_sock_write_all(fd, out.body->data, (size_t)out.body->len));
-        free(head);
-        lt_text_drop(out.body);
+        bool head_only = r.method_len == 4 && memcmp(r.method, "HEAD", 4) == 0;
+        bool ok = out.file && out.file->len > 0 ? lt_http_send_file(fd, &r, &out, keep, head_only) : lt_http_send(fd, &out, NULL, out.body ? out.body->len : 0, keep, head_only ? NULL : out.body);
+        lt_bytes_drop(out.body);
+        lt_text_drop(out.file);
         if (out.headers) {
             for (int64_t i = 0; i < out.headers->len; i++) lt_text_drop(out.headers->items[i]);
             lt_free(out.headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)out.headers->cap);
@@ -407,26 +529,32 @@ static size_t lt_curl_header(char *p, size_t size, size_t n, void *ud) {
 
 static void curl_global_init_void(void) { curl_global_init(CURL_GLOBAL_DEFAULT); }
 
-static lt_err lt_http_fetch(lt_text *method, lt_text *url, lt_text *body, lt_http_out *out) {
+static size_t lt_curl_file(char *p, size_t size, size_t n, void *ud) {
+    return fwrite(p, size, n, (FILE *)ud) * size;
+}
+
+// One request; the body goes to `sink` (a growing buffer or a FILE).
+static lt_err lt_http_perform(lt_text *method, lt_text *url, lt_text *body, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, (void (*)(void))curl_global_init_void);
     CURL *c = curl_easy_init();
     if (!c) return lt_make_failure(lt_text_cstr("http: can't start the client"));
-    lt_grow g = { NULL, 0, 0 };
     lt_texts *hs = lt_texts_new(8);
     curl_easy_setopt(c, CURLOPT_URL, url->data);
     curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method->data);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
     curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 10L);
-    curl_easy_setopt(c, CURLOPT_TIMEOUT, 60L);
+    // a slow but moving download is fine; a stalled one is not
+    curl_easy_setopt(c, CURLOPT_LOW_SPEED_LIMIT, 1L);
+    curl_easy_setopt(c, CURLOPT_LOW_SPEED_TIME, 60L);
     curl_easy_setopt(c, CURLOPT_USERAGENT, "lang-http/0.1");
-    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, lt_curl_body);
-    curl_easy_setopt(c, CURLOPT_WRITEDATA, &g);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, sink);
     curl_easy_setopt(c, CURLOPT_HEADERFUNCTION, lt_curl_header);
     curl_easy_setopt(c, CURLOPT_HEADERDATA, &hs);
     struct curl_slist *req_headers = NULL;
-    if (body->len > 0 || strcmp(method->data, "POST") == 0 || strcmp(method->data, "PUT") == 0) {
+    if (body && (body->len > 0 || strcmp(method->data, "POST") == 0 || strcmp(method->data, "PUT") == 0)) {
         curl_easy_setopt(c, CURLOPT_POSTFIELDS, body->data);
         curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE_LARGE, (curl_off_t)body->len);
         const char *ct = (body->len > 0 && (body->data[0] == '{' || body->data[0] == '[')) ? "content-type: application/json" : "content-type: text/plain; charset=utf-8";
@@ -434,24 +562,52 @@ static lt_err lt_http_fetch(lt_text *method, lt_text *url, lt_text *body, lt_htt
         curl_easy_setopt(c, CURLOPT_HTTPHEADER, req_headers);
     }
     CURLcode rc = curl_easy_perform(c);
-    if (rc != CURLE_OK) {
-        char buf[512];
-        snprintf(buf, sizeof buf, "http: %s %s failed: %s", method->data, url->data, curl_easy_strerror(rc));
-        curl_easy_cleanup(c);
-        curl_slist_free_all(req_headers);
-        free(g.d);
-        for (int64_t i = 0; i < hs->len; i++) lt_text_drop(hs->items[i]);
-        lt_free(hs, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)hs->cap);
-        return lt_make_failure(lt_text_cstr(buf));
-    }
     long status = 0;
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
     curl_easy_cleanup(c);
     curl_slist_free_all(req_headers);
+    if (rc != CURLE_OK) {
+        char buf[512];
+        snprintf(buf, sizeof buf, "http: %s %s failed: %s", method->data, url->data, curl_easy_strerror(rc));
+        for (int64_t i = 0; i < hs->len; i++) lt_text_drop(hs->items[i]);
+        lt_free(hs, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)hs->cap);
+        return lt_make_failure(lt_text_cstr(buf));
+    }
     out->status = status;
-    out->body = lt_text_from(g.d ? g.d : "", (int64_t)g.len);
-    free(g.d);
     out->headers = hs;
     return (lt_err){ 0 };
+}
+
+static lt_err lt_http_fetch(lt_text *method, lt_text *url, lt_text *body, lt_http_out *out) {
+    lt_grow g = { NULL, 0, 0 };
+    lt_err e = lt_http_perform(method, url, body, lt_curl_body, &g, out);
+    if (!e.obj) out->body = lt_bytes_from(g.d ? g.d : "", (int64_t)g.len);
+    free(g.d);
+    return e;
+}
+
+// Into `path` through a temporary file, so a failed download leaves no
+// half-written file behind.
+static lt_err lt_http_download(lt_text *url, lt_text *path, lt_http_out *out) {
+    char tmp[4096];
+    snprintf(tmp, sizeof tmp, "%s.download-%d", path->data, (int)getpid());
+    FILE *f = fopen(tmp, "wb");
+    if (!f) return lt_os_error("can't create", path);
+    lt_text *get = lt_text_cstr("GET");
+    lt_err e = lt_http_perform(get, url, NULL, lt_curl_file, f, out);
+    lt_text_drop(get);
+    bool written = fclose(f) == 0;
+    if (!e.obj && out->status / 100 == 2) {
+        if (!written || rename(tmp, path->data) != 0) {
+            unlink(tmp);
+            for (int64_t i = 0; i < out->headers->len; i++) lt_text_drop(out->headers->items[i]);
+            lt_free(out->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)out->headers->cap);
+            return lt_os_error("can't write", path);
+        }
+    } else {
+        unlink(tmp);
+    }
+    if (!e.obj) out->body = LT_EMPTY_BYTES;
+    return e;
 }
 #endif

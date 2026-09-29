@@ -1,0 +1,15 @@
+sorted: apple
+sorted: fig
+sorted: pear
+status 0
+status 3: one
+two
+stopped sleep
+300000 bytes in 19 chunks
+copied 300000
+same: true
+before
+through the stream
+after
+100001 lines, last last
+can't open "/tmp/lang-io-test-nope": No such file or directory

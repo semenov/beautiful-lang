@@ -12,6 +12,33 @@ pub type Output {
 // exits with a non-zero status is not an error: check `output.status`.
 pub fn run(program: Text, args: List<Text>) throws -> Output
 
+// A running program; get one with `with p = try process.start(...)`.
+// Reading reads its output (stdout); writing writes to its input (stdin).
+// Its error output goes to this program's error output. Leaving `with`
+// stops it if it is still running.
+//
+//   with p = try process.start("sort", []) {
+//     try p.write_text("b\na\n")
+//     try p.close_input()
+//     while try p.read_line() is some(line) { print(line) }
+//   }
+pub builtin type Process {
+  fn read(self, max: Int) throws -> Bytes
+  fn read_line(self) throws -> Text?
+  fn read_all(self) throws -> Bytes
+  fn write(self, data: Bytes) throws
+  fn write_text(self, text: Text) throws
+  // Tells the program there is no more input.
+  fn close_input(self) throws
+  // Waits for the program to finish and returns its exit status. Output it
+  // writes meanwhile is kept for reading.
+  fn wait(self) throws -> Int
+  fn close(self) throws
+}
+
+// Starts a program without waiting for it (see `run` for the arguments).
+pub fn start(program: Text, args: List<Text>) throws -> Process
+
 // The command-line arguments, without the program's name.
 pub fn args() -> List<Text>
 
