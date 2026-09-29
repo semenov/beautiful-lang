@@ -82,3 +82,6 @@ README scheduler section.
   - `http.h` is included only when a server or the client is used;
   - so helpers that tests use without a server belong in `std.h`.
 - Temporary test programs go in `/tmp/st`.
+- Profiling: `sample`/`vmmap` hang on this Mac (a permission prompt). Use
+  perf on Linux: `docker run --rm --privileged -v "$PWD":/src -w /src
+  lang-linux sh -c 'apk add perf; ... perf record -g ./prog; perf report'`.

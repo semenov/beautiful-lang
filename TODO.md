@@ -33,9 +33,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] channels: 4.8x slower than Go (0.63 s vs 0.13 s; partly a stray
         process): now 0.09 s, faster than Go (a task woken by a channel
         runs next on the same worker, like Go's runnext)
-  - [ ] spawn: 0.18 s vs Go 0.06 s (~0.9 us per task: calloc, the stack
-        pool lock, queue, wake, switch, finish); idle workers spin ~1 s of
-        CPU in that benchmark
+  - [x] spawn: 0.18 s vs Go 0.06 s: now ~0.10 s. perf (Linux, in a
+        privileged Docker container: `apk add perf`) showed 67% in futex
+        wake-ups: every spawn woke a worker. Now one waker claims "someone
+        is looking" (like Go's nmspinning), and idle workers spin 8 short
+        rounds, not 64 tight scans
   - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), maps 59 vs
         43 MB; json 332 -> 264 MB vs 247 (a JSON node is 40 bytes now)
   - [ ] other runtime buffers that grow with realloc and are freed to malloc

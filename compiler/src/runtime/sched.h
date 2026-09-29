@@ -183,7 +183,10 @@ static int64_t lt_gq_n;
 
 static pthread_mutex_t lt_park_mu = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t lt_park_cv = PTHREAD_COND_INITIALIZER;
-static int lt_workers, lt_idle, lt_spinning, lt_shutdown, lt_sleepers, lt_io_waiters;
+// lt_spinning: workers looking for work. lt_wakes: wake-ups given to
+// sleeping workers and not yet taken (each woken worker starts out
+// counted as looking).
+static int lt_workers, lt_idle, lt_spinning, lt_wakes, lt_shutdown, lt_sleepers, lt_io_waiters;
 static __thread lt_task *lt_cur;
 static __thread lt_ctx lt_worker_ctx;
 static __thread lt_spin *lt_release_after;
@@ -303,11 +306,20 @@ static void lt_gq_push_list(lt_task *first, lt_task *last, int64_t n) {
 }
 
 // Wakes a sleeping worker if there is one and nobody is looking for work.
+// The waker claims "one is looking" first, so a burst of new tasks wakes
+// one worker, not one each (it then wakes the next if work remains).
 static void lt_wake_one(void) {
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
-    if (__atomic_load_n(&lt_idle, __ATOMIC_SEQ_CST) == 0 || __atomic_load_n(&lt_spinning, __ATOMIC_SEQ_CST) > 0) return;
+    if (__atomic_load_n(&lt_idle, __ATOMIC_SEQ_CST) == 0) return;
+    int zero = 0;
+    if (!__atomic_compare_exchange_n(&lt_spinning, &zero, 1, false, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)) return;
     pthread_mutex_lock(&lt_park_mu);
-    if (lt_idle > 0) pthread_cond_signal(&lt_park_cv);
+    if (lt_idle > lt_wakes) {
+        lt_wakes++;
+        pthread_cond_signal(&lt_park_cv);
+    } else {
+        __atomic_sub_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST); // nobody asleep after all
+    }
     pthread_mutex_unlock(&lt_park_mu);
 }
 
@@ -629,25 +641,40 @@ static void lt_deadlock(void) {
 
 static lt_task *lt_next_task(void) {
     lt_worker *w = lt_self;
+    bool spinning = false; // counted in lt_spinning
     for (;;) {
         lt_task *t = lt_find_work(w);
-        if (t) return t;
-        // look a little longer before sleeping (work often comes right away)
-        __atomic_add_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
-        for (int i = 0; i < 64 && !t; i++) {
+        if (!t) {
+            // look a little longer before sleeping (work often comes right away)
+            if (!spinning) {
+                spinning = true;
+                __atomic_add_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
+            }
+            // a few rounds with a pause between them (scanning every queue
+            // in a tight loop only fights the owners for their locks)
+            for (int i = 0; i < 8 && !t; i++) {
+                for (int k = 0; k < 50; k++) {
 #if defined(__aarch64__)
-            __asm__ volatile("yield");
+                    __asm__ volatile("yield");
 #else
-            __asm__ volatile("pause");
+                    __asm__ volatile("pause");
 #endif
-            t = lt_find_work(w);
+                }
+                t = lt_find_work(w);
+            }
         }
-        __atomic_sub_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
-        if (t) {
-            // this worker stops looking: another may need to start
-            if (lt_any_work()) lt_wake_one();
-            return t;
+        if (spinning) {
+            spinning = false;
+            __atomic_sub_fetch(&lt_spinning, 1, __ATOMIC_SEQ_CST);
+            // wakers skipped waking while this one looked: look again, or
+            // wake someone for what's left
+            if (t) {
+                if (lt_any_work()) lt_wake_one();
+            } else if (lt_any_work()) {
+                continue;
+            }
         }
+        if (t) return t;
         pthread_mutex_lock(&lt_park_mu);
         if (lt_shutdown) {
             pthread_mutex_unlock(&lt_park_mu);
@@ -663,8 +690,12 @@ static lt_task *lt_next_task(void) {
             pthread_mutex_unlock(&lt_park_mu);
             lt_deadlock();
         }
-        pthread_cond_wait(&lt_park_cv, &lt_park_mu);
+        while (lt_wakes == 0 && !lt_shutdown) pthread_cond_wait(&lt_park_cv, &lt_park_mu);
         __atomic_sub_fetch(&lt_idle, 1, __ATOMIC_SEQ_CST);
+        if (lt_wakes > 0) {
+            lt_wakes--;
+            spinning = true; // the waker counted this worker as looking
+        }
         pthread_mutex_unlock(&lt_park_mu);
     }
 }
