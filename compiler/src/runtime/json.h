@@ -107,6 +107,8 @@ static lt_err lt_dec_missing(const char *src, const lt_path *p, const char *fiel
         for (; field[i] && i < sizeof fl - 1; i++) fl[i] = field[i] == '_' ? '-' : field[i];
         fl[i] = 0;
         snprintf(buf, sizeof buf, "the option --%s is required (see --help)", fl);
+    } else if (strcmp(src, "db") == 0) {
+        snprintf(buf, sizeof buf, "db: the query result has no column `%s`", field);
     } else {
         size_t len = (size_t)snprintf(buf, sizeof buf, "%s: at ", src);
         lt_path_write(p, buf, sizeof buf, &len);

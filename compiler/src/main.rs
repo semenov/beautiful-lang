@@ -71,6 +71,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "crypto" => include_str!("std/crypto.lang"),
         "encoding" => include_str!("std/encoding.lang"),
         "net" => include_str!("std/net.lang"),
+        "db" => include_str!("std/db.lang"),
         _ => return None,
     })
 }
@@ -354,7 +355,7 @@ fn compile(opts: &Opts, tests: bool, optimize: bool, exe: &Path) -> bool {
         cmd.arg(if optimize { "-O2" } else { "-O1" });
     }
     // libraries the program needs, from `// link:` lines
-    let libs: Vec<String> = c.lines().take(5).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
+    let libs: Vec<String> = c.lines().take(8).filter_map(|l| l.strip_prefix("// link: ")).flat_map(|l| l.split_whitespace().map(String::from).collect::<Vec<_>>()).collect();
     let status = cmd
         .args(["-std=gnu11", "-w", "-fwrapv", "-o"])
         .arg(exe)

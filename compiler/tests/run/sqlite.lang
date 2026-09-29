@@ -1,0 +1,55 @@
+import db
+
+type UserId = Int
+
+type User {
+  id: UserId
+  name: Text
+  age: Int
+  active: Bool = true
+  email: Text?
+}
+
+fn add(conn: db.Connection, name: Text, age: Int) throws -> Int {
+  try conn.execute("insert into users (name, age, active) values (?, ?, ?)", [name, age, age < 60])
+  return conn.last_id()
+}
+
+fn main() throws {
+  with conn = try db.open(":memory:") {
+    try conn.execute("create table users (id integer primary key, name text not null, age integer, active integer, email text)", [])
+    let ada = try add(conn, name: "Ada", age: 36)
+    let _ = try add(conn, name: "Alan", age: 41)
+    let _ = try add(conn, name: "Grace", age: 85)
+    print("ada is #${ada}")
+    let adults = try conn.query<User>("select id, name, age, active, email from users where age > ? order by age", [40])
+    for u in adults {
+      print("${u.id.value} ${u.name} ${u.age} active=${u.active} email=${u.email}")
+    }
+    let changed = try conn.execute_counting("update users set email = ? where id = ?", ["ada@example.com", UserId(1)])
+    print("changed ${changed}")
+    let one = try conn.query<User>("select * from users where id = ?", [UserId(1)])
+    print("${one}")
+    let bad = try conn.query<User>("select nme from users", []) catch err {
+      print(err.message())
+      []
+    }
+    let result = try conn.transaction(() => {
+      try conn.execute("insert into users (name, age) values (?, ?)", ["Temp", 1])
+      throw Failure(message: "changed my mind")
+    }) catch err {
+      print("rolled back: ${err.message()}")
+      0
+    }
+    let count = try conn.query<Count>("select count(*) as n from users", [])
+    print("users: ${count[0].n}")
+    let missing = try conn.query<User>("select id, name from users", []) catch err {
+      print(err.message())
+      []
+    }
+  }
+}
+
+type Count {
+  n: Int
+}

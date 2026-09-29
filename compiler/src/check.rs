@@ -1029,6 +1029,12 @@ impl Checker {
                 let sp = e.span;
                 return TExpr { kind: TK::Some(Box::new(e)), ty: exp, span: sp };
             }
+            (_, Ty::Adt(d, _)) if self.db_value_def(*d) && !matches!(&act, Ty::Adt(x, _) if x == d) => {
+                let d = *d;
+                if let Some(v) = self.to_db_value(e.clone(), &exp, d) {
+                    return v;
+                }
+            }
             (Ty::Adt(d, _), Ty::Iface(ids)) => {
                 if self.implements(*d, ids) {
                     let sp = e.span;
@@ -1057,6 +1063,39 @@ impl Checker {
             return TExpr { ty: Ty::Err, ..e };
         }
         e
+    }
+
+    // `db.Value`: database parameters are written as plain values
+    fn db_value_def(&self, d: DefId) -> bool {
+        let def = &self.prog.defs[d];
+        def.name == "Value" && self.prog.module_names.get(def.module).map(|m| m == "db").unwrap_or(false)
+    }
+
+    fn to_db_value(&mut self, e: TExpr, exp: &Ty, d: DefId) -> Option<TExpr> {
+        let act = self.resolve(&e.ty);
+        let sp = e.span;
+        if matches!(e.kind, TK::NoneLit) {
+            return Some(TExpr { kind: TK::Variant { def: d, idx: 0, fields: vec![] }, ty: exp.clone(), span: sp });
+        }
+        let (inner, e) = match &act {
+            Ty::Adt(nd, _) => match &self.prog.defs[*nd].kind {
+                TypeKind::Newtype(i) => {
+                    let i = i.clone();
+                    (i.clone(), TExpr { kind: TK::Unwrap(Box::new(e)), ty: i, span: sp })
+                }
+                _ => (act.clone(), e),
+            },
+            _ => (act.clone(), e),
+        };
+        let idx = match &inner {
+            Ty::Int => 1,
+            Ty::Float => 2,
+            Ty::Text => 3,
+            Ty::Bool => 5,
+            Ty::Adt(b, _) if *b == self.prog.b.bytes => 4,
+            _ => return None,
+        };
+        Some(TExpr { kind: TK::Variant { def: d, idx, fields: vec![e] }, ty: exp.clone(), span: sp })
     }
 
     fn mismatch(&mut self, span: Span, exp: &Ty, act: &Ty) {
@@ -2603,6 +2642,17 @@ impl Checker {
             if f.generics.len() > n_owner {
                 let (r2, e2) = (self.resolve(&ret), self.resolve(exp));
                 let _ = self.try_unify(&r2, &e2);
+            }
+        }
+        if matches!(f.name.as_str(), "execute" | "execute_counting" | "query") && self.prog.module_names.get(f.module).map(|m| m == "db").unwrap_or(false) {
+            if let Some(a0) = args.first() {
+                let literal = match &a0.value.kind {
+                    ExprKind::Str(segs) => segs.iter().all(|s| matches!(s, ast::StrSeg::Lit(_))),
+                    _ => false,
+                };
+                if !literal {
+                    self.err_help(a0.span, "the SQL must be written right here, as text in quotes", "put values in with `?` and pass them in the list: `conn.query<User>(\"select * from users where id = ?\", [id])`");
+                }
             }
         }
         let what = format!("`{}`", f.name);

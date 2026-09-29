@@ -92,6 +92,7 @@ pub struct CGen<'a> {
     http_glue: bool,
     curl: bool,
     net: bool,
+    sqlite: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -163,6 +164,7 @@ impl<'a> CGen<'a> {
             http_glue: false,
             curl: false,
             net: false,
+            sqlite: false,
         }
     }
 
@@ -1538,6 +1540,32 @@ static lt_err {name}({c} *out) {{
         name
     }
 
+    // List<db.Value> -> an array of lt_dbval (pointing into the list's texts)
+    fn dbvals_fn(&mut self, lid: usize) -> String {
+        let name = format!("dbvals_{}", lid);
+        if self.done.contains(&(H::Ops, usize::MAX / 64 + lid)) {
+            return name;
+        }
+        self.done.insert((H::Ops, usize::MAX / 64 + lid));
+        let lc = self.tys[lid].c.clone();
+        let e = match &self.tys[lid].kind {
+            Kind::List(e) => *e,
+            _ => unreachable!(),
+        };
+        let acc = match &self.tys[e].kind {
+            Kind::Enum { boxed: true, .. } => "->v.",
+            _ => ".",
+        };
+        let _ = writeln!(
+            self.helpers,
+            "static lt_dbval *{name}({lc} l) {{ lt_dbval *v = (lt_dbval *)calloc((size_t)l->len + 1, sizeof(lt_dbval)); for (int64_t i = 0; i < l->len; i++) {{ __typeof__(l->items[0]) x = l->items[i]; switch (x{a}tag) {{ case 1: v[i].kind = 1; v[i].i = x{a}u.v1.f0; break; case 2: v[i].kind = 2; v[i].f = x{a}u.v2.f0; break; case 3: v[i].kind = 3; v[i].s = x{a}u.v3.f0->data; v[i].len = x{a}u.v3.f0->len; break; case 4: v[i].kind = 4; v[i].s = (const char *)x{a}u.v4.f0->data; v[i].len = x{a}u.v4.f0->len; break; case 5: v[i].kind = 1; v[i].i = x{a}u.v5.f0; break; default: v[i].kind = 0; }} }} return v; }}",
+            name = name,
+            lc = lc,
+            a = acc
+        );
+        name
+    }
+
     fn http_def(&self, name: &str) -> Ty {
         for (d, def) in self.prog.defs.iter().enumerate() {
             if def.name == name && self.prog.module_names.get(def.module).map(|m| m == "http").unwrap_or(false) {
@@ -2643,6 +2671,44 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
             "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
             "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
+            n if n.starts_with("db.") => {
+                self.sqlite = true;
+                let params = |g: &mut CGen, list_op: &str, list_ty: &Ty| -> String {
+                    let lid = g.tid(list_ty);
+                    let f = g.dbvals_fn(lid);
+                    format!("{}({})", f, list_op)
+                };
+                let pty = args.get(2).map(|o| self.op_ty(fi, o));
+                match n {
+                    "db.open" => format!("lt_db_open({}, {})", a[0], a[1]),
+                    "db.Connection.execute" | "db.Connection.execute_counting" => {
+                        let pv = params(self, &a[2], pty.as_ref().unwrap());
+                        let out = if n == "db.Connection.execute" { "NULL".to_string() } else { a[3].clone() };
+                        format!("({{ lt_dbval *v_ = {}; lt_err e_ = lt_db_execute({}, {}, v_, {}->len, {}); free(v_); e_; }})", pv, a[0], a[1], a[2], out)
+                    }
+                    "db.Connection.query" => {
+                        let t = tys.last().unwrap().clone();
+                        let rid = self.tid(&t);
+                        self.need(H::Dec, rid);
+                        let lt = Ty::Adt(self.prog.b.list, vec![t]);
+                        let lid = self.tid(&lt);
+                        self.need(H::Ops, lid);
+                        self.need(H::Drop, lid);
+                        let lc = self.tys[lid].c.clone();
+                        let rc = self.tys[rid].c.clone();
+                        let row = format!("dbrow_{}", rid);
+                        if !self.done.contains(&(H::Ops, usize::MAX / 32 + rid)) {
+                            self.done.insert((H::Ops, usize::MAX / 32 + rid));
+                            let _ = writeln!(self.helpers, "static lt_err {row}(const lt_dyn *o, void *ctx) {{ {rc} v; lt_err e = dec_{rid}(\"db\", o, NULL, 1, &v); if (e.obj) return e; {lc}_push(({lc} *)ctx, v); return (lt_err){{0}}; }}", row = row, rc = rc, rid = rid, lc = lc);
+                        }
+                        let pv = params(self, &a[2], pty.as_ref().unwrap());
+                        format!("({{ lt_dbval *v_ = {pv}; {lc} r_ = {lc}_new(0); lt_err e_ = lt_db_query({c}, {s}, v_, {l}->len, {row}, &r_); free(v_); if (e_.obj) drop_{lid}(r_); else *{out} = r_; e_; }})", pv = pv, lc = lc, c = a[0], s = a[1], l = a[2], row = row, lid = lid, out = a[3])
+                    }
+                    "db.Connection.last_id" => format!("lt_db_last_id({})", a[0]),
+                    "db.Connection.close" => format!("lt_db_close({})", a[0]),
+                    _ => panic!("unknown intrinsic {}", n),
+                }
+            }
             n if n.starts_with("net.") => {
                 self.threads = true;
                 self.net = true;
@@ -3087,6 +3153,10 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         }
         if self.net {
             out += include_str!("runtime/net.h");
+        }
+        if self.sqlite {
+            out = format!("// link: -lsqlite3\n{}", out);
+            out += include_str!("runtime/db.h");
         }
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";

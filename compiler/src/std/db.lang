@@ -1,0 +1,50 @@
+// db: SQLite databases (a file, or ":memory:").
+//
+//   with conn = try db.open("app.db") {
+//     try conn.execute("create table if not exists users (id integer primary key, name text, age integer)", [])
+//     try conn.execute("insert into users (name, age) values (?, ?)", ["Ada", 36])
+//     let adults = try conn.query<User>("select id, name, age from users where age >= ?", [18])
+//   }
+//
+// SQL is always a literal with `?` for values: building SQL from pieces of
+// text is a compile error, so SQL injection can't happen. Parameters can be
+// Int, Float, Text, Bool and Bytes, and new types over them.
+// `query<T>` fills records by column name (like `json.decode`).
+
+pub builtin type Connection {
+  // A statement that returns no rows: create, insert, update, delete.
+  fn execute(self, sql: Text, params: List<Value>) throws
+  // The same, returning the number of rows changed.
+  fn execute_counting(self, sql: Text, params: List<Value>) throws -> Int
+  // The rows as records, columns matched to fields by name.
+  fn query<T>(self, sql: Text, params: List<Value>) throws -> List<T>
+  // The id of the row inserted last.
+  fn last_id(self) -> Int
+  fn close(self) throws
+
+  // Runs `work` in a transaction: everything or nothing. An error inside
+  // rolls the changes back and comes out of `transaction`.
+  fn transaction<R>(self, work: fn() throws -> R) throws -> R {
+    try self.execute("begin", [])
+    let result = try work() catch err {
+      try self.execute("rollback", [])
+      throw err
+    }
+    try self.execute("commit", [])
+    return result
+  }
+}
+
+// Opens (or creates) a database file; ":memory:" for one that lives only
+// while the program runs.
+pub fn open(path: Text) throws -> Connection
+
+// A parameter value; written as a plain Int, Float, Text, Bool or Bytes.
+pub enum Value {
+  Null
+  Integer(value: Int)
+  Real(value: Float)
+  String(value: Text)
+  Blob(value: Bytes)
+  Boolean(value: Bool)
+}
