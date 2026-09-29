@@ -1,0 +1,13 @@
+// A server for http_wire.sh: what only a real connection shows.
+import env
+import http
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "18190").to_int()
+  var router = http.Router()
+  router.post("/echo", req => http.text(200, "${req.body.length} bytes: ${try req.text()}"))
+  router.get("/ip", req => http.text(200, req.client_ip))
+  router.get("/empty", req => http.text(204, ""))
+  router.get("/sized", req => http.stream(200, content_type: "text/plain", writer: out => try out.write_text("12345")).with_header("content-length", "5"))
+  try http.serve(router, port: port)
+}

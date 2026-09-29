@@ -23,6 +23,8 @@ typedef struct {
     int64_t hvalue_len[64];
     const char *body;
     int64_t body_len;
+    // the client's IP address as text
+    const char *client_ip;
 } lt_http_raw;
 
 typedef struct {
@@ -114,32 +116,6 @@ static ssize_t lt_sock_read(int fd, char *buf, size_t cap) {
     }
 }
 
-static const char *lt_http_reason(int64_t s) {
-    switch (s) {
-    case 101: return "Switching Protocols";
-    case 200: return "OK";
-    case 201: return "Created";
-    case 204: return "No Content";
-    case 301: return "Moved Permanently";
-    case 302: return "Found";
-    case 304: return "Not Modified";
-    case 400: return "Bad Request";
-    case 401: return "Unauthorized";
-    case 403: return "Forbidden";
-    case 404: return "Not Found";
-    case 405: return "Method Not Allowed";
-    case 409: return "Conflict";
-    case 413: return "Payload Too Large";
-    case 422: return "Unprocessable Entity";
-    case 429: return "Too Many Requests";
-    case 500: return "Internal Server Error";
-    case 502: return "Bad Gateway";
-    case 503: return "Service Unavailable";
-    default: return "";
-    }
-}
-
-
 static void lt_http_simple(int fd, int status, const char *msg) {
     char buf[256];
     int n = snprintf(buf, sizeof buf, "HTTP/1.1 %d %s\r\ncontent-type: text/plain\r\ncontent-length: %d\r\nconnection: close\r\n\r\n%s", status, lt_http_reason(status), (int)strlen(msg), msg);
@@ -157,6 +133,8 @@ typedef struct {
 static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t length, bool keep, lt_bytes *body) {
     lt_buf b = { 0 };
     char line[256];
+    // no body, no length: 1xx, 204 and 304 (RFC 9110)
+    bool bodiless = out->status < 200 || out->status == 204 || out->status == 304;
     int n = snprintf(line, sizeof line, "HTTP/1.1 %lld %s\r\n", (long long)out->status, lt_http_reason(out->status));
     lt_buf_put(&b, line, n);
     bool has_type = false;
@@ -164,6 +142,7 @@ static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t le
         lt_text *hn = out->headers->items[i], *hv = out->headers->items[i + 1];
         if (lt_ieq(hn->data, hn->len, "content-type")) has_type = true;
         if (lt_ieq(hn->data, hn->len, "content-length") || lt_ieq(hn->data, hn->len, "connection")) continue;
+        if ((out->status < 200 || out->status == 204) && lt_ieq(hn->data, hn->len, "content-type")) continue;
         // a value with line breaks is several headers (Set-Cookie)
         const char *v = hv->data, *end = hv->data + hv->len;
         while (v <= end) {
@@ -177,9 +156,13 @@ static bool lt_http_send(int fd, lt_http_out *out, const char *extra, int64_t le
             v = nl + 1;
         }
     }
-    if (!has_type && !extra && length != -2) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
+    if (!has_type && !extra && length != -2 && length != 0 && !bodiless) lt_buf_put(&b, "content-type: text/plain; charset=utf-8\r\n", 41);
     if (extra) lt_buf_put(&b, extra, (int64_t)strlen(extra));
     if (length == -2) n = snprintf(line, sizeof line, "connection: Upgrade\r\n\r\n"); // 101: another protocol follows
+    else if (bodiless) {
+        n = snprintf(line, sizeof line, "connection: %s\r\n\r\n", keep ? "keep-alive" : "close");
+        body = NULL;
+    }
     else if (length < 0) n = snprintf(line, sizeof line, "transfer-encoding: chunked\r\nconnection: %s\r\n\r\n", keep ? "keep-alive" : "close");
     else n = snprintf(line, sizeof line, "content-length: %lld\r\nconnection: %s\r\n\r\n", (long long)length, keep ? "keep-alive" : "close");
     lt_buf_put(&b, line, n);
@@ -209,11 +192,15 @@ static const char *lt_http_header(const lt_http_raw *r, const char *name) {
 // A 101 answer (WebSockets) hands the writer the raw connection instead.
 static bool lt_http_send_stream(int fd, const lt_http_raw *r, lt_http_out *out, bool keep, bool head_only) {
     bool upgrade = out->status == 101;
-    if (!lt_http_send(fd, out, NULL, upgrade ? -2 : -1, keep, NULL)) return false;
-    if (head_only && !upgrade) return lt_sock_write_all(fd, "0\r\n\r\n", 5);
+    // a length given by the handler: the body is sent as it is, not chunked
+    int64_t fixed = -1;
+    for (int64_t i = 0; out->headers && i + 1 < out->headers->len; i += 2)
+        if (lt_ieq(out->headers->items[i]->data, out->headers->items[i]->len, "content-length")) fixed = strtoll(out->headers->items[i + 1]->data, NULL, 10);
+    if (!lt_http_send(fd, out, NULL, upgrade ? -2 : fixed >= 0 ? fixed : -1, keep, NULL)) return false;
+    if (head_only && !upgrade) return fixed >= 0 || lt_sock_write_all(fd, "0\r\n\r\n", 5);
     lt_conn *c = lt_conn_new(fd);
     c->borrowed = true;
-    c->chunked = !upgrade;
+    c->chunked = !upgrade && fixed < 0;
     // the writer takes one reference; ours ends the stream after it
     lt_handle_dup(&c->h);
     lt_task *t = lt_current();
@@ -249,6 +236,7 @@ static bool lt_http_send_stream(int fd, const lt_http_raw *r, lt_http_out *out, 
         return false; // cut: the client sees an unfinished body
     }
     if (upgrade) return false; // the connection ends with the other protocol
+    if (fixed >= 0) return true;
     return lt_sock_write_all(fd, "0\r\n\r\n", 5);
 }
 
@@ -338,6 +326,111 @@ static bool lt_http_send_file(int fd, const lt_http_raw *r, lt_http_out *out, bo
 #define LT_HTTP_MAX_HEAD (64 * 1024)
 #define LT_HTTP_MAX_BODY (64 * 1024 * 1024)
 
+// The buffer grows to `need`; the parsed pointers into it move along.
+static char *lt_http_grow(char *buf, size_t *cap, size_t need, lt_http_raw *r) {
+    if (need <= *cap) return buf;
+    char *old = buf;
+    size_t nc = *cap;
+    while (nc < need) nc *= 2;
+    buf = (char *)realloc(buf, nc);
+    *cap = nc;
+    ptrdiff_t d = buf - old;
+    r->method += d;
+    r->path += d;
+    if (r->query) r->query += d;
+    for (int64_t i = 0; i < r->nheaders; i++) {
+        r->hname[i] += d;
+        r->hvalue[i] += d;
+    }
+    return buf;
+}
+
+// Reads until `len` >= `need`; false when the client is gone.
+static bool lt_http_fill(int fd, char **buf, size_t *cap, size_t *len, size_t need, lt_http_raw *r) {
+    *buf = lt_http_grow(*buf, cap, need, r);
+    while (*len < need) {
+        ssize_t n = lt_sock_read(fd, *buf + *len, *cap - *len);
+        if (n <= 0) return false;
+        *len += (size_t)n;
+    }
+    return true;
+}
+
+// A chunked body starting at `at`: decoded into *body; returns the offset
+// just past it, 0 if the client left, -1 if it's malformed, -2 if too big.
+static int64_t lt_http_read_chunked(int fd, char **buf, size_t *cap, size_t *len, size_t at, lt_http_raw *r, char **body, int64_t *body_len) {
+    size_t total = 0, bcap = 0;
+    char *out = NULL;
+    for (;;) {
+        // the size line
+        size_t eol;
+        for (;;) {
+            char *nl = *len > at ? memchr(*buf + at, '\n', *len - at) : NULL;
+            if (nl) {
+                eol = (size_t)(nl - *buf);
+                break;
+            }
+            if (*len - at > 1024) goto bad;
+            if (!lt_http_fill(fd, buf, cap, len, *len + 1, r)) goto gone;
+        }
+        char *end;
+        unsigned long long size = strtoull(*buf + at, &end, 16);
+        if (end == *buf + at) goto bad;
+        at = eol + 1;
+        if (size == 0) {
+            // trailers, up to an empty line
+            for (;;) {
+                char *nl;
+                while (!(nl = *len > at ? memchr(*buf + at, '\n', *len - at) : NULL)) {
+                    if (*len - at > LT_HTTP_MAX_HEAD) goto bad;
+                    if (!lt_http_fill(fd, buf, cap, len, *len + 1, r)) goto gone;
+                }
+                size_t l = (size_t)(nl - (*buf + at));
+                at += l + 1;
+                if (l == 0 || (l == 1 && (*buf)[at - 2] == '\r')) break;
+            }
+            *body = out;
+            *body_len = (int64_t)total;
+            return (int64_t)at;
+        }
+        if (total + size > LT_HTTP_MAX_BODY) {
+            free(out);
+            return -2;
+        }
+        if (!lt_http_fill(fd, buf, cap, len, at + size + 2, r)) goto gone;
+        if (total + size > bcap) {
+            bcap = (total + size) * 2;
+            out = (char *)realloc(out, bcap);
+        }
+        memcpy(out + total, *buf + at, size);
+        total += size;
+        at += size;
+        // the chunk's line end
+        if ((*buf)[at] == '\r') at++;
+        if ((*buf)[at] == '\n') at++;
+        else goto bad;
+    }
+bad:
+    free(out);
+    return -1;
+gone:
+    free(out);
+    return 0;
+}
+
+static void lt_http_client_ip(int fd, char *ip, size_t cap) {
+    struct sockaddr_storage sa;
+    socklen_t sl = sizeof sa;
+    ip[0] = 0;
+    if (getpeername(fd, (struct sockaddr *)&sa, &sl) != 0) return;
+    if (sa.ss_family == AF_INET) inet_ntop(AF_INET, &((struct sockaddr_in *)&sa)->sin_addr, ip, (socklen_t)cap);
+    else if (sa.ss_family == AF_INET6) {
+        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)&sa)->sin6_addr, ip, (socklen_t)cap);
+        // an IPv4 client on a dual-stack socket
+        if (strncmp(ip, "::ffff:", 7) == 0 && strchr(ip + 7, '.')) memmove(ip, ip + 7, strlen(ip + 7) + 1);
+    }
+}
+
 static void lt_http_conn(lt_task *t) {
     lt_conn_arg a;
     memcpy(&a, t->result, sizeof a);
@@ -345,6 +438,8 @@ static void lt_http_conn(lt_task *t) {
     size_t cap = 16384, len = 0;
     char *buf = (char *)malloc(cap);
     bool keep = true;
+    char client_ip[64];
+    lt_http_client_ip(fd, client_ip, sizeof client_ip);
     while (keep && !lt_http_stop) {
         // the head: up to the empty line
         char *end = NULL;
@@ -398,6 +493,7 @@ static void lt_http_conn(lt_task *t) {
         bool http10 = (eol - sp2 - 1 == 8) && memcmp(sp2 + 1, "HTTP/1.0", 8) == 0;
         keep = !http10;
         int64_t content_length = 0;
+        bool chunked = false, expect_continue = false;
         char *line = eol + 2;
         while (line < head_end) {
             char *le = memchr(line, '\r', (size_t)(head_end - line + 1));
@@ -414,6 +510,8 @@ static void lt_http_conn(lt_task *t) {
                 r.hvalue[r.nheaders] = v;
                 r.hvalue_len[r.nheaders] = ve - v;
                 if (lt_ieq(line, colon - line, "content-length")) content_length = strtoll(v, NULL, 10);
+                if (lt_ieq(line, colon - line, "transfer-encoding") && ve - v >= 7 && strncasecmp(ve - 7, "chunked", 7) == 0) chunked = true;
+                if (lt_ieq(line, colon - line, "expect") && ve - v == 12 && strncasecmp(v, "100-continue", 12) == 0) expect_continue = true;
                 if (lt_ieq(line, colon - line, "connection")) {
                     if (ve - v == 5 && strncasecmp(v, "close", 5) == 0) keep = false;
                     if (ve - v == 10 && strncasecmp(v, "keep-alive", 10) == 0) keep = true;
@@ -422,33 +520,33 @@ static void lt_http_conn(lt_task *t) {
             }
             line = le + 2;
         }
+        r.client_ip = client_ip;
         if (content_length < 0 || content_length > LT_HTTP_MAX_BODY) {
             lt_http_simple(fd, 413, "request body too large");
             goto done;
         }
         size_t head_len = (size_t)(head_end - buf) + 4;
-        size_t need = head_len + (size_t)content_length;
-        while (len < need) {
-            if (need > cap) {
-                // the parsed pointers move with the buffer
-                char *old = buf;
-                cap = need;
-                buf = (char *)realloc(buf, cap);
-                ptrdiff_t d = buf - old;
-                r.method += d;
-                r.path += d;
-                if (r.query) r.query += d;
-                for (int64_t i = 0; i < r.nheaders; i++) {
-                    r.hname[i] += d;
-                    r.hvalue[i] += d;
-                }
+        // the client waits for a go-ahead before sending a big body
+        if (expect_continue && (chunked || content_length > 0) && len == head_len) lt_sock_write_all(fd, "HTTP/1.1 100 Continue\r\n\r\n", 25);
+        size_t need;
+        char *chunked_body = NULL;
+        if (chunked) {
+            int64_t blen = 0;
+            int64_t past = lt_http_read_chunked(fd, &buf, &cap, &len, head_len, &r, &chunked_body, &blen);
+            if (past == 0) goto done;
+            if (past < 0) {
+                lt_http_simple(fd, past == -2 ? 413 : 400, past == -2 ? "request body too large" : "bad chunked body");
+                goto done;
             }
-            ssize_t n = lt_sock_read(fd, buf + len, cap - len);
-            if (n <= 0) goto done;
-            len += (size_t)n;
+            need = (size_t)past;
+            r.body = chunked_body ? chunked_body : "";
+            r.body_len = blen;
+        } else {
+            need = head_len + (size_t)content_length;
+            if (!lt_http_fill(fd, &buf, &cap, &len, need, &r)) goto done;
+            r.body = buf + head_len;
+            r.body_len = content_length;
         }
-        r.body = buf + head_len;
-        r.body_len = content_length;
         lt_http_out out;
         memset(&out, 0, sizeof out);
         lt_http_dispatch(a.handler, &r, &out);
@@ -464,6 +562,7 @@ static void lt_http_conn(lt_task *t) {
             for (int64_t i = 0; i < out.headers->len; i++) lt_text_drop(out.headers->items[i]);
             lt_free(out.headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)out.headers->cap);
         }
+        free(chunked_body);
         if (!ok) break;
         // keep the rest (a pipelined next request)
         memmove(buf, buf + need, len - need);

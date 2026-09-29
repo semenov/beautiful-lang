@@ -333,7 +333,18 @@ let api = try http.send(http.ClientRequest(url: u, method: "POST",
   headers: {"authorization": "Bearer ${key}"}, body: json.encode(x).bytes()))
 ```
 
-Middleware runs around every request (the first added runs first):
+Routes: `get`, `post`, `put`, `patch`, `delete`, `any` (every method),
+`add("PROPFIND", pattern: ..., handler: ...)`; `:name` is one path part,
+`*name` the rest. HEAD is answered by GET routes; OPTIONS and 405 (with
+`allow`) by the router. Parameters come decoded (`%2F` inside a part stays
+in it; `+` in a path is a plus). The query: `req.query("q")` (a repeated
+name gives its last value), `req.query_all("tag")`, `req.raw_query`. Also
+`req.raw_path`, `req.client_ip`, `http.status_text(404)`. Header names are
+lower case; `with_header` sets one value per name in any case.
+
+Middleware runs around every request (the first added runs first; one
+that answers without calling `next` skips everything added after it, so
+add `log_requests` first):
 
 ```
 router.use(http.log_requests())

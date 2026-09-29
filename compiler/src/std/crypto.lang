@@ -5,10 +5,13 @@
 //   crypto.verify_password(attempt, stored)           // later
 
 pub fn sha256(data: Bytes) -> Bytes
-// A signature of `data` with a secret `key` (webhooks, tokens).
 // SHA-1, for protocols that require it (WebSocket handshakes, git). It
 // isn't collision-safe: use sha256 for anything new.
 pub fn sha1(data: Bytes) -> Bytes
+// MD5, for protocols and formats that require it (HTTP digest auth, old
+// checksums). Broken for security: use sha256 for anything new.
+pub fn md5(data: Bytes) -> Bytes
+// A signature of `data` with a secret `key` (webhooks, tokens).
 pub fn hmac_sha256(key: Bytes, data: Bytes) -> Bytes
 // A key derived from a password (PBKDF2 with HMAC-SHA256).
 pub fn pbkdf2_sha256(password: Bytes, salt: Bytes, iterations: Int, length: Int) -> Bytes

@@ -30,7 +30,29 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       missing in the language and libraries and add it as I go
   - [x] rakyll/hey (load generator): section below
   - [ ] tomnomnom/gron (JSON of any shape, streams, colors): in progress
-  - [ ] mccutchen/go-httpbin (the HTTP server API end to end): in progress
+  - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,
+        108/146 answers identical to Go's, 2552 lines vs 4099, throughput
+        on par with Go (61k vs 66k req/s with logging; 26 MB vs 53 MB).
+        Gaps found (/tmp/port-httpbin/GAPS.md):
+    - [x] bug: chunked request bodies arrive empty (and `Expect: 100-continue`)
+    - [x] bug: `+` in a path is decoded as a space; routes match raw parts
+    - [x] bug: response header names are case-sensitive (two content types)
+    - [x] security: cookie values aren't checked (attribute injection); `domain`
+    - [x] the client's address on the request (`client_ip`)
+    - [x] router: patch, any, add(method), automatic OPTIONS, 405 with allow
+    - [x] query: repeated names (`query_all`), `raw_query`, `raw_path`
+    - [x] crypto.md5 (digest auth, old protocols)
+    - [x] status reason texts for every code, `http.status_text`
+    - [x] 204/304 without content-length or content-type; Content-Length on a stream
+    - [x] test helper `http.request` splits off the query
+    - [ ] repeated headers; trailers; cookie Domain/Expires
+    - [ ] server options: bind address, body size limit, timeouts
+    - [ ] language: hex literals, `\u{...}` escapes, calling a stored
+          function `r.handler(x)`, `if a is some(x) or ...` message
+    - [ ] stdlib: seeded random, wall-clock ms, relative `url.parse`,
+          JSON field renames/omit-empty, env listing, Duration compare/divide
+    - [x] docs: `http.bytes` example, query/path decoding, middleware order
+    - [x] tests over real connections (compiler/tests/wire, curl)
 
 - [x] **Learn from fasthttp** (benchmarks/http/README.md; next step below): why Go's fasthttp beats net/http (buffer and
       object reuse, no per-request allocations, lazy header parsing, worker

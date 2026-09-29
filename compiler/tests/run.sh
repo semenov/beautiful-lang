@@ -5,6 +5,7 @@
 # - nothing may leak
 cd "$(dirname "$0")/run" || exit 1
 LANG_BIN=${LANG_BIN:-../../target/release/lang}
+case $LANG_BIN in /*) ;; *) LANG_BIN=$(pwd)/$LANG_BIN ;; esac
 fail=0
 for f in *.lang; do
   name=${f%.lang}
@@ -26,6 +27,15 @@ for f in *.lang; do
     echo "FAIL $f: memory error"; head -20 /tmp/lang-test-err; fail=1
   fi
 done
+# over real connections: each script's output must match its .out
+cd ../wire || exit 1
+for f in *.sh; do
+  out=$(LANG_BIN=$LANG_BIN ./"$f" 2>/dev/null)
+  if [ "$out" != "$(cat "${f%.sh}.out")" ]; then
+    echo "FAIL wire/$f: output differs"; echo "$out"; fail=1
+  fi
+done
+cd ../run || exit 1
 # the language's own code is laid out the standard way
 if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then
   echo "FAIL lang fmt --check:"; cat /tmp/lang-fmt-err; fail=1

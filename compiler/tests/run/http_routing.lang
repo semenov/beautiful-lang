@@ -1,0 +1,34 @@
+// Routing on the raw path, every method, 405 with Allow, OPTIONS, the
+// query with repeated names, cookies that can't carry extra attributes.
+import crypto
+import http
+
+fn show(res: http.Response) -> String {
+  let allow = res.headers["allow"] ?? "-"
+  let body = try res.text() catch err {
+    "?"
+  }
+  return "${res.status} ${http.status_text(res.status)} [${body}] allow=${allow}"
+}
+
+fn main() throws {
+  var router = http.Router()
+  router.get("/echo/:p", req => http.text(200, "p=${req.param("p") ?? ""} raw=${req.raw_path}"))
+  router.get("/c+d", req => http.text(200, "plus"))
+  router.patch("/items/:id", req => http.text(200, "patched ${req.param("id") ?? ""}"))
+  router.add("propfind", pattern: "/dav/*path", handler: req => http.text(207, "dav ${req.param("path") ?? ""}"))
+  router.any("/anything/*rest", req => http.text(200, "${req.method} ${req.param("rest") ?? ""}"))
+  router.get("/q", req => http.text(200, "q=${req.query("q") ?? ""} tags=${req.query_all("tag")}"))
+  router.get("/cookie", req => http.text(200, "ok").with_cookie(http.Cookie(name: "s", value: "x; Domain=evil.com", domain: "example.com")))
+  router.get("/typed", req => http.text(200, "<b>hi</b>").with_header("Content-Type", "text/html"))
+
+  for call in [["GET", "/echo/a+b%2Fc"], ["GET", "/c+d"], ["PATCH", "/items/7"], ["PROPFIND", "/dav/a/b%20c"], ["DELETE", "/anything/x/y"], ["GET", "/q?q=a+b&tag=x&tag=y%21"], ["DELETE", "/q"], ["OPTIONS", "/items/7"], ["GET", "/nope"]] {
+    print("${call[0]} ${call[1]}: ${show(try router.handle(http.request(call[0], path: call[1])))}")
+  }
+  let c = try router.handle(http.request("GET", path: "/cookie"))
+  print(c.headers["set-cookie"] ?? "")
+  let t = try router.handle(http.request("GET", path: "/typed"))
+  print("${t.headers.keys()}")
+  print("${http.status_text(418)} / ${http.status_text(999)}.")
+  print(crypto.md5("abc".bytes()).hex())
+}

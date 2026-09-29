@@ -663,12 +663,23 @@ pub type Request {
   body: Bytes
   // from the route pattern: "/notes/:id" gives "id"
   params: Map<String, String> = {}
-  // from "?q=word&page=2"
+  // from "?q=word&page=2"; a name given twice keeps its last value (all
+  // of them: `query_all`)
   query_params: Map<String, String> = {}
+  // the path as sent, still %-encoded: "/files/a%2Fb"
+  raw_path: String = ""
+  // the query as sent, without "?": "q=a+b&tag=x&tag=y"
+  raw_query: String = ""
+  // the client's address: "203.0.113.5", "2001:db8::1" (behind a proxy,
+  // the proxy's; see the "x-forwarded-for" header)
+  client_ip: String = ""
   // A part of the path matched by `:name` in the route.
   pub fn param(self, name: String) -> String?
   // A value from the query: `?page=2` gives query("page") == "2".
   pub fn query(self, name: String) -> String?
+  // Every value of a query parameter given several times:
+  // `?tag=a&tag=b` gives ["a", "b"].
+  pub fn query_all(self, name: String) -> List<String>
   // A header, by its name in any case.
   pub fn header(self, name: String) -> String?
   // The body as text; an error if it isn't valid UTF-8.
@@ -706,6 +717,8 @@ pub type Cookie {
   secure: Bool = false
   // "Lax", "Strict" or "None"
   same_site: String = "Lax"
+  // also for subdomains of this one: "example.com"; empty: only this host
+  domain: String = ""
 }
 
 // How long a client request took, each from its start. Connections are
@@ -748,7 +761,7 @@ pub fn html(status: Int, body: String) -> Response
 // The value as JSON (see the `json` module).
 pub fn json<T>(status: Int, value: T) -> Response
 
-// Any bytes: `http.bytes(200, png, content_type: "image/png")`.
+// Any bytes: `http.bytes(200, data: png, content_type: "image/png")`.
 pub fn bytes(status: Int, data: Bytes, content_type: String) -> Response
 
 // A body written piece by piece while the client already receives it:
@@ -795,6 +808,12 @@ pub type Router {
   pub mutating fn post(pattern: String, handler: fn(Request) throws -> Response)
   pub mutating fn put(pattern: String, handler: fn(Request) throws -> Response)
   pub mutating fn delete(pattern: String, handler: fn(Request) throws -> Response)
+  pub mutating fn patch(pattern: String, handler: fn(Request) throws -> Response)
+  // Any other method: add("PROPFIND", pattern: "/dav/*path", handler: ...). HEAD is answered
+  // by GET routes and OPTIONS by the router itself unless added here.
+  pub mutating fn add(method: String, pattern: String, handler: fn(Request) throws -> Response)
+  // Every method: any("/anything/*rest", ...).
+  pub mutating fn any(pattern: String, handler: fn(Request) throws -> Response)
   // A WebSocket endpoint: the connection is upgraded and `handler` talks
   // over it until it returns (the connection then closes).
   //   router.websocket("/chat", ws => try chat(ws))
@@ -823,7 +842,11 @@ pub fn mime_type(path: String) -> String
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 // With a body: `var req = http.request("POST", "/notes")`, then
 // `req.body = "{\"title\": \"x\"}".bytes()`.
+// The path may have a query: `http.request("GET", "/search?q=x")`.
 pub fn request(method: String, path: String) -> Request
+
+// The reason phrase of a status code: 404 -> "Not Found"; "" if unknown.
+pub fn status_text(status: Int) -> String
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
 // It logs "listening on http://localhost:<port>" when ready, and "stopped".
@@ -1069,10 +1092,13 @@ crypto.verify_password(attempt, stored)           // later
 
 ```
 pub fn sha256(data: Bytes) -> Bytes
-// A signature of `data` with a secret `key` (webhooks, tokens).
 // SHA-1, for protocols that require it (WebSocket handshakes, git). It
 // isn't collision-safe: use sha256 for anything new.
 pub fn sha1(data: Bytes) -> Bytes
+// MD5, for protocols and formats that require it (HTTP digest auth, old
+// checksums). Broken for security: use sha256 for anything new.
+pub fn md5(data: Bytes) -> Bytes
+// A signature of `data` with a secret `key` (webhooks, tokens).
 pub fn hmac_sha256(key: Bytes, data: Bytes) -> Bytes
 // A key derived from a password (PBKDF2 with HMAC-SHA256).
 pub fn pbkdf2_sha256(password: Bytes, salt: Bytes, iterations: Int, length: Int) -> Bytes

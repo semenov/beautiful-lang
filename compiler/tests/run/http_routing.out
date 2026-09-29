@@ -1,0 +1,13 @@
+GET /echo/a+b%2Fc: 200 OK [p=a+b/c raw=/echo/a+b%2Fc] allow=-
+GET /c+d: 200 OK [plus] allow=-
+PATCH /items/7: 200 OK [patched 7] allow=-
+PROPFIND /dav/a/b%20c: 207 Multi-Status [dav a/b c] allow=-
+DELETE /anything/x/y: 200 OK [DELETE x/y] allow=-
+GET /q?q=a+b&tag=x&tag=y%21: 200 OK [q=a b tags=["x", "y!"]] allow=-
+DELETE /q: 405 Method Not Allowed [method not allowed] allow=GET, HEAD, OPTIONS
+OPTIONS /items/7: 204 No Content [] allow=PATCH, OPTIONS
+GET /nope: 404 Not Found [not found] allow=-
+s=xDomain=evil.com; Path=/; SameSite=Lax; Domain=example.com; HttpOnly
+["content-type"]
+I'm a teapot / .
+900150983cd24fb0d6963f7d28e17f72

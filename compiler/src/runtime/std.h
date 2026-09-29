@@ -861,6 +861,57 @@ static void lt_sha256_final(lt_sha256 *s, unsigned char out[32]) {
     }
 }
 
+// MD5: only for protocols that require it (HTTP digest auth, ETags,
+// checksums of old formats); broken for anything that needs security.
+static lt_bytes *lt_crypto_md5(lt_bytes *d) {
+    static const uint32_t K[64] = {
+        0xd76aa478, 0xe8c7b756, 0x242070db, 0xc1bdceee, 0xf57c0faf, 0x4787c62a, 0xa8304613, 0xfd469501,
+        0x698098d8, 0x8b44f7af, 0xffff5bb1, 0x895cd7be, 0x6b901122, 0xfd987193, 0xa679438e, 0x49b40821,
+        0xf61e2562, 0xc040b340, 0x265e5a51, 0xe9b6c7aa, 0xd62f105d, 0x02441453, 0xd8a1e681, 0xe7d3fbc8,
+        0x21e1cde6, 0xc33707d6, 0xf4d50d87, 0x455a14ed, 0xa9e3e905, 0xfcefa3f8, 0x676f02d9, 0x8d2a4c8a,
+        0xfffa3942, 0x8771f681, 0x6d9d6122, 0xfde5380c, 0xa4beea44, 0x4bdecfa9, 0xf6bb4b60, 0xbebfbc70,
+        0x289b7ec6, 0xeaa127fa, 0xd4ef3085, 0x04881d05, 0xd9d4d039, 0xe6db99e5, 0x1fa27cf8, 0xc4ac5665,
+        0xf4292244, 0x432aff97, 0xab9423a7, 0xfc93a039, 0x655b59c3, 0x8f0ccc92, 0xffeff47d, 0x85845dd1,
+        0x6fa87e4f, 0xfe2ce6e0, 0xa3014314, 0x4e0811a1, 0xf7537e82, 0xbd3af235, 0x2ad7d2bb, 0xeb86d391 };
+    static const int R[64] = { 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
+        5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14, 20,
+        4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
+        6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21 };
+    uint32_t h[4] = { 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476 };
+    uint64_t bits = (uint64_t)d->len * 8;
+    int64_t total = ((d->len + 9 + 63) / 64) * 64;
+    unsigned char *m = (unsigned char *)calloc((size_t)total, 1);
+    memcpy(m, d->data, (size_t)d->len);
+    m[d->len] = 0x80;
+    for (int i = 0; i < 8; i++) m[total - 8 + i] = (unsigned char)(bits >> (8 * i));
+    for (int64_t off = 0; off < total; off += 64) {
+        uint32_t w[16];
+        for (int i = 0; i < 16; i++) w[i] = (uint32_t)m[off + 4 * i] | (uint32_t)m[off + 4 * i + 1] << 8 | (uint32_t)m[off + 4 * i + 2] << 16 | (uint32_t)m[off + 4 * i + 3] << 24;
+        uint32_t a = h[0], b = h[1], c = h[2], dd = h[3];
+        for (int i = 0; i < 64; i++) {
+            uint32_t f;
+            int g;
+            if (i < 16) { f = (b & c) | (~b & dd); g = i; }
+            else if (i < 32) { f = (dd & b) | (~dd & c); g = (5 * i + 1) % 16; }
+            else if (i < 48) { f = b ^ c ^ dd; g = (3 * i + 5) % 16; }
+            else { f = c ^ (b | ~dd); g = (7 * i) % 16; }
+            uint32_t tmp = dd;
+            dd = c;
+            c = b;
+            uint32_t x = a + f + K[i] + w[g];
+            b = b + ((x << R[i]) | (x >> (32 - R[i])));
+            a = tmp;
+        }
+        h[0] += a; h[1] += b; h[2] += c; h[3] += dd;
+    }
+    free(m);
+    lt_bytes *out = lt_bytes_new(16);
+    for (int i = 0; i < 4; i++)
+        for (int j = 0; j < 4; j++) out->data[4 * i + j] = (unsigned char)(h[i] >> (8 * j));
+    out->len = 16;
+    return out;
+}
+
 // SHA-1: only for protocols that require it (WebSocket handshakes, git);
 // it isn't safe against collisions: use sha256 for anything new.
 static lt_bytes *lt_crypto_sha1(lt_bytes *d) {
@@ -1780,3 +1831,86 @@ static lt_text *lt_tz_local(void) {
     }
     return lt_text_cstr("UTC");
 }
+
+// ---------------------------------------------------------------- http (used without a server too)
+
+// `plus`: `+` is a space (queries); in paths it's a plus
+static lt_text *lt_url_decode(const char *s, int64_t n, bool plus) {
+  lt_text *t = lt_text_new(n); int64_t w = 0;
+  for (int64_t i = 0; i < n; i++) {
+    if (s[i] == '%' && i + 2 < n && lt_hex(s[i + 1]) >= 0 && lt_hex(s[i + 2]) >= 0) { t->data[w++] = (char)(lt_hex(s[i + 1]) * 16 + lt_hex(s[i + 2])); i += 2; }
+    else t->data[w++] = (plus && s[i] == '+') ? ' ' : s[i];
+  }
+  t->len = w; t->data[w] = 0; return t;
+}
+
+
+// the IANA reason phrases
+static const char *lt_http_reason(int64_t s) {
+    switch (s) {
+    case 100: return "Continue";
+    case 101: return "Switching Protocols";
+    case 102: return "Processing";
+    case 103: return "Early Hints";
+    case 200: return "OK";
+    case 201: return "Created";
+    case 202: return "Accepted";
+    case 203: return "Non-Authoritative Information";
+    case 204: return "No Content";
+    case 205: return "Reset Content";
+    case 206: return "Partial Content";
+    case 207: return "Multi-Status";
+    case 208: return "Already Reported";
+    case 226: return "IM Used";
+    case 300: return "Multiple Choices";
+    case 301: return "Moved Permanently";
+    case 302: return "Found";
+    case 303: return "See Other";
+    case 304: return "Not Modified";
+    case 305: return "Use Proxy";
+    case 307: return "Temporary Redirect";
+    case 308: return "Permanent Redirect";
+    case 400: return "Bad Request";
+    case 401: return "Unauthorized";
+    case 402: return "Payment Required";
+    case 403: return "Forbidden";
+    case 404: return "Not Found";
+    case 405: return "Method Not Allowed";
+    case 406: return "Not Acceptable";
+    case 407: return "Proxy Authentication Required";
+    case 408: return "Request Timeout";
+    case 409: return "Conflict";
+    case 410: return "Gone";
+    case 411: return "Length Required";
+    case 412: return "Precondition Failed";
+    case 413: return "Content Too Large";
+    case 414: return "URI Too Long";
+    case 415: return "Unsupported Media Type";
+    case 416: return "Range Not Satisfiable";
+    case 417: return "Expectation Failed";
+    case 418: return "I'm a teapot";
+    case 421: return "Misdirected Request";
+    case 422: return "Unprocessable Content";
+    case 423: return "Locked";
+    case 424: return "Failed Dependency";
+    case 425: return "Too Early";
+    case 426: return "Upgrade Required";
+    case 428: return "Precondition Required";
+    case 429: return "Too Many Requests";
+    case 431: return "Request Header Fields Too Large";
+    case 451: return "Unavailable For Legal Reasons";
+    case 500: return "Internal Server Error";
+    case 501: return "Not Implemented";
+    case 502: return "Bad Gateway";
+    case 503: return "Service Unavailable";
+    case 504: return "Gateway Timeout";
+    case 505: return "HTTP Version Not Supported";
+    case 506: return "Variant Also Negotiates";
+    case 507: return "Insufficient Storage";
+    case 508: return "Loop Detected";
+    case 510: return "Not Extended";
+    case 511: return "Network Authentication Required";
+    default: return "";
+    }
+}
+static lt_text *lt_http_status_text(int64_t s) { return lt_text_cstr(lt_http_reason(s)); }

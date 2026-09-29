@@ -1,0 +1,10 @@
+3 bytes: abc
+10 bytes: from stdin
+2000000 bytes: zzzzz
+127.0.0.1
+HTTP/1.1 204 No Content
+connection: keep-alive
+
+content-length: 5
+12345
+0 not freed

@@ -1813,14 +1813,6 @@ static {rsc} lt_http_response_from(lt_http_out *o) {{
   if (o->headers) lt_free(o->headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)o->headers->cap);
   return ({rsc}){{ o->status, o->body, h, lt_text_from("", 0), (lt_fn){{0}}, lt_http_timing_value(o->timing, o->reused) }};
 }}
-static lt_text *lt_url_decode(const char *s, int64_t n) {{
-  lt_text *t = lt_text_new(n); int64_t w = 0;
-  for (int64_t i = 0; i < n; i++) {{
-    if (s[i] == '%' && i + 2 < n && lt_hex(s[i + 1]) >= 0 && lt_hex(s[i + 2]) >= 0) {{ t->data[w++] = (char)(lt_hex(s[i + 1]) * 16 + lt_hex(s[i + 2])); i += 2; }}
-    else t->data[w++] = s[i] == '+' ? ' ' : s[i];
-  }}
-  t->len = w; t->data[w] = 0; return t;
-}}
 #ifdef LT_THREADS
 static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *out) {{
   {mc} headers = {mc}_new(r->nheaders);
@@ -1829,10 +1821,10 @@ static void lt_http_dispatch(lt_fn handler, const lt_http_raw *r, lt_http_out *o
   for (int64_t i = 0; i < r->query_len;) {{
     int64_t j = i; while (j < r->query_len && r->query[j] != '&') j++;
     int64_t eq = i; while (eq < j && r->query[eq] != '=') eq++;
-    if (j > i) {mc}_put(&query, lt_url_decode(r->query + i, eq - i), eq < j ? lt_url_decode(r->query + eq + 1, j - eq - 1) : lt_text_from("", 0));
+    if (j > i) {mc}_put(&query, lt_url_decode(r->query + i, eq - i, true), eq < j ? lt_url_decode(r->query + eq + 1, j - eq - 1, true) : lt_text_from("", 0));
     i = j + 1;
   }}
-  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len), headers, lt_bytes_from(r->body, r->body_len), {mc}_new(0), query }};
+  {rqc} req = {{ lt_text_from(r->method, r->method_len), lt_url_decode(r->path, r->path_len, false), headers, lt_bytes_from(r->body, r->body_len), {mc}_new(0), query, lt_text_from(r->path, r->path_len), lt_text_from(r->query ? r->query : "", r->query_len), lt_text_cstr(r->client_ip ? r->client_ip : "") }};
   {rsc} resp;
   lt_err e = lt_http_call(handler, &req, &resp);
   if (e.obj) {{
@@ -2762,6 +2754,8 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "math.is_nan" => format!("isnan({})", a[0]),
             "math.infinity" => "INFINITY".to_string(),
             "url.encode" => format!("lt_url_encode({})", a[0]),
+            "http.__path_decode" => format!("({{ lt_text *p_ = {}; lt_url_decode(p_->data, p_->len, false); }})", a[0]),
+            "http.status_text" => format!("lt_http_status_text({})", a[0]),
             "url.decode" | "http.__url_decode" => format!("lt_url_decode_text({}, {})", a[0], a[1]),
             "csv.parse" | "csv.encode" | "csv.decode" => self.csv_intrinsic(name, tys, a),
             "sql.decode" => self.sql_decode(tys, a),
@@ -3036,6 +3030,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 }
             }
             "crypto.sha1" | "http.__sha1" => format!("lt_crypto_sha1({})", a[0]),
+            "crypto.md5" => format!("lt_crypto_md5({})", a[0]),
             "http.__ws_mask" => format!("lt_ws_mask({}, {})", a[0], a[1]),
             "crypto.hmac_sha256" => format!("lt_crypto_hmac({}, {})", a[0], a[1]),
             "crypto.pbkdf2_sha256" => format!("lt_crypto_pbkdf2({}, {}, {}, {}, {})", a[0], a[1], a[2], a[3], line),

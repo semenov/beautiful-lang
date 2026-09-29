@@ -29,8 +29,16 @@ pub type Request {
   body: Bytes
   // from the route pattern: "/notes/:id" gives "id"
   params: Map<String, String> = {}
-  // from "?q=word&page=2"
+  // from "?q=word&page=2"; a name given twice keeps its last value (all
+  // of them: `query_all`)
   query_params: Map<String, String> = {}
+  // the path as sent, still %-encoded: "/files/a%2Fb"
+  raw_path: String = ""
+  // the query as sent, without "?": "q=a+b&tag=x&tag=y"
+  raw_query: String = ""
+  // the client's address: "203.0.113.5", "2001:db8::1" (behind a proxy,
+  // the proxy's; see the "x-forwarded-for" header)
+  client_ip: String = ""
 
   // A part of the path matched by `:name` in the route.
   pub fn param(self, name: String) -> String? {
@@ -40,6 +48,25 @@ pub type Request {
   // A value from the query: `?page=2` gives query("page") == "2".
   pub fn query(self, name: String) -> String? {
     return self.query_params[name]
+  }
+
+  // Every value of a query parameter given several times:
+  // `?tag=a&tag=b` gives ["a", "b"].
+  pub fn query_all(self, name: String) -> List<String> {
+    var out: List<String> = []
+    for pair in self.raw_query.split("&") {
+      let kv = pair.split("=")
+      let key = try __url_decode(kv[0]) catch err {
+        continue
+      }
+      if key == name {
+        let value = if kv.length > 1 { pair.slice(from: kv[0].length + 1, to: pair.length) } else { "" }
+        out.append(try __url_decode(value) catch err {
+          value
+        })
+      }
+    }
+    return out
   }
 
   // A header, by its name in any case.
@@ -153,6 +180,23 @@ pub type Cookie {
   secure: Bool = false
   // "Lax", "Strict" or "None"
   same_site: String = "Lax"
+  // also for subdomains of this one: "example.com"; empty: only this host
+  domain: String = ""
+}
+
+// What a cookie's name, value or attribute may hold: characters that would
+// end it or start another attribute (`;`, `,`, spaces, quotes, control
+// characters) are dropped, as browsers and Go do. Encode such values
+// first (`url.encode`, `encoding.base64`).
+fn cookie_safe(text: String) -> String {
+  var out = ""
+  for c in text.chars() {
+    let code = c.bytes()[0]
+    if c.byte_length() == 1 and code > 32 and code < 127 and c != ";" and c != "," and c != "\"" and c != "\\" {
+      out = "${out}${c}"
+    }
+  }
+  return out
 }
 
 // How long a client request took, each from its start. Connections are
@@ -187,13 +231,17 @@ pub type Response {
   // A copy with one more header.
   pub fn with_header(self, name: String, value: String) -> Response {
     var r = self
-    r.headers[name] = value
+    // one header per name, in any case
+    r.headers[name.lower()] = value
     return r
   }
 
   // A copy that sets a cookie (several can be set).
   pub fn with_cookie(self, cookie: Cookie) -> Response {
-    var line = "${cookie.name}=${cookie.value}; Path=${cookie.path}; SameSite=${cookie.same_site}"
+    var line = "${cookie_safe(cookie.name).replace("=", "")}=${cookie_safe(cookie.value)}; Path=${cookie_safe(cookie.path)}; SameSite=${cookie_safe(cookie.same_site)}"
+    if not cookie.domain.is_empty() {
+      line = "${line}; Domain=${cookie_safe(cookie.domain)}"
+    }
     if cookie.max_age is some(age) {
       line = "${line}; Max-Age=${age}"
     }
@@ -235,7 +283,7 @@ pub fn json<T>(status: Int, value: T) -> Response {
   return Response(status: status, body: json.encode(value).bytes(), headers: {"content-type": "application/json"})
 }
 
-// Any bytes: `http.bytes(200, png, content_type: "image/png")`.
+// Any bytes: `http.bytes(200, data: png, content_type: "image/png")`.
 pub fn bytes(status: Int, data: Bytes, content_type: String) -> Response {
   return Response(status: status, body: data, headers: {"content-type": content_type})
 }
@@ -312,6 +360,21 @@ pub type Router {
     self.routes.append(Route(method: "DELETE", parts: split_path(pattern), handler: handler))
   }
 
+  pub mutating fn patch(pattern: String, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "PATCH", parts: split_path(pattern), handler: handler))
+  }
+
+  // Any other method: add("PROPFIND", pattern: "/dav/*path", handler: ...). HEAD is answered
+  // by GET routes and OPTIONS by the router itself unless added here.
+  pub mutating fn add(method: String, pattern: String, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: method.upper(), parts: split_path(pattern), handler: handler))
+  }
+
+  // Every method: any("/anything/*rest", ...).
+  pub mutating fn any(pattern: String, handler: fn(Request) throws -> Response) {
+    self.routes.append(Route(method: "*", parts: split_path(pattern), handler: handler))
+  }
+
   // A WebSocket endpoint: the connection is upgraded and `handler` talks
   // over it until it returns (the connection then closes).
   //   router.websocket("/chat", ws => try chat(ws))
@@ -343,8 +406,10 @@ pub type Router {
   }
 
   fn route(self, request: Request) throws -> Response {
-    let parts = split_path(request.path)
-    var path_found = false
+    // matched on the path as sent, so "%2F" inside a part stays in it
+    let raw = if request.raw_path.is_empty() { request.path } else { request.raw_path }
+    let parts = split_path(raw)
+    var allowed: List<String> = []
     for route in self.routes {
       let rest = route.parts.any(p => p.starts_with("*"))
       if rest and parts.length < route.parts.length - 1 {
@@ -358,12 +423,12 @@ pub type Router {
       for i in 0..<route.parts.length {
         let p = route.parts[i]
         if p.starts_with("*") {
-          params[p.slice(from: 1, to: p.length)] = parts.drop(i).join("/")
+          params[p.slice(from: 1, to: p.length)] = parts.drop(i).map(x => __path_decode(x)).join("/")
           break
         }
         if p.starts_with(":") {
-          params[p.slice(from: 1, to: p.length)] = parts[i]
-        } else if p != parts[i] {
+          params[p.slice(from: 1, to: p.length)] = __path_decode(parts[i])
+        } else if p != __path_decode(parts[i]) {
           same = false
           break
         }
@@ -371,8 +436,11 @@ pub type Router {
       if not same {
         continue
       }
-      path_found = true
-      if route.method != request.method and not (request.method == "HEAD" and route.method == "GET") {
+      let fits = route.method == "*" or route.method == request.method or (request.method == "HEAD" and route.method == "GET")
+      if not fits {
+        if not allowed.contains(route.method) {
+          allowed.append(route.method)
+        }
         continue
       }
       var req = request
@@ -380,10 +448,18 @@ pub type Router {
       let handler = route.handler
       return try handler(req)
     }
-    if path_found {
-      return text(405, "method not allowed")
+    if allowed.is_empty() {
+      return text(404, "not found")
     }
-    return text(404, "not found")
+    if allowed.contains("GET") and not allowed.contains("HEAD") {
+      allowed.append("HEAD")
+    }
+    allowed.append("OPTIONS")
+    let allow = allowed.join(", ")
+    if request.method == "OPTIONS" {
+      return Response(status: 204, body: Bytes()).with_header("allow", allow)
+    }
+    return text(405, "method not allowed").with_header("allow", allow)
   }
 }
 
@@ -450,9 +526,33 @@ fn __url_decode(text: String) throws -> String
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
 // With a body: `var req = http.request("POST", "/notes")`, then
 // `req.body = "{\"title\": \"x\"}".bytes()`.
+// The path may have a query: `http.request("GET", "/search?q=x")`.
 pub fn request(method: String, path: String) -> Request {
-  return Request(method: method, path: path, headers: {}, body: Bytes())
+  let q = path.index_of("?")
+  let raw_path = if q is some(i) { path.slice(from: 0, to: i) } else { path }
+  let raw_query = if q is some(i) { path.slice(from: i + 1, to: path.length) } else { "" }
+  var params: Map<String, String> = {}
+  for pair in raw_query.split("&") {
+    if pair.is_empty() {
+      continue
+    }
+    let kv = pair.split("=")
+    let key = try __url_decode(kv[0]) catch err {
+      kv[0]
+    }
+    let value = if kv.length > 1 { pair.slice(from: kv[0].length + 1, to: pair.length) } else { "" }
+    params[key] = try __url_decode(value) catch err {
+      value
+    }
+  }
+  let decoded = __path_decode(raw_path)
+  return Request(method: method, path: decoded, headers: {}, body: Bytes(), query_params: params, raw_path: raw_path, raw_query: raw_query, client_ip: "127.0.0.1")
 }
+
+fn __path_decode(path: String) -> String
+
+// The reason phrase of a status code: 404 -> "Not Found"; "" if unknown.
+pub fn status_text(status: Int) -> String
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
 // It logs "listening on http://localhost:<port>" when ready, and "stopped".
