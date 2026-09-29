@@ -2,9 +2,9 @@
 
 A small notes service: users, token login (HMAC), notes per user in SQLite
 (WAL), JSON in and out, validation, an auth check in every handler, and a
-log line per request. `lang/server.lang` (158 lines) and `go/main.go`
+log line per request. `lang/server.lang` (167 lines) and `go/main.go`
 (net/http, database/sql with mattn/go-sqlite3 (the same C SQLite),
-encoding/json, log/slog; 250 lines) have the same API.
+encoding/json, log/slog; 251 lines) have the same API.
 
 `load/` sets up users and notes, then sends a mix over keep-alive
 connections: 70% "list my 20 newest notes", 20% "get one note", 10% "create
