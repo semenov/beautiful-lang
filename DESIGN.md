@@ -555,9 +555,11 @@ wrong thing; Vlad chose (see `research/critique-response.md`):
   code is mostly library code; a helper that needs ordering or a method
   takes a function (`largest(xs, key: x => x.score)`) or an interface-typed
   list. `max`, `sum`, `sorted` keep their built-in knowledge of numbers.
-- **Fields are private unless `pub`**, like functions: a field without
-  `pub` is visible only in its file, so a type can guard its values
-  (`email.parse` is the only way to make an `Email`).
+- **Fields stay visible everywhere** (Vlad, after a second look). Most
+  types are data read by other files (JSON bodies, rows, configs); `pub` on
+  every field, or a second visibility keyword, would cost everywhere for
+  the few types that guard a rule. Those are built through a function
+  (`email.parse`) by convention.
 - **`is` looks through `cause`:** `err is files.NotFound` is true when the
   error or any error in its `cause` chain is one (Go's `errors.Is`).
 - **SQL from literal pieces:** a query may be chosen or joined from

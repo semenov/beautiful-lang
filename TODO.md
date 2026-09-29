@@ -20,7 +20,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] new errors: optional in text; `m[k] op=`; lambda + later-assigned
         var; unused let/import
   - [x] generic bounds: not added (Vlad, after a second look)
-  - [ ] fields private unless `pub`
+  - [x] private fields: not added (Vlad, after a second look)
   - [ ] `is` through `cause`
   - [ ] SQL from literal pieces; list parameters
   - [ ] name every argument after the first (2+ parameters)

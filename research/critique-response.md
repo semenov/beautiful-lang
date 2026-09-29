@@ -18,7 +18,7 @@ answer: does it keep the language simple and fast?
 | 7 | SQL only as one literal | **ask** |
 | 8 | an optional prints as `none` in text | **ask** (make it an error) |
 | 9 | `counts[w] += 1` compiles, then panics | **ask** (make it an error) |
-| 10 | no private fields | **ask** |
+| 10 | no private fields | **explain**: asked; fields stay visible (most types are data) |
 | 11 | wrapping an error hides its type | **ask** (`is` looks through `cause`) |
 | 12 | lambdas capture a snapshot silently | **ask** (an error when the captured `var` changes later) |
 | 13 | two ways to call a 2-parameter function | **ask** |
