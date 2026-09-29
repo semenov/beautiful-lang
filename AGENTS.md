@@ -252,12 +252,17 @@ let n = if args.length > 0 { try args[0].to_int() } else { usage("no count") }
 - `Int` is 64-bit and `Float` is 64-bit. There are no implicit conversions:
   `n.to_float()`, `f.round()`, `f.floor()`, `f.ceil()`.
 - **`/` on two `Int`s is an error.** Write `a.div(b)` (whole numbers) or
-  `a.to_float() / b.to_float()`.
+  `a.to_float() / b.to_float()`. `div` and `%` round down, toward minus
+  infinity, as in Python: `(-7).div(2) == -4`, `(-7) % 2 == 1`, so
+  `(-1) % 7 == 6` (Go, Rust, C and JS give `-3` and `-1`: mind it when
+  porting code that handles negative numbers).
 - Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`;
   `0xFF`, `0b1010`, `0o755`, `1_000_000`.
 - String to numbers: `try text.to_int()`, `try text.to_float()`.
 - **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
-  `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;
+  `+ -` are exact, `*` is exact up to 18 digits after the point (then it
+  rounds half up), and a result past 18 significant digits stops the
+  program ("Decimal overflow"); `/` is `a.div(b, places: 2)`; `x.round(2)`;
   `n.to_decimal()` from an Int; `1.50` prints as `1.50` and equals `1.5`.
   JSON carries it exactly as a number; as a SQL parameter it is sent as
   text (`"19.99"`), and `query<T>` reads it back into a `Decimal` field.
@@ -337,6 +342,25 @@ resources, `http.serve` stops, and the exit status is 130. A loop that
 doesn't wait checks `process.interrupted()`. A second Ctrl-C exits at once.
 (A program started with `&` from a script ignores SIGINT, as the shell
 asks; SIGTERM still works.)
+
+Work after the response (a welcome email): a handler waits for the tasks
+it starts, so `spawn` there would hold the reply. Start one worker in
+`main` and give it jobs through a channel:
+
+```
+fn main() throws {
+  let emails = Channel<String>(capacity: 1000)
+  let worker = spawn send_emails(emails)        // for address in emails { ... }
+  var router = http.Router()
+  router.post("/signup", req => {
+    let _ = emails.try_send(req.text())         // queued: the reply doesn't wait
+    http.text(201, "welcome")
+  })
+  try http.serve(router, port: 8080)
+  emails.close()                                // then the worker finishes
+  try worker.wait()
+}
+```
 
 Sending to many listeners (chat, live updates over WebSockets): one
 `Channel` per listener, kept in a `Shared` map. The sender uses

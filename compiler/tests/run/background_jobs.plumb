@@ -1,0 +1,28 @@
+// Work after the response: a worker started in main takes jobs from a
+// channel, so the handler replies at once.
+
+import http
+import time
+
+fn send_emails(emails: Channel<String>) throws {
+  for address in emails {
+    try time.sleep(time.millis(10))
+    print("sent to ${address}")
+  }
+}
+
+fn main() throws {
+  let emails = Channel<String>(capacity: 1000)
+  let worker = spawn send_emails(emails)
+  var router = http.Router()
+  router.post("/signup", req => {
+    let _ = emails.try_send(req.text())
+    http.text(201, "welcome")
+  })
+  var req = http.request("POST", path: "/signup")
+  req.body = "a@b.c".bytes()
+  let res = try router.handle(req)
+  print("${res.status} before the email is sent")
+  emails.close()
+  try worker.wait()
+}

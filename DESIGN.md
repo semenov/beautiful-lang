@@ -430,8 +430,10 @@ used result is always a mutation or an action. The rule also catches the
   Inside the block the value is changed like an ordinary variable; other
   tasks wait at the entrance; the lock is released at the end of the block,
   even on an error. There is no `update`. A `lock()` directly inside another
-  `lock()` is a compile error; a deadlock through function calls is reported
-  at runtime instead of hanging.
+  `lock()` is a compile error. A deadlock through function calls is
+  reported at runtime only when every task waits and nothing else (no
+  timer, no socket) could wake one; in a server, a lock cycle between two
+  requests just hangs them, so keep one lock at a time.
 - **Processes:** `process.run("git", ["log", "-n", "5"])` takes a list of
   arguments, not a shell string.
 - **Time:** `Instant` and `Date` are different types. Time zones are always
