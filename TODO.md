@@ -61,7 +61,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 ## Stdlib gaps from the npm review (research/npm-top-packages.md), in order
 
 - [x] `files.walk`, `files.glob`, `path.matches`, `files.delete_all`
-- [ ] `term`: colors (off when not a terminal / NO_COLOR), text width, tables,
+- [x] `term`: colors (off when not a terminal / NO_COLOR), text width, tables,
       questions (yes/no, password), a progress line
 - [ ] `time`: format and parse with a pattern, time zones, `Date`,
       `parse_duration`, printing durations
@@ -74,7 +74,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
       (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
       chunks, partition, index_of, find_index), log levels and JSON logs
-- [ ] still small: byte sizes, decode key naming, log fields, cli subcommands
+- [ ] still small: decode key naming, log fields, cli subcommands
 - [ ] signals: Ctrl-C cancels `main` so `with` blocks close (design first)
 - [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
 - [ ] packages: jwt, smtp, s3, mysql, semver, markdown, yaml (maybe stdlib)

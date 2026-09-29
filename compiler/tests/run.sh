@@ -9,13 +9,13 @@ fail=0
 for f in *.lang; do
   name=${f%.lang}
   if [ -f "$name.out" ]; then
-    out=$($LANG_BIN run --debug "$f" 2>/tmp/lang-test-err)
+    out=$($LANG_BIN run --debug "$f" 2>/tmp/lang-test-err </dev/null)
     if [ "$out" != "$(cat "$name.out")" ]; then
       echo "FAIL $f: output differs"; fail=1
     fi
   fi
   if grep -q '^test "' "$f"; then
-    if ! $LANG_BIN test --debug "$f" >/tmp/lang-test-out 2>/tmp/lang-test-err; then
+    if ! $LANG_BIN test --debug "$f" >/tmp/lang-test-out 2>/tmp/lang-test-err </dev/null; then
       if [ "$name" != "failing" ]; then echo "FAIL $f: tests failed"; cat /tmp/lang-test-out; fail=1; fi
     fi
   fi

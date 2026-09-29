@@ -1,0 +1,8 @@
+import term
+
+fn main() throws {
+  print("${term.green("ok")} ${term.bold("bold")} plain")
+  print("${term.width("hello")} ${term.width("日本語")} ${term.width(term.red("red"))} ${term.width("👍x")}")
+  print(term.table([["name", "size", "note"], ["a.txt", term.size(1536), "日本"], ["longer-name.bin", term.size(5000000000), ""]]))
+  print("${term.size(10)} ${term.size(1048576)}")
+}

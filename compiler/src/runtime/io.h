@@ -645,3 +645,140 @@ static const char *lt_ca_file(void) {
 #define LT_NO_CA "no trusted certificates on this system (install the ca-certificates package, or set SSL_CERT_FILE)"
 #endif
 
+
+// ---- the terminal
+
+#include <termios.h>
+
+static int lt_color_on = -1;
+
+// Colors only for a terminal, and never with NO_COLOR; FORCE_COLOR forces them.
+static bool lt_term_colors(void) {
+    if (lt_color_on < 0) {
+        const char *force = getenv("FORCE_COLOR");
+        const char *no = getenv("NO_COLOR");
+        const char *term = getenv("TERM");
+        if (force && *force && strcmp(force, "0") != 0) lt_color_on = 1;
+        else if (no && *no) lt_color_on = 0;
+        else lt_color_on = isatty(1) && !(term && strcmp(term, "dumb") == 0);
+    }
+    return lt_color_on;
+}
+
+static lt_text *lt_term_style(lt_text *t, const char *on, const char *off) {
+    if (!lt_term_colors()) {
+        lt_text_dup(t);
+        return t;
+    }
+    size_t a = strlen(on), b = strlen(off);
+    lt_text *r = lt_text_new(t->len + (int64_t)(a + b));
+    memcpy(r->data, on, a);
+    memcpy(r->data + a, t->data, (size_t)t->len);
+    memcpy(r->data + a + (size_t)t->len, off, b);
+    r->data[r->len] = 0;
+    return r;
+}
+
+// Without ANSI escape codes.
+static lt_text *lt_term_strip(lt_text *t) {
+    lt_text *r = lt_text_new(t->len);
+    int64_t w = 0;
+    for (int64_t i = 0; i < t->len; i++) {
+        if (t->data[i] == 0x1b && i + 1 < t->len && t->data[i + 1] == '[') {
+            i += 2;
+            while (i < t->len && !(t->data[i] >= 0x40 && t->data[i] <= 0x7e)) i++;
+            continue;
+        }
+        r->data[w++] = t->data[i];
+    }
+    r->len = w;
+    r->data[w] = 0;
+    return r;
+}
+
+// Columns a code point takes: 0 for combining marks, 2 for wide (CJK,
+// emoji), 1 otherwise.
+static int lt_cp_width(uint32_t c) {
+    if (c == 0 || (c >= 0x300 && c <= 0x36f) || (c >= 0x200b && c <= 0x200f) || c == 0xfe0f || (c >= 0x1ab0 && c <= 0x1aff) || (c >= 0x20d0 && c <= 0x20ff)) return 0;
+    if ((c >= 0x1100 && c <= 0x115f) || (c >= 0x2e80 && c <= 0xa4cf) || (c >= 0xac00 && c <= 0xd7a3) || (c >= 0xf900 && c <= 0xfaff) || (c >= 0xfe30 && c <= 0xfe4f) ||
+        (c >= 0xff00 && c <= 0xff60) || (c >= 0xffe0 && c <= 0xffe6) || (c >= 0x1f300 && c <= 0x1f64f) || (c >= 0x1f900 && c <= 0x1f9ff) || (c >= 0x1f680 && c <= 0x1f6ff) ||
+        (c >= 0x2600 && c <= 0x27bf && c >= 0x2614) || (c >= 0x20000 && c <= 0x3fffd))
+        return 2;
+    return 1;
+}
+
+static int64_t lt_term_width(lt_text *t) {
+    int64_t w = 0;
+    const unsigned char *s = (const unsigned char *)t->data, *e = s + t->len;
+    while (s < e) {
+        if (*s == 0x1b && s + 1 < e && s[1] == '[') {
+            s += 2;
+            while (s < e && !(*s >= 0x40 && *s <= 0x7e)) s++;
+            if (s < e) s++;
+            continue;
+        }
+        uint32_t c = *s;
+        int n = 1;
+        if (c >= 0xf0) c &= 0x07, n = 4;
+        else if (c >= 0xe0) c &= 0x0f, n = 3;
+        else if (c >= 0xc0) c &= 0x1f, n = 2;
+        for (int i = 1; i < n && s + i < e; i++) c = (c << 6) | (s[i] & 0x3f);
+        s += n;
+        w += lt_cp_width(c);
+    }
+    return w;
+}
+
+static void lt_term_prompt(lt_text *q) {
+    fflush(stdout);
+    fwrite(q->data, 1, (size_t)q->len, stdout);
+    if (q->len && q->data[q->len - 1] != ' ') fputc(' ', stdout);
+    fflush(stdout);
+}
+
+// Asks and returns the answer (without the line break); an error at the end
+// of the input.
+static lt_err lt_term_ask(lt_text *q, lt_text **out) {
+    lt_term_prompt(q);
+    lt_text *line = NULL;
+    lt_err e = lt_io_read_line(&line);
+    if (e.obj) return e;
+    if (!line) return lt_make_failure(lt_text_cstr("term: no answer (the input ended)"));
+    *out = line;
+    return (lt_err){ 0 };
+}
+
+// The same, without showing what's typed (passwords).
+static lt_err lt_term_secret(lt_text *q, lt_text **out) {
+    struct termios old, quiet;
+    bool tty = isatty(0) && tcgetattr(0, &old) == 0;
+    if (tty) {
+        quiet = old;
+        quiet.c_lflag &= ~(tcflag_t)ECHO;
+        tcsetattr(0, TCSAFLUSH, &quiet);
+    }
+    lt_err e = lt_term_ask(q, out);
+    if (tty) {
+        tcsetattr(0, TCSAFLUSH, &old);
+        fputc('\n', stdout);
+        fflush(stdout);
+    }
+    return e;
+}
+
+// A progress line on standard error, redrawn in place (only on a terminal).
+static void lt_term_progress(int64_t done, int64_t total, lt_text *label) {
+    if (!isatty(2)) return;
+    int width = 30;
+    double f = total > 0 ? (double)done / (double)total : 0;
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    int full = (int)(f * width + 0.5);
+    char bar[64];
+    for (int i = 0; i < width; i++) bar[i] = i < full ? '#' : '.';
+    bar[width] = 0;
+    fflush(stdout);
+    fprintf(stderr, "\r[%s] %3d%% %.*s\x1b[K", bar, (int)(f * 100 + 0.5), (int)label->len, label->data);
+    if (done >= total) fputc('\n', stderr);
+    fflush(stderr);
+}

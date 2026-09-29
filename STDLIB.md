@@ -5,7 +5,7 @@ declarations with their comments, bodies left out. `import <module>`,
 then use `module.name`. Functions without a body are built into the
 compiler and runtime.
 
-Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`url`](#url), [`zlib`](#zlib), [`math`](#math), and the [prelude](#prelude)
+Modules: [`files`](#files), [`path`](#path), [`io`](#io), [`process`](#process), [`env`](#env), [`cli`](#cli), [`term`](#term), [`log`](#log), [`time`](#time), [`json`](#json), [`http`](#http), [`net`](#net), [`sql`](#sql), [`db`](#db), [`crypto`](#crypto), [`encoding`](#encoding), [`random`](#random), [`regex`](#regex), [`csv`](#csv), [`xml`](#xml), [`url`](#url), [`zlib`](#zlib), [`math`](#math), and the [prelude](#prelude)
 (available everywhere without `import`).
 
 ## files
@@ -237,6 +237,70 @@ required ones are errors that show the usage.
 
 ```
 pub fn decode<T>() throws -> T
+```
+
+## term
+
+term: the terminal: colors, questions, tables and progress for CLI tools.
+
+```
+print("${term.green("ok")} ${term.bold(name)}")
+let name = try term.ask("Project name?")
+if try term.confirm("Delete ${n} files?") { ... }
+print(term.table([["name", "size"], ["a.txt", term.size(1536)]]))
+```
+
+Colors are added only when the output is a terminal and NO_COLOR isn't
+set (FORCE_COLOR turns them on anyway), so piping into a file or another
+program gives plain text.
+
+```
+// Whether standard output is a terminal (not a file or a pipe).
+pub fn is_terminal() -> Bool
+
+pub fn bold(text: Text) -> Text
+pub fn dim(text: Text) -> Text
+pub fn italic(text: Text) -> Text
+pub fn underline(text: Text) -> Text
+pub fn red(text: Text) -> Text
+pub fn green(text: Text) -> Text
+pub fn yellow(text: Text) -> Text
+pub fn blue(text: Text) -> Text
+pub fn magenta(text: Text) -> Text
+pub fn cyan(text: Text) -> Text
+pub fn gray(text: Text) -> Text
+
+// The text without color codes.
+pub fn strip(text: Text) -> Text
+
+// How many columns the text takes on screen: wide characters (Chinese,
+// emoji) take 2, color codes none.
+pub fn width(text: Text) -> Int
+
+// The text padded with spaces to `columns` on screen.
+pub fn pad(text: Text, columns: Int) -> Text
+
+// Rows as aligned columns; the first row is the header (underlined when
+// colors are on). Lines end without trailing spaces.
+pub fn table(rows: List<List<Text>>) -> Text
+
+// A size in bytes for people: 512 B, 1.5 KB, 23.4 MB, 1.2 GB (1 KB = 1024 B).
+pub fn size(bytes: Int) -> Text
+
+// Asks a question on the terminal and returns the answer (without the line
+// break); an error if the input has ended.
+pub fn ask(question: Text) throws -> Text
+
+// Asks until the answer is yes or no (y / n; an empty answer is no).
+pub fn confirm(question: Text) throws -> Bool
+
+// Asks without showing what's typed: passwords.
+pub fn secret(question: Text) throws -> Text
+
+// Draws a progress line on standard error: [#########.....]  60% label.
+// Call it as work advances; at `done == total` it ends the line. Nothing is
+// drawn when standard error isn't a terminal.
+pub fn progress(done: Int, total: Int, label: Text)
 ```
 
 ## log

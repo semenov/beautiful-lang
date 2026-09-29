@@ -16,7 +16,7 @@ SRC = ROOT / "compiler" / "src"
 
 # The order modules appear in: most used first.
 ORDER = [
-    "files", "path", "io", "process", "env", "cli", "log", "time", "json",
+    "files", "path", "io", "process", "env", "cli", "term", "log", "time", "json",
     "http", "net", "sql", "db", "crypto", "encoding", "random", "regex",
     "csv", "xml", "url", "zlib", "math",
 ]

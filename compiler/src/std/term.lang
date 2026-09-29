@@ -1,0 +1,112 @@
+// term: the terminal: colors, questions, tables and progress for CLI tools.
+//
+//   print("${term.green("ok")} ${term.bold(name)}")
+//   let name = try term.ask("Project name?")
+//   if try term.confirm("Delete ${n} files?") { ... }
+//   print(term.table([["name", "size"], ["a.txt", term.size(1536)]]))
+//
+// Colors are added only when the output is a terminal and NO_COLOR isn't
+// set (FORCE_COLOR turns them on anyway), so piping into a file or another
+// program gives plain text.
+
+// Whether standard output is a terminal (not a file or a pipe).
+pub fn is_terminal() -> Bool
+
+pub fn bold(text: Text) -> Text
+pub fn dim(text: Text) -> Text
+pub fn italic(text: Text) -> Text
+pub fn underline(text: Text) -> Text
+pub fn red(text: Text) -> Text
+pub fn green(text: Text) -> Text
+pub fn yellow(text: Text) -> Text
+pub fn blue(text: Text) -> Text
+pub fn magenta(text: Text) -> Text
+pub fn cyan(text: Text) -> Text
+pub fn gray(text: Text) -> Text
+
+// The text without color codes.
+pub fn strip(text: Text) -> Text
+
+// How many columns the text takes on screen: wide characters (Chinese,
+// emoji) take 2, color codes none.
+pub fn width(text: Text) -> Int
+
+// The text padded with spaces to `columns` on screen.
+pub fn pad(text: Text, columns: Int) -> Text {
+  let w = width(text)
+  if w >= columns {
+    return text
+  }
+  return "${text}${" ".repeat(columns - w)}"
+}
+
+// Rows as aligned columns; the first row is the header (underlined when
+// colors are on). Lines end without trailing spaces.
+pub fn table(rows: List<List<Text>>) -> Text {
+  var widths: List<Int> = []
+  for row in rows {
+    for i in 0..<row.length {
+      let w = width(row[i])
+      if i >= widths.length {
+        widths.append(w)
+      } else if w > widths[i] {
+        widths[i] = w
+      }
+    }
+  }
+  var lines: List<Text> = []
+  for r in rows.indexed() {
+    var cells: List<Text> = []
+    for i in 0..<r.value.length {
+      let cell = if r.index == 0 { bold(r.value[i]) } else { r.value[i] }
+      cells.append(if i + 1 < r.value.length { pad(cell, columns: widths[i]) } else { cell })
+    }
+    var line = cells.join("  ")
+    while line.ends_with(" ") {
+      line = line.slice(from: 0, to: line.length - 1)
+    }
+    lines.append(line)
+  }
+  return lines.join("\n")
+}
+
+// A size in bytes for people: 512 B, 1.5 KB, 23.4 MB, 1.2 GB (1 KB = 1024 B).
+pub fn size(bytes: Int) -> Text {
+  if bytes < 1024 {
+    return "${bytes} B"
+  }
+  var value = bytes.to_float() / 1024.0
+  for unit in ["KB", "MB", "GB", "TB"] {
+    if value < 1024.0 or unit == "TB" {
+      return "${value.format(1)} ${unit}"
+    }
+    value = value / 1024.0
+  }
+  return "${bytes} B"
+}
+
+// Asks a question on the terminal and returns the answer (without the line
+// break); an error if the input has ended.
+pub fn ask(question: Text) throws -> Text
+
+// Asks until the answer is yes or no (y / n; an empty answer is no).
+pub fn confirm(question: Text) throws -> Bool {
+  while true {
+    let answer = (try ask("${question} [y/N]")).trim().lower()
+    if answer == "y" or answer == "yes" {
+      return true
+    }
+    if answer == "n" or answer == "no" or answer.is_empty() {
+      return false
+    }
+  }
+  return false
+}
+
+// Asks without showing what's typed: passwords.
+pub fn secret(question: Text) throws -> Text
+
+// Draws a progress line on standard error: [#########.....]  60% label.
+// Call it as work advances; at `done == total` it ends the line. Nothing is
+// drawn when standard error isn't a terminal.
+pub fn progress(done: Int, total: Int, label: Text)
