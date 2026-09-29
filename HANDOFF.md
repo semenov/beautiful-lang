@@ -1,4 +1,4 @@
-# Handoff: where the work stands (2026-09-29)
+# Handoff: where the work stands (2026-09-29, evening)
 
 For the next session. The full backlog is in `TODO.md`; this file is the
 short version: what's in flight, what waits for Vlad, and what to do next.
@@ -22,29 +22,27 @@ short version: what's in flight, what waits for Vlad, and what to do next.
 
 ## Next, in this order
 
-The three ports are done and live in `ports/` (hey, httpbin, gron):
-sources, `GAPS.md` gap logs, `repro/` programs, and comparison scripts
-against the Go originals. `tests/run.sh` keeps them compiling and runs
-their tests. What they left open is in `TODO.md` under each port. The most
-important:
+Done on 2026-09-29: stack overflow panic, the tasks slowdown (allocator),
+top-level `let` built once, json numbers, Unicode, all four of Vlad's
+decisions (`to_string`, `json.encode_with`, `json.Number`, `?.`), the small
+gron items, benchmarks against Go with memory (`benchmarks/`, `ONLY=Go,Lang
+python3 run.py`), the scheduler rewrite (per-worker queues, runnext), the
+README scheduler section.
 
-1. **Stack overflow kills the program silently** (SIGBUS/SIGSEGV, exit 138
-   or 139, no message). Programs that use http or spawn get a much smaller
-   stack (task stacks). Give a clear "stack overflow" panic with a guard
-   page and an alternate signal stack, and give tasks bigger stacks.
-   Repro: `ports/gron/repro/stack_overflow_silent/`.
-2. **Using http, spawn or net anywhere makes the whole program 1.7–2.4x
-   slower.** It's probably the multi-threaded runtime (atomic refcounts
-   everywhere?). Measure it, and pay the cost only where values are shared.
-   Repro: `ports/gron/repro/http_slows_program/`.
-3. **A top-level `let` holding a list, map or interpolated text is rebuilt
-   on every use.** Build it once, as a static value.
-4. **`json.parse` changes numbers:** `-0` becomes `0`, and `1e400` becomes
-   Infinity and then null. Also: Unicode `is_letter` isn't the letter
-   category, and there's no conversion between code points and characters.
-5. The rest of the ports' open items in `TODO.md`.
+1. **A realistic backend vs Go** (Vlad): a service shaped like a real app
+   (JSON API, routing, middleware, auth header, validation, SQLite, logging)
+   in both languages; load it, compare req/s, latency, CPU per request,
+   memory; fix where we lose.
+2. **Where the benchmarks still lose** (TODO "More benchmarks"): words
+   (strings are heap objects per piece: needs a text representation change),
+   spawn (3x Go), memory in sort / json / maps.
+3. **Question for Vlad:** is a String always UTF-8 (bad bytes replaced on
+   the way in) or any bytes like Go? (`read_line` vs `Bytes.text()`.)
+4. Server timeouts (timer wheel first), HTTP repeated headers / trailers /
+   cookie Expires, the I/O path (poll from idle workers), mysql, reviews,
+   another port.
 
-## Decided by Vlad (2026-09-29), to build
+## Decided by Vlad (2026-09-29), built
 
 1. **A type's own text form: yes.** `fn to_string(self) -> String` on a type
    is used by `"${x}"`; stdlib types (Duration, errors, Date) get readable text.
