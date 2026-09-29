@@ -787,9 +787,27 @@ static void lt_http_timing(CURL *c, int64_t *t, bool *reused) {
     *reused = n == 0;
 }
 
+// Per-request client options (copied: a request may run on curl's thread).
+typedef struct {
+    bool follow;
+    bool insecure;  // don't check the server's certificate
+    char proxy[512];    // "" : from http_proxy / https_proxy
+    char no_proxy[512]; // hosts to reach directly
+} lt_http_opts;
+
+static lt_http_opts lt_http_opts_make(bool follow, lt_text *proxy, lt_text *no_proxy, bool insecure) {
+    lt_http_opts o;
+    memset(&o, 0, sizeof o);
+    o.follow = follow;
+    o.insecure = insecure;
+    snprintf(o.proxy, sizeof o.proxy, "%.*s", (int)proxy->len, proxy->data);
+    snprintf(o.no_proxy, sizeof o.no_proxy, "%.*s", (int)no_proxy->len, no_proxy->data);
+    return o;
+}
+
 // A request's options. `headers` alternate names and values; the body, the
 // header list and `errbuf` (CURL_ERROR_SIZE) must live until the end.
-static CURL *lt_http_setup(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, bool follow, char *errbuf, struct curl_slist **slist) {
+static CURL *lt_http_setup(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, const lt_http_opts *o, char *errbuf, struct curl_slist **slist) {
     static pthread_once_t once = PTHREAD_ONCE_INIT;
     pthread_once(&once, (void (*)(void))curl_global_init_void);
     CURL *c = curl_easy_init();
@@ -798,7 +816,13 @@ static CURL *lt_http_setup(const char *method, const char *url, lt_bytes *body, 
     curl_easy_setopt(c, CURLOPT_URL, url);
     if (strcmp(method, "HEAD") == 0) curl_easy_setopt(c, CURLOPT_NOBODY, 1L); // no body will come
     else if (strcmp(method, "GET") != 0) curl_easy_setopt(c, CURLOPT_CUSTOMREQUEST, method);
-    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, follow ? 1L : 0L);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, o->follow ? 1L : 0L);
+    if (o->proxy[0]) curl_easy_setopt(c, CURLOPT_PROXY, o->proxy);
+    if (o->no_proxy[0]) curl_easy_setopt(c, CURLOPT_NOPROXY, o->no_proxy);
+    if (o->insecure) {
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYPEER, 0L);
+        curl_easy_setopt(c, CURLOPT_SSL_VERIFYHOST, 0L);
+    }
     curl_easy_setopt(c, CURLOPT_MAXREDIRS, 10L);
     // after a 301/302/303 a POST becomes a GET, as browsers (and Go) do
     curl_easy_setopt(c, CURLOPT_POSTREDIR, 0L);
@@ -861,10 +885,10 @@ static int lt_curl_cancel_check(void *ud, curl_off_t a, curl_off_t b, curl_off_t
 
 // One request; the body goes to `sink` (a growing buffer or a FILE).
 // `cancel`, if given, stops the transfer when it becomes non-zero.
-static lt_err lt_http_perform_on(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, bool follow, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out, volatile int *cancel) {
+static lt_err lt_http_perform_on(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, const lt_http_opts *o, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out, volatile int *cancel) {
     struct curl_slist *slist;
     char errbuf[CURL_ERROR_SIZE];
-    CURL *c = lt_http_setup(method, url, body, headers, timeout_ms, follow, errbuf, &slist);
+    CURL *c = lt_http_setup(method, url, body, headers, timeout_ms, o, errbuf, &slist);
     if (!c) return lt_make_failure(lt_text_cstr("http: can't start the client"));
     if (cancel) {
         curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
@@ -959,7 +983,7 @@ typedef struct {
     lt_bytes *body;
     lt_texts *headers;
     int64_t timeout_ms;
-    bool follow;
+    lt_http_opts opts;
     size_t (*write)(char *, size_t, size_t, void *);
     void *sink;
     lt_http_out out;
@@ -970,17 +994,17 @@ typedef struct {
 
 static void lt_hjob_run(void *ud) {
     lt_hjob *j = (lt_hjob *)ud;
-    j->err = lt_http_perform_on(j->method, j->url, j->body, j->headers, j->timeout_ms, j->follow, j->write, j->sink, &j->out, &j->cancel);
+    j->err = lt_http_perform_on(j->method, j->url, j->body, j->headers, j->timeout_ms, &j->opts, j->write, j->sink, &j->out, &j->cancel);
     int w = j->done_w; // `j` may be gone once the byte is written
     char x = 1;
     while (write(w, &x, 1) < 0 && errno == EINTR) {
     }
 }
 
-static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, bool follow, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out) {
+static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *body, lt_texts *headers, int64_t timeout_ms, const lt_http_opts *o, size_t (*write)(char *, size_t, size_t, void *), void *sink, lt_http_out *out) {
 #ifdef LT_THREADS
     int p[2];
-    if (pipe(p) != 0) return lt_http_perform_on(method, url, body, headers, timeout_ms, follow, write, sink, out, NULL);
+    if (pipe(p) != 0) return lt_http_perform_on(method, url, body, headers, timeout_ms, o, write, sink, out, NULL);
     fcntl(p[0], F_SETFD, FD_CLOEXEC);
     fcntl(p[1], F_SETFD, FD_CLOEXEC);
     lt_set_nonblocking(p[0]);
@@ -991,14 +1015,14 @@ static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *bod
     j.body = body;
     j.headers = headers;
     j.timeout_ms = timeout_ms;
-    j.follow = follow;
+    j.opts = *o;
     j.write = write;
     j.sink = sink;
     j.done_w = p[1];
     if (!lt_pool_submit(lt_hjob_run, &j)) {
         close(p[0]);
         close(p[1]);
-        return lt_http_perform_on(method, url, body, headers, timeout_ms, follow, write, sink, out, NULL);
+        return lt_http_perform_on(method, url, body, headers, timeout_ms, o, write, sink, out, NULL);
     }
     bool cancelled = false;
     for (;;) {
@@ -1028,13 +1052,13 @@ static lt_err lt_http_perform(const char *method, const char *url, lt_bytes *bod
     *out = j.out;
     return j.err;
 #else
-    return lt_http_perform_on(method, url, body, headers, timeout_ms, follow, write, sink, out, NULL);
+    return lt_http_perform_on(method, url, body, headers, timeout_ms, o, write, sink, out, NULL);
 #endif
 }
 
-static lt_err lt_http_send_request(lt_text *method, lt_text *url, lt_texts *headers, lt_bytes *body, int64_t timeout_ms, bool follow, lt_http_out *out) {
+static lt_err lt_http_send_request(lt_text *method, lt_text *url, lt_texts *headers, lt_bytes *body, int64_t timeout_ms, const lt_http_opts *o, lt_http_out *out) {
     lt_grow g = { NULL, 0, 0 };
-    lt_err e = lt_http_perform(method->data, url->data, body, headers, timeout_ms, follow, lt_curl_body, &g, out);
+    lt_err e = lt_http_perform(method->data, url->data, body, headers, timeout_ms, o, lt_curl_body, &g, out);
     if (!e.obj) out->body = lt_bytes_from(g.d ? g.d : "", (int64_t)g.len);
     free(g.d);
     return e;
@@ -1047,7 +1071,10 @@ static lt_err lt_http_download(lt_text *url, lt_text *path, lt_http_out *out) {
     snprintf(tmp, sizeof tmp, "%s.download-%d", path->data, (int)getpid());
     FILE *f = fopen(tmp, "wb");
     if (!f) return lt_os_error("can't create", path);
-    lt_err e = lt_http_perform("GET", url->data, NULL, NULL, 0, true, lt_curl_file, f, out);
+    lt_http_opts o;
+    memset(&o, 0, sizeof o);
+    o.follow = true;
+    lt_err e = lt_http_perform("GET", url->data, NULL, NULL, 0, &o, lt_curl_file, f, out);
     bool written = fclose(f) == 0;
     if (!e.obj && out->status / 100 == 2) {
         if (!written || rename(tmp, path->data) != 0) {
@@ -1183,7 +1210,7 @@ static void lt_hstream_free(lt_handle *h) {
     free(s);
 }
 
-static lt_err lt_http_open(lt_text *method, lt_text *url, lt_texts *headers, lt_bytes *body, int64_t timeout_ms, bool follow, lt_handle **out) {
+static lt_err lt_http_open(lt_text *method, lt_text *url, lt_texts *headers, lt_bytes *body, int64_t timeout_ms, const lt_http_opts *o, lt_handle **out) {
     int bp[2], rp[2];
     if (pipe(bp) != 0) return lt_make_failure(lt_text_cstr("http: can't make a pipe"));
     if (pipe(rp) != 0) {
@@ -1203,7 +1230,7 @@ static lt_err lt_http_open(lt_text *method, lt_text *url, lt_texts *headers, lt_
     s->h.free = lt_hstream_free;
     s->method = strdup(method->data);
     s->url = strdup(url->data);
-    s->follow = follow;
+    s->follow = o->follow;
     s->req_body = body;
     lt_bytes_dup(body);
     s->hs = lt_texts_new(8);
@@ -1214,7 +1241,7 @@ static lt_err lt_http_open(lt_text *method, lt_text *url, lt_texts *headers, lt_
     s->body->owner = s;
     s->body->on_eof = lt_hstream_eof;
     s->body->label = "the response";
-    s->c = lt_http_setup(s->method, s->url, body, headers, timeout_ms, follow, s->errbuf, &s->slist);
+    s->c = lt_http_setup(s->method, s->url, body, headers, timeout_ms, o, s->errbuf, &s->slist);
     curl_easy_setopt(s->c, CURLOPT_WRITEFUNCTION, lt_hstream_write);
     curl_easy_setopt(s->c, CURLOPT_WRITEDATA, s);
     curl_easy_setopt(s->c, CURLOPT_HEADERFUNCTION, lt_hstream_header);

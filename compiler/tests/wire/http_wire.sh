@@ -13,6 +13,8 @@ head -c 4000000 /dev/zero | curl -s -X POST --data-binary @- $u/echo; echo
 curl -s $u/ip; echo
 curl -si $u/empty | tr -d '\r' | grep -iv "^date"
 curl -si $u/sized | tr -d '\r' | grep -i "content-length\|transfer-encoding\|^12345"
+$LANG_BIN run --debug client_lines.lang $u/lines 2>/dev/null
+$LANG_BIN run --debug client_proxy.lang $u/lines 2>/dev/null
 kill -TERM $pid
 wait $pid
 grep "not freed" /tmp/lang-wire-err | sed 's/.*allocations, //'

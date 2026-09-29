@@ -967,6 +967,14 @@ pub type ClientRequest {
   // 3xx answers are followed (at most 10; a POST becomes a GET after
   // 301/302/303, as browsers do). Otherwise the 3xx is the answer.
   follow_redirects: Bool = true
+  // A proxy: "http://proxy.internal:3128" (socks5:// too). Empty: the
+  // http_proxy / https_proxy / no_proxy environment variables, as curl.
+  proxy: String = ""
+  // Hosts reached directly, not through the proxy: "localhost,.internal"
+  no_proxy: String = ""
+  // Don't check the server's certificate (self-signed test servers only:
+  // anyone in the middle can then read and change the traffic).
+  insecure: Bool = false
 }
 
 pub fn send(request: ClientRequest) throws -> Response
@@ -997,6 +1005,9 @@ pub builtin type ResponseStream {
   fn read(self, max: Int) throws -> Bytes
   fn read_line(self) throws -> String?
   fn read_all(self) throws -> Bytes
+  // The body as an `io.Stream`, for code that reads any stream (a file,
+  // standard input, a response). Closing the response closes it.
+  fn body(self) -> io.Stream
   // How long the request took up to the headers (`total` is filled in
   // once the body has been read).
   fn timing(self) -> Timing

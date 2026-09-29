@@ -1,0 +1,18 @@
+// A response body read as an io.Stream, like a file or standard input.
+import http
+import io
+import process
+
+fn count_lines(s: io.Stream) throws -> Int {
+  var n = 0
+  while try s.read_line() is some(_) {
+    n += 1
+  }
+  return n
+}
+
+fn main() throws {
+  with res = try http.open(http.ClientRequest(url: process.args()[0])) {
+    print("${try count_lines(res.body())} lines")
+  }
+}

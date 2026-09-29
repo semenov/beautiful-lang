@@ -74,14 +74,15 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           scripts, marks, Ⅻ); code point <-> character conversion
           (generated tables: L/Lu/Ll and case mappings, so lower/upper work
           past ASCII too; `String.code_points()`, `Int.character()`)
-    - [ ] `http.ResponseStream` isn't an `io.Stream`
+    - [x] `http.ResponseStream` isn't an `io.Stream` (`res.body()` is one)
     - [x] file errors have no kinds (NotFound, ...); `files.read` of a
           directory gives empty text instead of an error (files.NotFound,
           PermissionDenied, IsADirectory, AlreadyExists; others: Failure)
     - [ ] `read_line` can return non-UTF-8 text that `Bytes.text()` refuses
           -- a question for Vlad: is a String always UTF-8 (replace bad bytes
           on the way in) or any bytes, as in Go (then `text()` can't fail)?
-    - [ ] HTTP client: proxy and "insecure" options
+    - [x] HTTP client: proxy and "insecure" options (`ClientRequest.proxy`,
+          `no_proxy`, `insecure`; the environment's http_proxy as before)
     - [x] print without a line break without a `with` stream (`io.write`)
     - [x] errors: misplaced `catch` inside a lambda says "expected `)`"; a
           file named like a stdlib module gets an unclear error

@@ -595,13 +595,21 @@ pub type ClientRequest {
   // 3xx answers are followed (at most 10; a POST becomes a GET after
   // 301/302/303, as browsers do). Otherwise the 3xx is the answer.
   follow_redirects: Bool = true
+  // A proxy: "http://proxy.internal:3128" (socks5:// too). Empty: the
+  // http_proxy / https_proxy / no_proxy environment variables, as curl.
+  proxy: String = ""
+  // Hosts reached directly, not through the proxy: "localhost,.internal"
+  no_proxy: String = ""
+  // Don't check the server's certificate (self-signed test servers only:
+  // anyone in the middle can then read and change the traffic).
+  insecure: Bool = false
 }
 
 pub fn send(request: ClientRequest) throws -> Response {
   if not request.url.contains("://") {
     throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")
   }
-  return try __send(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects)
+  return try __send(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects, proxy: request.proxy, no_proxy: request.no_proxy, insecure: request.insecure)
 }
 
 pub fn get(url: String) throws -> Response {
@@ -631,7 +639,7 @@ pub fn open(request: ClientRequest) throws -> ResponseStream {
   if not request.url.contains("://") {
     throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")
   }
-  return try __open(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects)
+  return try __open(request.method, url: request.url, headers: request.headers, body: request.body, timeout_ms: request.timeout.millis(), follow: request.follow_redirects, proxy: request.proxy, no_proxy: request.no_proxy, insecure: request.insecure)
 }
 
 pub builtin type ResponseStream {
@@ -643,6 +651,9 @@ pub builtin type ResponseStream {
   fn read(self, max: Int) throws -> Bytes
   fn read_line(self) throws -> String?
   fn read_all(self) throws -> Bytes
+  // The body as an `io.Stream`, for code that reads any stream (a file,
+  // standard input, a response). Closing the response closes it.
+  fn body(self) -> io.Stream
   // How long the request took up to the headers (`total` is filled in
   // once the body has been read).
   fn timing(self) -> Timing
@@ -650,8 +661,8 @@ pub builtin type ResponseStream {
   fn close(self) throws
 }
 
-fn __send(method: String, url: String, headers: Map<String, String>, body: Bytes, timeout_ms: Int, follow: Bool) throws -> Response
-fn __open(method: String, url: String, headers: Map<String, String>, body: Bytes, timeout_ms: Int, follow: Bool) throws -> ResponseStream
+fn __send(method: String, url: String, headers: Map<String, String>, body: Bytes, timeout_ms: Int, follow: Bool, proxy: String, no_proxy: String, insecure: Bool) throws -> Response
+fn __open(method: String, url: String, headers: Map<String, String>, body: Bytes, timeout_ms: Int, follow: Bool, proxy: String, no_proxy: String, insecure: Bool) throws -> ResponseStream
 
 // Saves what `url` answers into the file `to`, without holding it in memory.
 // The response has the status and headers and an empty body. The file is

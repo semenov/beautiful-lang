@@ -1,4 +1,4 @@
-// http.ResponseStream reads like an io.Stream (read, read_line, read_all)
+// FIXED (res.body() is an io.Stream). Was: http.ResponseStream reads like an io.Stream (read, read_line, read_all)
 // but is a different type with no shared interface, so code that reads
 // "a file, standard input or a URL" can't take one parameter: gron passes
 // a record of two closures (Input in main.lang) instead.

@@ -2642,7 +2642,16 @@ impl Checker {
                 self.value_call(f, args, span, in_try)
             }
         };
-        if !resource_ok {
+        // a method of something that must be closed may hand out a part of
+        // it (`response.body()`): closed with its owner
+        let part_of_owner = match &result.kind {
+            TK::Call { callee: Callee::Fn(id, _), .. } => match self.prog.fns[*id].owner {
+                Some(d) if self.prog.defs[d].generics.is_empty() => self.resource_close(&Ty::Adt(d, vec![])).is_some(),
+                _ => false,
+            },
+            _ => false,
+        };
+        if !resource_ok && !part_of_owner {
             let rt = self.resolve(&result.ty);
             if self.resource_close(&rt).is_some() {
                 let s = self.show(&rt);

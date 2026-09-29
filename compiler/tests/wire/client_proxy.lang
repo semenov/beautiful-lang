@@ -1,0 +1,14 @@
+// The client's proxy options: through a proxy that isn't there (an error),
+// and around it with no_proxy.
+import http
+import process
+
+fn main() throws {
+  let url = process.args()[0]
+  let r = try http.send(http.ClientRequest(url: url, proxy: "http://127.0.0.1:1")) catch err {
+    print("through a missing proxy: failed")
+    http.Response(status: 0, body: Bytes())
+  }
+  let direct = try http.send(http.ClientRequest(url: url, proxy: "http://127.0.0.1:1", no_proxy: "127.0.0.1"))
+  print("${r.status} ${direct.status} ${try direct.text()}")
+}

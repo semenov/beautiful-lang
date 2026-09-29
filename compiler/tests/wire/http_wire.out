@@ -8,4 +8,10 @@ connection: keep-alive
 
 content-length: 5
 12345
+3 lines
+through a missing proxy: failed
+0 200 a
+b
+c
+
 0 not freed
