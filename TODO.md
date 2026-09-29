@@ -103,7 +103,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] small ones: `env.load(".env")`, `process.find`, `process.run_command`
       (dir / env / input), `random.uuid_v7`, List helpers (flat_map, unique,
       chunks, partition, index_of, find_index), log levels and JSON logs
-- [ ] still small: log fields (decode key naming and cli subcommands: done)
+- [x] still small: log fields (`log.with_fields`), decode key naming, cli subcommands
 - [x] signals: Ctrl-C cancels `main` so `with` blocks close
 - [x] `crypto`: RSA and ECDSA P-256 sign/verify, keys from PEM or JWK (Ed25519: not yet)
 - [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)

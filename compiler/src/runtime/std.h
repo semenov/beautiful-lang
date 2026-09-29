@@ -668,7 +668,19 @@ static void lt_print_indented(const char *d, int64_t n) {
     }
 }
 
-static void lt_log(const char *level, lt_text *msg) {
+// a field value in text logs: bare when it's one plain word, else quoted
+static void lt_log_value(lt_buf *b, lt_text *v) {
+    bool plain = v->len > 0;
+    for (int64_t i = 0; i < v->len && plain; i++) {
+        unsigned char c = (unsigned char)v->data[i];
+        if (c <= ' ' || c == '"' || c == '=' || c == '\\' || c == 127) plain = false;
+    }
+    if (plain) lt_buf_put(b, v->data, v->len);
+    else lt_json_str(b, v->data, v->len);
+}
+
+// `keys` / `vals`: fields (may be NULL)
+static void lt_log_fields(const char *level, lt_text *msg, lt_texts *keys, lt_texts *vals) {
     static int min_rank = -1, json = -1;
     if (min_rank < 0) {
         const char *l = getenv("LOG_LEVEL");
@@ -684,31 +696,52 @@ static void lt_log(const char *level, lt_text *msg) {
     gmtime_r(&now, &tm);
     char stamp[40];
     size_t sl = strftime(stamp, sizeof stamp, "%Y-%m-%dT%H:%M:%S", &tm);
-    fflush(stdout);
-    flockfile(stderr);
+    int64_t nf = keys && vals ? (keys->len < vals->len ? keys->len : vals->len) : 0;
+    lt_buf b = { 0 };
     if (json) {
         snprintf(stamp + sl, sizeof stamp - sl, ".%03ldZ", (long)(ts.tv_nsec / 1000000));
-        lt_buf b = { 0 };
         lt_buf_put(&b, "{\"time\":\"", 9);
         lt_buf_put(&b, stamp, (int64_t)strlen(stamp));
         lt_buf_put(&b, "\",\"level\":\"", 11);
         for (const char *c = level; *c; c++) lt_buf_c(&b, (char)tolower((unsigned char)*c));
         lt_buf_put(&b, "\",\"message\":", 12);
         lt_json_str(&b, msg->data, msg->len);
+        for (int64_t i = 0; i < nf; i++) {
+            lt_buf_c(&b, ',');
+            lt_json_str(&b, keys->items[i]->data, keys->items[i]->len);
+            lt_buf_c(&b, ':');
+            lt_json_str(&b, vals->items[i]->data, vals->items[i]->len);
+        }
         lt_buf_put(&b, "}\n", 2);
-        if (lt_log_capture) lt_buf_put(lt_log_capture, b.d, b.len);
-        else fwrite(b.d, 1, (size_t)b.len, stderr);
-        free(b.d);
-    } else if (lt_log_capture) {
-        char head[80];
-        int hl = snprintf(head, sizeof head, "%sZ %s ", stamp, level);
-        lt_buf_put(lt_log_capture, head, hl);
-        lt_buf_put(lt_log_capture, msg->data, msg->len);
-        lt_buf_c(lt_log_capture, '\n');
     } else {
-        fprintf(stderr, "%sZ %s %.*s\n", stamp, level, (int)msg->len, msg->data);
+        lt_buf_put(&b, stamp, (int64_t)sl);
+        lt_buf_put(&b, "Z ", 2);
+        lt_buf_put(&b, level, (int64_t)strlen(level));
+        lt_buf_c(&b, ' ');
+        lt_buf_put(&b, msg->data, msg->len);
+        for (int64_t i = 0; i < nf; i++) {
+            lt_buf_c(&b, ' ');
+            lt_buf_put(&b, keys->items[i]->data, keys->items[i]->len);
+            lt_buf_c(&b, '=');
+            lt_log_value(&b, vals->items[i]);
+        }
+        lt_buf_c(&b, '\n');
     }
+    fflush(stdout);
+    flockfile(stderr);
+    if (lt_log_capture) lt_buf_put(lt_log_capture, b.d, b.len);
+    else fwrite(b.d, 1, (size_t)b.len, stderr);
     funlockfile(stderr);
+    free(b.d);
+}
+
+static void lt_log(const char *level, lt_text *msg) {
+    lt_log_fields(level, msg, NULL, NULL);
+}
+
+// log.Logger: the level as text
+static void lt_log_named(lt_text *level, lt_text *msg, lt_texts *keys, lt_texts *vals) {
+    lt_log_fields(level->data, msg, keys, vals);
 }
 
 // ---------------------------------------------------------------- random

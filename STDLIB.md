@@ -366,11 +366,32 @@ pub fn progress(done: Int, total: Int, label: String)
 log: messages for people running the program, on standard error, with the
 time: `2026-09-29T12:00:00Z INFO server started`.
 
+LOG_LEVEL=debug shows `debug` messages too (warn / error show fewer);
+LOG_FORMAT=json writes a JSON object per line:
+{"time":"2026-09-29T12:00:00.123Z","level":"info","message":"server started"}
+
 ```
 pub fn debug(message: String)
 pub fn info(message: String)
 pub fn warn(message: String)
 pub fn error(message: String)
+
+// A logger that adds fields to every message: one per request, job or
+// connection.
+//   let l = log.with_fields({"request": "${id}", "user": user.name})
+//   l.info("order saved")  // ... INFO order saved request=17 user=ada
+// With LOG_FORMAT=json the fields are keys of the object.
+pub fn with_fields(fields: Map<String, String>) -> Logger
+
+pub type Logger {
+  fields: Map<String, String>
+  // The same fields and more (a later value replaces an earlier one).
+  pub fn with_fields(self, fields: Map<String, String>) -> Logger
+  pub fn debug(self, message: String)
+  pub fn info(self, message: String)
+  pub fn warn(self, message: String)
+  pub fn error(self, message: String)
+}
 ```
 
 ## time

@@ -308,6 +308,11 @@ SQL is always written right in the call, with `?` (SQLite) or `$1`
 (Postgres) for values. Building SQL from text is a compile error. Parameters
 are plain values: `[name, 36, true]`.
 
+Logging goes to standard error: `log.info("started")` (also `debug`, `warn`,
+`error`; `LOG_LEVEL=debug`, `LOG_FORMAT=json`). Fields for every message of
+a request or job: `let l = log.with_fields({"request": "${id}"})`, then
+`l.info("saved")`.
+
 ## HTTP
 
 ```

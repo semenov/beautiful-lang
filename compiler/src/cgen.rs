@@ -2992,6 +2992,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "process.exit" => format!("lt_process_exit({})", a[0]),
             "env.get" => format!("lt_env_get({})", a[0]),
             "log.info" => format!("lt_log(\"INFO\", {})", a[0]),
+            "log.__log" => format!("lt_log_named({}, {}, {}, {})", a[0], a[1], a[2], a[3]),
             "log.warn" => format!("lt_log(\"WARN\", {})", a[0]),
             "log.error" => format!("lt_log(\"ERROR\", {})", a[0]),
             "random.between" => format!("lt_random_between({}, {}, {})", a[0], a[1], line),
