@@ -1,0 +1,6 @@
+error: module `json` has no `NotFound`
+  --> hint_errdup.plumb:5:15
+  |
+5 |     if err is json.NotFound {
+  |               ^^^^^^^^^^^^^
+1 error(s)

@@ -1,0 +1,10 @@
+import json
+
+fn compute() -> Int {
+  return 1
+}
+
+fn main() {
+  let r = compute()
+  print("x")
+}

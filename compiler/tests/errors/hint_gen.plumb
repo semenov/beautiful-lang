@@ -1,0 +1,10 @@
+fn big<T>(a: T, b: T) -> T {
+  if a > b {
+    return a
+  }
+  return b
+}
+
+fn main() {
+  print("${big(1, b: 2)}")
+}

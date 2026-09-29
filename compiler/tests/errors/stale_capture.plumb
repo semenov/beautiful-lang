@@ -1,0 +1,28 @@
+fn main() {
+  var count = 0
+  let inc = () => count + 1
+  count = 10
+  print("${inc()}")
+
+  // fine: changed before the lambda is made
+  var base = 1
+  base = 5
+  let add: fn(Int) -> Int = x => x + base
+  print("${add(1)}")
+
+  // fine: declared inside the loop
+  for i in 0..<3 {
+    var k = i
+    k += 1
+    let f = () => k
+    print("${f()}")
+  }
+
+  // not fine: changed in the loop around the lambda
+  var total = 0
+  var fs: List<fn() -> Int> = []
+  for i in 0..<3 {
+    fs.append(() => total)
+    total += i
+  }
+}

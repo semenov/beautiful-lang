@@ -1,0 +1,7 @@
+error: can't change `it`: it's a copy of an element
+  --> loop_var.plumb:8:5
+  |
+8 |     it.qty = 100
+  |     ^^
+  = help: change the list itself: `for i in 0..<list.length { list[i].field = ... }`, or build a new one with `map`
+1 error(s)

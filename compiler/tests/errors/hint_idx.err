@@ -1,0 +1,7 @@
+error: a `String` can't be indexed
+  --> hint_idx.plumb:3:9
+  |
+3 |   print(s[0])
+  |         ^^^^
+  = help: use `s.slice(from: i, to: i + 1)` or `s.chars()`
+1 error(s)

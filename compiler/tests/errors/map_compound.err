@@ -1,0 +1,7 @@
+error: the key may not be in the map yet: `m[k] += ...` would stop the program then
+  --> map_compound.plumb:4:5
+  |
+4 |     counts[w] += 1
+  |     ^^^^^^
+  = help: write `m[k] = (m[k] ?? 0) + ...`
+1 error(s)

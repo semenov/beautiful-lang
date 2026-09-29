@@ -1,0 +1,4 @@
+fn main() {
+  let f: fn(Int) -> Map<String, Int> = x => {"a": x}
+  print("${f(1)}")
+}

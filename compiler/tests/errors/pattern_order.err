@@ -1,0 +1,13 @@
+error: `height` binds the field `width` here: fields bind by position, and `height` is another field
+  --> pattern_order.plumb:8:10
+  |
+8 |     Rect(height, width) => print("height=${height} width=${width}")
+  |          ^^^^^^
+  = help: write them in the declared order: `Rect(width, height)`
+error: `width` binds the field `height` here: fields bind by position, and `width` is another field
+  --> pattern_order.plumb:8:18
+  |
+8 |     Rect(height, width) => print("height=${height} width=${width}")
+  |                  ^^^^^
+  = help: write them in the declared order: `Rect(width, height)`
+2 error(s)

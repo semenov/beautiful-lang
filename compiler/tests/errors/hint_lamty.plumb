@@ -1,0 +1,4 @@
+fn main() {
+  let g = (name: String) => "hi ${name}"
+  print(g("a"))
+}

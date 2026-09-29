@@ -1,0 +1,13 @@
+error: `json` is imported but not used
+  --> unused.plumb:1:8
+  |
+1 | import json
+  |        ^^^^
+  = help: remove the import
+error: `r` is never used
+  --> unused.plumb:8:7
+  |
+8 |   let r = compute()
+  |       ^
+  = help: remove it, or write `let _ = ...` to drop a value on purpose
+2 error(s)

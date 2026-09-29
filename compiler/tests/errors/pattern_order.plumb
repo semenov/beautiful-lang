@@ -1,0 +1,10 @@
+enum Shape {
+  Rect(width: Float, height: Float)
+}
+
+fn main() {
+  let r = Rect(width: 2.0, height: 10.0)
+  match r {
+    Rect(height, width) => print("height=${height} width=${width}")
+  }
+}

@@ -32,6 +32,17 @@ for f in *.plumb; do
     echo "FAIL $f: memory error"; head -20 $T/test-err; fail=1
   fi
 done
+# error messages: each program in errors/ with a .err file must give
+# exactly those messages
+cd ../errors || exit 1
+for f in *.plumb; do
+  [ -f "${f%.plumb}.err" ] || continue
+  out=$($PLUMB_BIN check "$f" 2>&1)
+  if [ "$out" != "$(cat "${f%.plumb}.err")" ]; then
+    echo "FAIL errors/$f: the messages differ"; echo "$out" | head -8; fail=1
+  fi
+done
+cd ../run || exit 1
 # over real connections: each script's output must match its .out
 cd ../wire || exit 1
 for f in *.sh; do

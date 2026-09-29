@@ -1,0 +1,7 @@
+error: this lambda uses `conn`, and it's kept after the `with` block, which closes `conn`
+  --> with_escape.plumb:11:21
+   |
+11 |     router.get("/", req => {
+   |                     ^^^^^^^^
+   = help: open `conn` where the lambda runs, or open it before and pass it to the function that keeps the lambda (e.g. open the database in `main` and hand the connection to the routes)
+1 error(s)

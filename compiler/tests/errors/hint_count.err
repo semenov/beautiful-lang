@@ -1,0 +1,7 @@
+error: `count` counts the items that pass a test
+  --> hint_count.plumb:2:16
+  |
+2 |   print("${[1].count}")
+  |                ^^^^^
+  = help: the number of items is `.length`; `xs.count(x => x > 0)` counts matching ones
+1 error(s)

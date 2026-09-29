@@ -1,0 +1,23 @@
+import db
+import http
+
+type Row {
+  n: Int
+}
+
+fn make() throws -> http.Router {
+  var router = http.Router()
+  with conn = try db.open(":memory:") {
+    router.get("/", req => {
+      let rows = try conn.query<Row>("select 1 as n", [])
+      http.text(200, "${rows}")
+    })
+    let ok = try conn.transaction(() => try conn.query<Row>("select 2 as n", []))
+    print("${ok}")
+  }
+  return router
+}
+
+fn main() throws {
+  let _ = try make()
+}

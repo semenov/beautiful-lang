@@ -1,0 +1,13 @@
+error: this changes `a`, but `a` is never read: the change is lost
+  --> lost_copy.plumb:9:5
+  |
+9 |     a.balance -= 5
+  |     ^
+  = help: if `a` is a copy of a value in a list or map, change it there (`list[i].field = ...`, `m[key].field = ...`); if nothing needs it, remove it
+error: this changes `first`, but `first` is never read: the change is lost
+  --> lost_copy.plumb:13:3
+   |
+13 |   first.balance = 99
+   |   ^^^^^
+   = help: if `first` is a copy of a value in a list or map, change it there (`list[i].field = ...`, `m[key].field = ...`); if nothing needs it, remove it
+2 error(s)

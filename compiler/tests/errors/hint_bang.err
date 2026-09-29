@@ -1,0 +1,6 @@
+error: there is no `!` to take a value out of an optional
+  --> hint_bang.plumb:3:13
+  |
+3 |   print("${y!}")
+  |             ^
+  = help: give a fallback: `x ?? 0`, or check it: `if x is some(v) { ... }`

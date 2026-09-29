@@ -1,0 +1,6 @@
+error: text has no `f` prefix
+  --> hint_fstr.plumb:3:9
+  |
+3 |   print(f"{x}")
+  |         ^
+  = help: write `"a ${x} b"`: values go inside as `${...}`

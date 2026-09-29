@@ -1,0 +1,7 @@
+error: this `String?` may be missing: it would print as `none`
+  --> optional_in_text.plumb:3:18
+  |
+3 |   print("Hello ${name}")
+  |                  ^^^^
+  = help: say what to print then: `${x ?? ""}`, or check it first: `if x is some(v) { ... }`
+1 error(s)

@@ -1,0 +1,17 @@
+type Acc {
+  balance: Int
+}
+
+fn main() {
+  var accounts: Map<String, Acc> = {"a": Acc(balance: 10)}
+  if accounts["a"] is some(acc) {
+    var a = acc
+    a.balance -= 5
+  }
+  var list = [Acc(balance: 1)]
+  var first = list[0]
+  first.balance = 99
+  var ok = list[0]
+  ok.balance = 1
+  print("${accounts} ${list} ${ok}")
+}

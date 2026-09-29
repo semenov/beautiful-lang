@@ -1,0 +1,7 @@
+error: a `Shared` can't hold another `Shared` in its value
+  --> shared_in_shared.plumb:7:11
+  |
+7 |   let a = Shared<Node>(Node(name: "a"))
+  |           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  = help: keep the shared parts side by side (two `Shared`s passed separately), or keep plain values inside one `Shared`
+1 error(s)

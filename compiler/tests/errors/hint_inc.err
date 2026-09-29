@@ -1,0 +1,6 @@
+error: there is no `++`
+  --> hint_inc.plumb:3:4
+  |
+3 |   x++
+  |    ^
+  = help: write `x += 1`

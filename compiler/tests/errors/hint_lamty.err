@@ -1,0 +1,6 @@
+error: lambda parameters have no type annotations; the type comes from where the lambda is used
+  --> hint_lamty.plumb:2:16
+  |
+2 |   let g = (name: String) => "hi ${name}"
+  |                ^
+  = help: give the type where the lambda is kept: `let greet: fn(String) -> String = name => ...`

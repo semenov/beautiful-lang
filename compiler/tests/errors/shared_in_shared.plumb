@@ -1,0 +1,11 @@
+type Node {
+  name: String
+  next: List<Shared<Node>> = []
+}
+
+fn main() {
+  let a = Shared<Node>(Node(name: "a"))
+  with n = a.lock() {
+    n.next.append(a)
+  }
+}

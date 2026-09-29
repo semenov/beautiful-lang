@@ -1,0 +1,5 @@
+fn main() {
+  let c = true
+  let s = c ? "a" : "b"
+  print(s)
+}

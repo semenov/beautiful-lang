@@ -230,6 +230,10 @@ impl<'a> Lexer<'a> {
                         self.pos += 1;
                     }
                     let s = std::str::from_utf8(&self.src[lo..self.pos]).unwrap();
+                    // f"...", r"...": other languages' text prefixes
+                    if self.peek(0) == b'"' && matches!(s, "f" | "r" | "b" | "u" | "rb" | "br" | "fr") {
+                        return Err(self.err(lo, format!("text has no `{}` prefix", s)).help("write `\"a ${x} b\"`: values go inside as `${...}`"));
+                    }
                     let tok = keyword(s).unwrap_or_else(|| Tok::Ident(s.to_string()));
                     self.push(tok, lo, self.pos);
                 }
@@ -267,6 +271,7 @@ impl<'a> Lexer<'a> {
                 b"/=" => (Tok::SlashEq, 2),
                 b"%=" => (Tok::PercentEq, 2),
                 b"&&" => return Err(self.err(lo, "use `and` instead of `&&`")),
+                b"++" => return Err(self.err(lo, "there is no `++`").help("write `x += 1`")),
                 b"||" => return Err(self.err(lo, "use `or` instead of `||`")),
                 b".." => return Err(self.err(lo, "a bare `..` doesn't exist: use `..<` (excludes the end) or `..=` (includes it)")),
                 _ => match self.peek(0) {
@@ -290,7 +295,12 @@ impl<'a> Lexer<'a> {
                     b'%' => (Tok::Percent, 1),
                     b'&' => (Tok::Amp, 1),
                     b'|' => (Tok::Bar, 1),
+                    // `y!` (force-unwrap in Swift/Kotlin/TS) vs `!x`
+                    b'!' if lo > 0 && (self.src[lo - 1].is_ascii_alphanumeric() || matches!(self.src[lo - 1], b')' | b']' | b'_')) => {
+                        return Err(self.err(lo, "there is no `!` to take a value out of an optional").help("give a fallback: `x ?? 0`, or check it: `if x is some(v) { ... }`"))
+                    }
                     b'!' => return Err(self.err(lo, "use `not x` instead of `!x`")),
+                    b'`' => return Err(self.err(lo, "text uses double quotes, with values inside as `${x}`").help("write `\"a ${x}\"`")),
                     b';' => return Err(self.err(lo, "no semicolons: a statement ends at the end of the line")),
                     b'\'' => return Err(self.err(lo, "text uses double quotes only")),
                     c => return Err(self.err(lo, format!("unexpected character `{}`", c as char))),

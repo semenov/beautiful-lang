@@ -185,7 +185,7 @@ pub fn parse(src: &str, prelude: bool) -> ModuleDoc {
                 }
                 pending.clear();
                 if is_fn_decl(s) {
-                    if s.starts_with("pub ") || *all_public {
+                    if (s.starts_with("pub ") || *all_public) && !decl_name(s).starts_with("__") {
                         text.push_str(&signature(line));
                         ty.members.push(Item { name: decl_name(s), text, members: vec![] });
                     }

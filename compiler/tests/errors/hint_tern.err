@@ -1,0 +1,6 @@
+error: unexpected `?`
+  --> hint_tern.plumb:3:13
+  |
+3 |   let s = c ? "a" : "b"
+  |             ^
+  = help: for a choice write `if c { a } else { b }`; `try f()` passes an error up, `??` gives a fallback, `?.` reaches into an optional value

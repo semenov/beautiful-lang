@@ -1,0 +1,7 @@
+fn main() {
+  var counts: Map<String, Int> = {}
+  for w in ["a", "b", "a"] {
+    counts[w] += 1
+  }
+  print("${counts}")
+}

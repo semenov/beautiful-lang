@@ -1,0 +1,11 @@
+import json
+
+fn main() {
+  let v = try json.parse("1") catch err {
+    if err is json.NotFound {
+      print("x")
+    }
+    json.Value.Null
+  }
+  print("${v}")
+}

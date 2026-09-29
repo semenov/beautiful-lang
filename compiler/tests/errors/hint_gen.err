@@ -1,0 +1,7 @@
+error: `T` values can't be ordered
+  --> hint_gen.plumb:2:6
+  |
+2 |   if a > b {
+  |      ^^^^^
+  = help: a generic value can't be ordered: take a function that gives the key, or write the function for a concrete type
+1 error(s)

@@ -901,7 +901,7 @@ impl Parser {
                     e = Expr { kind: ExprKind::Field(Box::new(e), name, nsp), span };
                 }
                 Tok::Question => {
-                    return Err(self.err_here("unexpected `?`").help("use `try f()` to pass an error up, `??` for a fallback, `?.` to reach into an optional value"));
+                    return Err(self.err_here("unexpected `?`").help("for a choice write `if c { a } else { b }`; `try f()` passes an error up, `??` gives a fallback, `?.` reaches into an optional value"));
                 }
                 _ => break,
             }
@@ -935,6 +935,10 @@ impl Parser {
     }
 
     fn lambda_body(&mut self) -> PResult<Expr> {
+        // `x => {"a": x}` reads as a block
+        if self.at(&Tok::LBrace) && matches!(self.peek_at(1), Tok::Str(_)) && matches!(self.peek_at(2), Tok::Colon) {
+            return Err(self.err_here("a `{` after `=>` starts a block, not a map").help("for a map, put it in parentheses: `x => ({\"a\": x})`"));
+        }
         if self.at(&Tok::LBrace) {
             let b = self.block()?;
             let span = b.span;
@@ -1012,7 +1016,7 @@ impl Parser {
                     while !self.at(&Tok::RParen) {
                         params.push(self.ident("a lambda parameter")?);
                         if self.at(&Tok::Colon) {
-                            return Err(self.err_here("lambda parameters have no type annotations; the type comes from where the lambda is used"));
+                            return Err(self.err_here("lambda parameters have no type annotations; the type comes from where the lambda is used").help("give the type where the lambda is kept: `let greet: fn(String) -> String = name => ...`"));
                         }
                         if !self.eat(&Tok::Comma) {
                             break;

@@ -1,0 +1,7 @@
+error: expected `String`, found `Int`
+  --> hint_printn.plumb:3:9
+  |
+3 |   print(n)
+  |         ^
+  = help: put it into text: `"${x}"`
+1 error(s)

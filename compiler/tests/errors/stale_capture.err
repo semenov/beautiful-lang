@@ -1,0 +1,13 @@
+error: `count` changes here, but a lambda made earlier uses it: the lambda keeps the value `count` had when it was made
+  --> stale_capture.plumb:4:3
+  |
+4 |   count = 10
+  |   ^^^^^
+  = help: give the lambda the value it should see: `let count_now = count` before it, or pass it in as an argument
+error: `total` changes here, but a lambda made earlier uses it: the lambda keeps the value `total` had when it was made
+  --> stale_capture.plumb:26:5
+   |
+26 |     total += i
+   |     ^^^^^
+   = help: give the lambda the value it should see: `let total_now = total` before it, or pass it in as an argument
+2 error(s)

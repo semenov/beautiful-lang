@@ -1,0 +1,6 @@
+error: a `{` after `=>` starts a block, not a map
+  --> hint_maplam.plumb:2:45
+  |
+2 |   let f: fn(Int) -> Map<String, Int> = x => {"a": x}
+  |                                             ^
+  = help: for a map, put it in parentheses: `x => ({"a": x})`

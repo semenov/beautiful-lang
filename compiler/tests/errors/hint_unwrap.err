@@ -1,0 +1,7 @@
+error: an optional value has no `.unwrap()`
+  --> hint_unwrap.plumb:3:14
+  |
+3 |   print("${y.unwrap()}")
+  |              ^^^^^^
+  = help: give a fallback: `x ?? 0`, fail: `x ?? throw Failure(message: "...")`, or check it: `if x is some(v) { ... }`
+1 error(s)

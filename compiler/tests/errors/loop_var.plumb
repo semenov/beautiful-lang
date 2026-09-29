@@ -1,0 +1,14 @@
+type It {
+  qty: Int
+}
+
+fn main() {
+  var list = [It(qty: 1)]
+  for it in list {
+    it.qty = 100
+  }
+  var xs = [1]
+  var ys = xs
+  ys.append(2)
+  print("${list} ${xs}")
+}

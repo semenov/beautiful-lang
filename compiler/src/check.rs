@@ -132,7 +132,8 @@ pub fn suggest<'a>(name: &str, candidates: impl Iterator<Item = &'a String>) -> 
         return Some(s.to_string());
     }
     let mut best: Option<(usize, &String)> = None;
-    for c in candidates {
+    // `__find` and friends are the standard library's own
+    for c in candidates.filter(|c| !c.starts_with("__")) {
         let d = levenshtein(name, c);
         if d <= 2 && d < name.len() && best.map(|(bd, _)| d < bd).unwrap_or(true) {
             best = Some((d, c));
@@ -170,7 +171,14 @@ impl Checker {
     }
     fn show(&self, t: &Ty) -> String {
         let t = self.resolve(t);
-        self.prog.show(&t)
+        let mut s = self.prog.show(&t);
+        // generic parameters by the names they were given (`T`, not `T0`)
+        if let Some(f) = &self.f {
+            for (i, g) in f.generics.iter().enumerate().rev() {
+                s = s.replace(&format!("T{}", i), g);
+            }
+        }
+        s
     }
 
     fn lookup_global(&self, name: &str, md: usize) -> Option<Global> {
@@ -1442,7 +1450,7 @@ impl Checker {
         let help: Option<String> = match (&exp, &act) {
             (Ty::Float, Ty::Int) => Some("convert explicitly: `x.to_float()`".into()),
             (Ty::Int, Ty::Float) => Some("convert explicitly: `x.round()`, `x.floor()` or `x.ceil()`".into()),
-            (Ty::Text, Ty::Int) | (Ty::Text, Ty::Float) | (Ty::Text, Ty::Bool) => Some("use interpolation: `\"${x}\"`, or `x.to_string()`".into()),
+            (Ty::Text, Ty::Int) | (Ty::Text, Ty::Float) | (Ty::Text, Ty::Bool) => Some("put it into text: `\"${x}\"`".into()),
             (Ty::Int, Ty::Text) => Some("parse it: `try text.to_int()`".into()),
             (t, Ty::Opt(inner)) if **inner == *t => Some("the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`".into()),
             (Ty::Adt(d, _), _) if matches!(self.prog.defs[*d].kind, TypeKind::Newtype(_)) => {
@@ -2279,7 +2287,7 @@ impl Checker {
                         mk(TK::Index(Box::new(b), Box::new(i)), Ty::Int)
                     }
                     Ty::Text => {
-                        self.err_help(span, "text can't be indexed", "use `text.slice(from: i, to: i + 1)` or `text.chars()`");
+                        self.err_help(span, "a `String` can't be indexed", "use `s.slice(from: i, to: i + 1)` or `s.chars()`");
                         mk(TK::Unit, Ty::Err)
                     }
                     Ty::Err => mk(TK::Unit, Ty::Err),
@@ -2666,7 +2674,9 @@ impl Checker {
                 if let Some((_, pty)) = def.props.iter().find(|p| p.0 == name) {
                     return mk(TK::Prop(Box::new(b), name.to_string()), pty.subst(args));
                 }
-                if def.methods.contains_key(name) {
+                if name == "count" && *d == self.prog.b.list {
+                    self.err_help(nsp, "`count` counts the items that pass a test", "the number of items is `.length`; `xs.count(x => x > 0)` counts matching ones");
+                } else if def.methods.contains_key(name) {
                     self.err_help(nsp, format!("`{}` is a method", name), format!("call it: `.{}()`", name));
                 } else {
                     let mut cands: Vec<String> = def.props.iter().map(|p| p.0.clone()).collect();
@@ -3046,7 +3056,7 @@ impl Checker {
         match (owner.as_str(), f.name.as_str()) {
             ("List", "sum") => need(self, t0, &|_, t| matches!(t, Ty::Int | Ty::Float), "numbers"),
             ("List", "min") | ("List", "max") | ("List", "sort") | ("List", "sorted") => {
-                need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers or text); for other types use `sort_by(x => x.key)`")
+                need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers, String, time); for other types use `sort_by(x => x.key)`")
             }
             ("List", "join") => need(self, t0, &|_, t| *t == Ty::Text, "a list of `String`"),
             ("List", "sort_by") | ("List", "sorted_by") | ("List", "min_by") | ("List", "max_by") => {
@@ -3058,7 +3068,7 @@ impl Checker {
                     }
                 }
             }
-            ("", "min") | ("", "max") | ("", "__less") => need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers or text)"),
+            ("", "min") | ("", "max") | ("", "__less") => need(self, t0, &|c, t| c.ordered(t), "values that can be ordered (numbers, String, time)"),
             _ => {}
         }
     }
@@ -3171,6 +3181,10 @@ impl Checker {
                 return self.iface_call(r, &ids, name, nsp, args, span);
             }
             Ty::Opt(_) => {
+                // `.unwrap()`, `.get()`, `.expect()` from other languages
+                if matches!(name, "unwrap" | "get" | "expect" | "value" | "unwrap_or" | "or_else" | "or") {
+                    return err(self, format!("an optional value has no `.{}()`", name), Some("give a fallback: `x ?? 0`, fail: `x ?? throw Failure(message: \"...\")`, or check it: `if x is some(v) { ... }`".into()));
+                }
                 return err(self, "this value may be missing".into(), Some(format!("unwrap it first: `if x is some(v) {{ v.{}(...) }}`, or use `??`", name)));
             }
             Ty::Err => {
@@ -3592,8 +3606,8 @@ impl Checker {
                 }
                 let t = self.resolve(&lt);
                 if !self.ordered(&self.zonk_ty(&t, &mut None)) && !matches!(t, Ty::Var(_)) {
-                    let s = self.prog.show(&t);
-                    let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers, String, Decimal, time and lists of them can be ordered; compare a field instead") };
+                    let s = self.show(&t);
+                    let help = if matches!(t, Ty::Param(_)) { Some("a generic value can't be ordered: take a function that gives the key, or write the function for a concrete type") } else if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers, String, Decimal, time and lists of them can be ordered; compare a field instead") };
                     return bad(self, format!("`{}` values can't be ordered", s), help);
                 }
                 mk(TK::Binary(op, Box::new(l), Box::new(r)), Ty::Bool)
@@ -4056,8 +4070,11 @@ impl Checker {
                         } else {
                             self.lookup_global(name, md)
                         };
+                        let from_module = path.len() == 2 && self.module_named(&path[0]).is_some();
                         let d = match found {
                             Some(Global::Type(d)) => d,
+                            // lookup_in_module has said what's missing
+                            None if from_module => return TPat::Wild,
                             _ => {
                                 self.err(*span, format!("unknown type `{}`", path.join(".")));
                                 return TPat::Wild;

@@ -1,0 +1,6 @@
+error: text uses double quotes, with values inside as `${x}`
+  --> hint_btick.plumb:3:9
+  |
+3 |   print(`a ${x}`)
+  |         ^
+  = help: write `"a ${x}"`
