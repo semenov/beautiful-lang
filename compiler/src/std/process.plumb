@@ -3,6 +3,8 @@
 pub type Output {
   // the exit status: 0 means success
   status: Int
+  // as text: invalid UTF-8 becomes U+FFFD; for binary output (an image, an
+  // archive) use `process.start` and read its Bytes with `read_all()`
   stdout: String
   stderr: String
 }

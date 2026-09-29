@@ -40,7 +40,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [x] **A String is always valid UTF-8** (Vlad chose A, 2026-09-29):
       invalid bytes become U+FFFD on the way in; `Bytes.text()` strict,
       `Bytes.text_lossy()`; HTTP `text()` can't fail
-- [ ] `process.Output` as bytes (binary output of a command gets U+FFFD)
+- [x] `process.Output` as bytes: not needed; `process.start` + `read_all()` gives Bytes (said in the docs)
 - [x] runtime: a text allocated big (>= 1 MB, mapped) and then shortened
       below that (lt_text_quote, other `r->len = w` sites) is freed with
       free() by its length: a crash. Free by the allocated size, or copy

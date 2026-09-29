@@ -204,6 +204,8 @@ process: this program, and running other programs.
 pub type Output {
   // the exit status: 0 means success
   status: Int
+  // as text: invalid UTF-8 becomes U+FFFD; for binary output (an image, an
+  // archive) use `process.start` and read its Bytes with `read_all()`
   stdout: String
   stderr: String
 }
@@ -1682,6 +1684,8 @@ builtin type Int {
   fn to_float(self) -> Float
   fn to_decimal(self) -> Decimal
   fn to_string(self) -> String
+  // Whole-number division rounding down, toward minus infinity
+  // ((-7).div(2) == -4); `%` matches it ((-7) % 2 == 1).
   fn div(self, by: Int) -> Int
   fn abs(self) -> Int
   fn pow(self, exponent: Int) -> Int
@@ -1717,7 +1721,9 @@ builtin type Float {
 
 // An exact decimal number, for money: 0.1 + 0.2 == 0.3. Up to 18 digits.
 // A number literal becomes one where a Decimal is expected:
-// `let price: Decimal = 19.99`. `+ - *` are exact; division is `div`,
+// `let price: Decimal = 19.99`. `+ -` are exact, `*` rounds past 18 digits
+// after the point, and past 18 significant digits it stops the program;
+// division is `div`,
 // which says how many digits to keep. `1.50` keeps its two digits when
 // printed, and `1.50 == 1.5`.
 builtin type Decimal {
