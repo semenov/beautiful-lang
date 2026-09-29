@@ -170,7 +170,10 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           `/articles/feed`); Go routers pick the most specific (major)
     - [ ] `json.decode<T>` can't tell a missing field from `null` (PUT
           semantics) (major)
-    - [ ] `crypto.hash_password` ~200 ms vs ~22 ms for OpenSSL's PBKDF2
+    - [x] `crypto.hash_password` ~200 ms vs ~22 ms for OpenSSL's PBKDF2:
+          now 80 ms (two compressions per iteration); the rest is
+          OpenSSL's use of the CPU's SHA instructions (arm64 SHA2, x86
+          SHA-NI): later
     - [x] a `String?` as an SQL parameter (docs say `none` is allowed)
     - [ ] SQL can't be shared between queries (not even a top-level `let`)
     - [ ] database errors are untyped (UNIQUE violation is only text)

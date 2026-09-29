@@ -1066,6 +1066,44 @@ static lt_bytes *lt_crypto_hmac(lt_bytes *key, lt_bytes *msg) {
     return r;
 }
 
+// HMAC-SHA256's states after the key's inner and outer pad blocks
+static void lt_pbkdf2_keys(lt_bytes *pw, lt_sha256 *in, lt_sha256 *out) {
+    unsigned char k[64] = { 0 };
+    if (pw->len > 64) {
+        lt_sha256 s;
+        lt_sha256_init(&s);
+        lt_sha256_update(&s, pw->data, (size_t)pw->len);
+        lt_sha256_final(&s, k);
+    } else {
+        memcpy(k, pw->data, (size_t)pw->len);
+    }
+    unsigned char pad[64];
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x36;
+    lt_sha256_init(in);
+    lt_sha256_block(in, pad);
+    for (int i = 0; i < 64; i++) pad[i] = k[i] ^ 0x5c;
+    lt_sha256_init(out);
+    lt_sha256_block(out, pad);
+}
+
+// w = SHA256 continued from `from` over the 32 bytes w (after one 64-byte
+// block): one compression of w, padding and the length (96 bytes)
+static void lt_pbkdf2_step(const lt_sha256 *from, uint32_t w[8]) {
+    unsigned char blk[64];
+    for (int j = 0; j < 8; j++) {
+        blk[4 * j] = (unsigned char)(w[j] >> 24);
+        blk[4 * j + 1] = (unsigned char)(w[j] >> 16);
+        blk[4 * j + 2] = (unsigned char)(w[j] >> 8);
+        blk[4 * j + 3] = (unsigned char)w[j];
+    }
+    memset(blk + 32, 0, 32);
+    blk[32] = 0x80;
+    blk[62] = 0x03; // 96 * 8 = 768 bits = 0x0300
+    lt_sha256 s = *from;
+    lt_sha256_block(&s, blk);
+    memcpy(w, s.h, 32);
+}
+
 static lt_bytes *lt_crypto_pbkdf2(lt_bytes *pw, lt_bytes *salt, int64_t iterations, int64_t length, int line) {
     if (iterations < 1 || length < 1 || length > 1024) lt_panic_at("pbkdf2: iterations must be at least 1 and length 1 to 1024", line);
     lt_bytes *out = lt_bytes_new(length);
@@ -1079,9 +1117,24 @@ static lt_bytes *lt_crypto_pbkdf2(lt_bytes *pw, lt_bytes *salt, int64_t iteratio
         unsigned char u[32], t[32];
         lt_hmac_raw(pw->data, (size_t)pw->len, msg, (size_t)salt->len + 4, u);
         memcpy(t, u, 32);
+        // each further HMAC is two compressions: the key's inner and outer
+        // states are computed once, and a 32-byte message pads to one block
+        lt_sha256 in0, out0;
+        lt_pbkdf2_keys(pw, &in0, &out0);
+        uint32_t w[8];
+        for (int j = 0; j < 8; j++) w[j] = (uint32_t)u[4 * j] << 24 | (uint32_t)u[4 * j + 1] << 16 | (uint32_t)u[4 * j + 2] << 8 | u[4 * j + 3];
+        uint32_t acc[8];
+        memcpy(acc, w, sizeof acc);
         for (int64_t i = 1; i < iterations; i++) {
-            lt_hmac_raw(pw->data, (size_t)pw->len, u, 32, u);
-            for (int j = 0; j < 32; j++) t[j] ^= u[j];
+            lt_pbkdf2_step(&in0, w);
+            lt_pbkdf2_step(&out0, w);
+            for (int j = 0; j < 8; j++) acc[j] ^= w[j];
+        }
+        for (int j = 0; j < 8; j++) {
+            t[4 * j] = (unsigned char)(acc[j] >> 24);
+            t[4 * j + 1] = (unsigned char)(acc[j] >> 16);
+            t[4 * j + 2] = (unsigned char)(acc[j] >> 8);
+            t[4 * j + 3] = (unsigned char)acc[j];
         }
         int64_t take = length - out->len < 32 ? length - out->len : 32;
         memcpy(out->data + out->len, t, (size_t)take);
