@@ -40,8 +40,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         rounds, not 64 tight scans
   - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), maps 59 vs
         43 MB; json 332 -> 264 MB vs 247 (a JSON node is 40 bytes now)
-  - [ ] other runtime buffers that grow with realloc and are freed to malloc
-        (lt_grow for HTTP bodies, readers): same treatment where big
+  - [x] other runtime buffers that grow with realloc and are freed to malloc
+        (lt_grow for HTTP bodies, readers): lt_rmalloc/lt_rrealloc/lt_rfree
+        (size in a header, big ones mapped) for request buffers, chunked
+        bodies, stream buffers, client bodies. (20 uploads of 20 MB: macOS
+        gave the memory back either way in that test)
   - [x] lt_dyn is 80 bytes per JSON node: a union would halve it
 - [x] **A realistic backend vs Go** (Vlad, 2026-09-29): benchmarks/backend
       (notes service, SQLite, JSON, auth, logs): Lang 28k req/s, 91 us CPU

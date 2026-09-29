@@ -121,7 +121,7 @@ static void lt_conn_free(lt_handle *h) {
         if (f.obj) lt_iface_drop(f);
     }
     lt_conn_release(c);
-    free(c->buf);
+    lt_rfree(c->buf);
     free(c->wbuf);
     lt_text_drop(c->path);
     free(c);
@@ -161,7 +161,7 @@ static lt_err lt_conn_fill(lt_conn *c, bool *eof) {
     }
     if (c->bcap - c->blen < 4096) {
         c->bcap = c->bcap ? c->bcap * 2 : 16384;
-        c->buf = (char *)realloc(c->buf, c->bcap);
+        c->buf = (char *)lt_rrealloc(c->buf, c->bcap);
     }
     if (c->tls) {
         lt_err e = { 0 };

@@ -311,6 +311,44 @@ LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
 
 #endif
 
+// Byte buffers of the runtime that can grow big (request bodies, stream
+// buffers): the size is kept in front, and big ones are mapped from the
+// system and given back when freed (malloc keeps freed big blocks resident).
+typedef struct { size_t size; size_t pad; } lt_rhdr;
+static void *lt_rmalloc(size_t n) {
+    size_t t = n + sizeof(lt_rhdr);
+    lt_rhdr *h = t >= LT_BIG ? (lt_rhdr *)lt_big_map(t) : (lt_rhdr *)malloc(t);
+    if (!h) lt_oom();
+    h->size = n;
+    return h + 1;
+}
+static void lt_rfree(void *p) {
+    if (!p) return;
+    lt_rhdr *h = (lt_rhdr *)p - 1;
+    if (h->size + sizeof(lt_rhdr) >= LT_BIG) lt_big_free(h, h->size + sizeof(lt_rhdr));
+    else free(h);
+}
+static void *lt_rrealloc(void *p, size_t n) {
+    if (!p) return lt_rmalloc(n);
+    lt_rhdr *h = (lt_rhdr *)p - 1;
+    bool was_big = h->size + sizeof(lt_rhdr) >= LT_BIG, big = n + sizeof(lt_rhdr) >= LT_BIG;
+    if (!was_big && !big) {
+        h = (lt_rhdr *)realloc(h, n + sizeof(lt_rhdr));
+        if (!h) lt_oom();
+        h->size = n;
+        return h + 1;
+    }
+    if (was_big && big) {
+        h = (lt_rhdr *)lt_big_realloc(h, h->size + sizeof(lt_rhdr), n + sizeof(lt_rhdr));
+        h->size = n;
+        return h + 1;
+    }
+    void *q = lt_rmalloc(n);
+    memcpy(q, p, h->size < n ? h->size : n);
+    lt_rfree(p);
+    return q;
+}
+
 // ---------------------------------------------------------------- panics
 
 static void (*lt_panic_hook)(const char *msg, int line);

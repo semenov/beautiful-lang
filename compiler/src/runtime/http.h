@@ -399,7 +399,7 @@ static char *lt_http_grow(char *buf, size_t *cap, size_t need, lt_http_raw *r) {
     char *old = buf;
     size_t nc = *cap;
     while (nc < need) nc *= 2;
-    buf = (char *)realloc(buf, nc);
+    buf = (char *)lt_rrealloc(buf, nc);
     *cap = nc;
     ptrdiff_t d = buf - old;
     r->method += d;
@@ -465,13 +465,13 @@ static int64_t lt_http_read_chunked(int fd, char **buf, size_t *cap, size_t *len
             return (int64_t)at;
         }
         if (total + size > LT_HTTP_MAX_BODY) {
-            free(out);
+            lt_rfree(out);
             return -2;
         }
         if (!lt_http_fill(fd, buf, cap, len, at + size + 2, r)) goto gone;
         if (total + size > bcap) {
             bcap = (total + size) * 2;
-            out = (char *)realloc(out, bcap);
+            out = (char *)lt_rrealloc(out, bcap);
         }
         memcpy(out + total, *buf + at, size);
         total += size;
@@ -482,10 +482,10 @@ static int64_t lt_http_read_chunked(int fd, char **buf, size_t *cap, size_t *len
         else goto bad;
     }
 bad:
-    free(out);
+    lt_rfree(out);
     return -1;
 gone:
-    free(out);
+    lt_rfree(out);
     return 0;
 }
 
@@ -507,7 +507,7 @@ static void lt_http_conn(lt_task *t) {
     memcpy(&a, t->result, sizeof a);
     int fd = a.fd;
     size_t cap = 16384, len = 0;
-    char *buf = (char *)malloc(cap);
+    char *buf = (char *)lt_rmalloc(cap);
     bool keep = true;
     char client_ip[64];
     lt_http_client_ip(fd, client_ip, sizeof client_ip);
@@ -536,7 +536,7 @@ static void lt_http_conn(lt_task *t) {
                 lt_http_simple(fd, 413, "request head too large");
                 goto done;
             }
-            if (len == cap) buf = (char *)realloc(buf, cap *= 2);
+            if (len == cap) buf = (char *)lt_rrealloc(buf, cap *= 2);
             ssize_t n = lt_sock_read(fd, buf + len, cap - len);
             if (n <= 0) goto done;
             len += (size_t)n;
@@ -632,7 +632,7 @@ static void lt_http_conn(lt_task *t) {
         lt_http_out out;
         memset(&out, 0, sizeof out);
         if (!lt_hconn_set(&hc, 0)) {
-            free(chunked_body);
+            lt_rfree(chunked_body);
             goto done;
         }
         lt_http_dispatch(a.handler, &r, &out);
@@ -650,7 +650,7 @@ static void lt_http_conn(lt_task *t) {
             for (int64_t i = 0; i < out.headers->len; i++) lt_text_drop(out.headers->items[i]);
             lt_free(out.headers, sizeof(lt_texts) + sizeof(lt_text *) * (size_t)out.headers->cap);
         }
-        free(chunked_body);
+        lt_rfree(chunked_body);
         if (!ok) break;
         // keep the rest (a pipelined next request)
         memmove(buf, buf + need, len - need);
@@ -659,7 +659,7 @@ static void lt_http_conn(lt_task *t) {
 done:
     lt_hconn_remove(&hc);
     close(fd);
-    free(buf);
+    lt_rfree(buf);
     lt_fn_drop(a.handler);
 }
 
@@ -792,7 +792,7 @@ static size_t lt_curl_body(char *p, size_t size, size_t n, void *ud) {
     size_t add = size * n;
     if (g->len + add + 1 > g->cap) {
         g->cap = (g->len + add + 1) * 2;
-        g->d = (char *)realloc(g->d, g->cap);
+        g->d = (char *)lt_rrealloc(g->d, g->cap);
     }
     memcpy(g->d + g->len, p, add);
     g->len += add;
@@ -1147,7 +1147,7 @@ static lt_err lt_http_send_request(lt_text *method, lt_text *url, lt_texts *head
     lt_grow g = { NULL, 0, 0 };
     lt_err e = lt_http_perform(method->data, url->data, body, headers, timeout_ms, o, lt_curl_body, &g, out);
     if (!e.obj) out->body = lt_bytes_from(g.d ? g.d : "", (int64_t)g.len);
-    free(g.d);
+    lt_rfree(g.d);
     return e;
 }
 
