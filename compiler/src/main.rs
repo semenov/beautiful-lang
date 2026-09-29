@@ -84,6 +84,7 @@ fn std_module(name: &str) -> Option<&'static str> {
         "zlib" => include_str!("std/zlib.lang"),
         "xml" => include_str!("std/xml.lang"),
         "io" => include_str!("std/io.lang"),
+        "sql" => include_str!("std/sql.lang"),
         _ => return None,
     })
 }

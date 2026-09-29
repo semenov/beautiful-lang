@@ -1,0 +1,20 @@
+import sql
+import db
+
+type User {
+  id: Int
+  name: Text
+  admin: Bool = false
+  score: Float?
+}
+
+fn main() throws {
+  let users = try sql.decode<User>(["id", "name", "admin", "score"], [[sql.Value.Integer(value: 1), sql.Value.String(value: "Ada"), sql.Value.Boolean(value: true), sql.Value.Real(value: 2.5)], [sql.Value.String(value: "2"), sql.Value.String(value: "Bob"), sql.Value.Null, sql.Value.Null]])
+  for u in users {
+    print("${u.id} ${u.name} ${u.admin} ${u.score ?? 0.0}")
+  }
+  let bad = try sql.decode<User>(["id"], [[sql.Value.String(value: "x")]]) catch err {
+    print(err.message())
+    return
+  }
+}

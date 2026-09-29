@@ -1,0 +1,30 @@
+// sql: what SQL databases share. The built-in `db` (SQLite) and database
+// packages (Postgres, ...) use it, so they all work the same way:
+//
+// - A `Query` can only be SQL written right in the call, as text in quotes.
+//   Building SQL from pieces of text is a compile error, so SQL injection
+//   can't happen: values go in as parameters.
+// - Parameters are written as plain values: `[name, 36, true]` becomes a
+//   `List<Value>` by itself (Int, Float, Text, Bool, Bytes, new types over
+//   them, and `none`).
+// - Rows become records by column name, like `json.decode`.
+
+// SQL text. Only a literal becomes a `Query`; a database package reads the
+// text with `query.value`.
+pub type Query = Text
+
+// A parameter or column value.
+pub enum Value {
+  Null
+  Integer(value: Int)
+  Real(value: Float)
+  String(value: Text)
+  Blob(value: Bytes)
+  Boolean(value: Bool)
+}
+
+// Rows as records: `columns` name the values of each row, matched to fields
+// by name. Numbers and true/false convert as in `json.decode`; Null is
+// "missing" (fine for optional fields and fields with defaults). For
+// database packages.
+pub fn decode<T>(columns: List<Text>, rows: List<List<Value>>) throws -> List<T>

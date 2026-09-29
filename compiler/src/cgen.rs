@@ -1578,6 +1578,44 @@ static lt_err {name}({c} *out) {{
         name
     }
 
+    // sql.decode<T>(columns, rows): each row -> an object -> T
+    fn sql_decode(&mut self, tys: &[Ty], a: &[String]) -> String {
+        let t = tys[0].clone();
+        let id = self.tid(&t);
+        self.need(H::Dec, id);
+        let lt = Ty::Adt(self.prog.b.list, vec![t]);
+        let lid = self.tid(&lt);
+        self.need(H::Ops, lid);
+        self.need(H::Drop, lid);
+        let value_def = (0..self.prog.defs.len())
+            .find(|&d| self.prog.defs[d].name == "Value" && self.prog.module_names.get(self.prog.defs[d].module).map(|m| m == "sql").unwrap_or(false))
+            .expect("sql.Value");
+        let vt = Ty::Adt(value_def, vec![]);
+        let vid = self.tid(&vt);
+        let row_t = Ty::Adt(self.prog.b.list, vec![vt]);
+        let rows_t = Ty::Adt(self.prog.b.list, vec![row_t.clone()]);
+        let (row_id, rows_id) = (self.tid(&row_t), self.tid(&rows_t));
+        let acc = match &self.tys[vid].kind {
+            Kind::Enum { boxed: true, .. } => "->v.",
+            _ => ".",
+        };
+        let (lc, tc, rowc, rowsc) = (self.tys[lid].c.clone(), self.tys[id].c.clone(), self.tys[row_id].c.clone(), self.tys[rows_id].c.clone());
+        format!(
+            "({{ lt_texts *c_ = {cols}; {rowsc} r_ = {rows}; {lc} o_ = {lc}_new(r_->len); lt_err e_ = {{0}}; lt_dyn d_; memset(&d_, 0, sizeof d_); d_.kind = LT_D_OBJ; d_.items = (lt_dyn *)calloc((size_t)c_->len + 1, sizeof(lt_dyn)); d_.keys = (const char **)calloc((size_t)c_->len + 1, sizeof(char *)); d_.klens = (int64_t *)calloc((size_t)c_->len + 1, sizeof(int64_t)); \
+for (int64_t i_ = 0; i_ < r_->len && !e_.obj; i_++) {{ {rowc} row_ = r_->items[i_]; int64_t m_ = row_->len < c_->len ? row_->len : c_->len; d_.n = 0; \
+for (int64_t j_ = 0; j_ < m_; j_++) {{ __typeof__(row_->items[0]) x_ = row_->items[j_]; if (x_{a}tag == 0) continue; /* null: missing */ lt_dyn *v_ = &d_.items[d_.n]; memset(v_, 0, sizeof *v_); d_.keys[d_.n] = c_->items[j_]->data; d_.klens[d_.n] = c_->items[j_]->len; d_.n++; switch (x_{a}tag) {{ \
+case 1: v_->kind = LT_D_NUM; v_->is_int = true; v_->i = x_{a}u.v1.f0; v_->num = (double)v_->i; break; \
+case 2: v_->kind = LT_D_NUM; v_->num = x_{a}u.v2.f0; break; \
+case 3: v_->kind = LT_D_STR; v_->s = x_{a}u.v3.f0->data; v_->slen = x_{a}u.v3.f0->len; break; \
+case 4: v_->kind = LT_D_STR; v_->s = (const char *)x_{a}u.v4.f0->data; v_->slen = x_{a}u.v4.f0->len; break; \
+case 5: v_->kind = LT_D_BOOL; v_->b = x_{a}u.v5.f0; break; \
+default: v_->kind = LT_D_NULL; }} }} \
+lt_path q_ = {{ NULL, NULL, 0, i_ + 1 }}; {tc} x_; e_ = dec_{id}(\"sql\", &d_, &q_, 1, &x_); if (!e_.obj) {lc}_push(&o_, x_); }} \
+free(d_.items); free(d_.keys); free(d_.klens); if (!e_.obj) *{out} = o_; else drop_{lid}(o_); e_; }})",
+            cols = a[0], rows = a[1], out = a[2], lc = lc, tc = tc, rowc = rowc, rowsc = rowsc, id = id, lid = lid, a = acc
+        )
+    }
+
     fn csv_intrinsic(&mut self, name: &str, tys: &[Ty], a: &[String]) -> String {
         // List<List<Text>>: an outer list of lt_texts*
         let rows_ty = Ty::Adt(self.prog.b.list, vec![Ty::Adt(self.prog.b.list, vec![Ty::Text])]);
@@ -2607,6 +2645,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "url.encode" => format!("lt_url_encode({})", a[0]),
             "url.decode" => format!("lt_url_decode_text({}, {})", a[0], a[1]),
             "csv.parse" | "csv.encode" | "csv.decode" => self.csv_intrinsic(name, tys, a),
+            "sql.decode" => self.sql_decode(tys, a),
             "Float.pow" => format!("pow({}, {})", a[0], a[1]),
             "Float.sqrt" => format!("sqrt({})", a[0]),
             "Bool.to_text" => format!("lt_bool_to_text({})", a[0]),

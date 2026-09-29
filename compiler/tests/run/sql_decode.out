@@ -1,0 +1,3 @@
+1 Ada true 2.5
+2 Bob false 0.0
+sql: at $[1].id: expected a whole number, found "x"

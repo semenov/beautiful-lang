@@ -20,6 +20,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       agents), STDLIB.md (reference), DESIGN.md (stdlib decisions: why
       Postgres/Redis are packages, streams, static builds)
 
+- [ ] **Port a small open-source project** to the language; note what's
+      missing in the language and libraries and add it as I go
+
 ## Then: my own review of what's missing or weak
 
 - [ ] Review the stdlib against Go and Node for backend/CLI gaps

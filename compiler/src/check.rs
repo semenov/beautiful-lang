@@ -1033,6 +1033,17 @@ impl Checker {
                 let sp = e.span;
                 return TExpr { kind: TK::Some(Box::new(e)), ty: exp, span: sp };
             }
+            // `sql.Query`: only SQL written right here, never text built at run time
+            (_, Ty::Adt(d, _)) if self.sql_def(*d, "Query") && !matches!(&act, Ty::Adt(x, _) if x == d) => {
+                let sp = e.span;
+                if matches!(e.kind, TK::Text(_)) {
+                    return TExpr { kind: TK::Wrap(Box::new(e)), ty: exp, span: sp };
+                }
+                if act == Ty::Text {
+                    self.err_help(sp, "the SQL must be written right here, as text in quotes", "put values in as parameters: `conn.query<User>(\"select * from users where id = ?\", [id])`");
+                    return TExpr { ty: Ty::Err, ..e };
+                }
+            }
             (_, Ty::Adt(d, _)) if self.db_value_def(*d) && !matches!(&act, Ty::Adt(x, _) if x == d) => {
                 let d = *d;
                 if let Some(v) = self.to_db_value(e.clone(), &exp, d) {
@@ -1069,10 +1080,14 @@ impl Checker {
         e
     }
 
-    // `db.Value`: database parameters are written as plain values
+    // `sql.Value`: database parameters are written as plain values
     fn db_value_def(&self, d: DefId) -> bool {
+        self.sql_def(d, "Value")
+    }
+
+    fn sql_def(&self, d: DefId, name: &str) -> bool {
         let def = &self.prog.defs[d];
-        def.name == "Value" && self.prog.module_names.get(def.module).map(|m| m == "db").unwrap_or(false)
+        def.name == name && self.prog.module_names.get(def.module).map(|m| m == "sql").unwrap_or(false)
     }
 
     fn to_db_value(&mut self, e: TExpr, exp: &Ty, d: DefId) -> Option<TExpr> {
@@ -2079,6 +2094,24 @@ impl Checker {
         }
     }
 
+    // `module.Enum` written before a variant name
+    fn imported_enum(&mut self, e: &Expr) -> Option<DefId> {
+        if let ExprKind::Field(recv, tn, nsp) = &e.kind {
+            if let ExprKind::Ident(alias) = &recv.kind {
+                if self.lookup_local(alias).is_none() {
+                    if let Some(target) = self.module_named(alias) {
+                        if let Some(Global::Type(d)) = self.lookup_in_module(target, tn, *nsp) {
+                            if matches!(self.prog.defs[d].kind, TypeKind::Enum { .. }) {
+                                return Some(d);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn field(&mut self, base: &Expr, name: &str, nsp: Span, span: Span) -> TExpr {
         let mk = |kind, ty| TExpr { kind, ty, span };
         if let ExprKind::Ident(alias) = &base.kind {
@@ -2099,6 +2132,19 @@ impl Checker {
                     None => return mk(TK::Unit, Ty::Err),
                 }
             }
+        }
+        // `json.Value.Null`
+        if let Some(d) = self.imported_enum(base) {
+            if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
+                if let Some(i) = variants.iter().position(|v| v.name == name) {
+                    let ng = self.prog.defs[d].generics.len();
+                    let targs: Vec<Ty> = (0..ng).map(|_| self.fresh()).collect();
+                    return mk(TK::Variant { def: d, idx: i, fields: vec![] }, Ty::Adt(d, targs));
+                }
+            }
+            let n = self.prog.defs[d].name.clone();
+            self.err(nsp, format!("`{}` has no variant `{}`", n, name));
+            return mk(TK::Unit, Ty::Err);
         }
         // `Status.Draft`
         if let ExprKind::Ident(tn) = &base.kind {
@@ -2271,6 +2317,17 @@ impl Checker {
                 }
             }
             ExprKind::Field(recv, name, nsp) => {
+                // `json.Value.String(...)`: a variant of an imported module's enum
+                if let Some(d) = self.imported_enum(recv) {
+                    if let TypeKind::Enum { variants } = &self.prog.defs[d].kind {
+                        if let Some(i) = variants.iter().position(|v| v.name == *name) {
+                            return self.variant_ctor(d, i, args, span, expected);
+                        }
+                    }
+                    let n = self.prog.defs[d].name.clone();
+                    self.err(*nsp, format!("`{}` has no variant `{}`", n, name));
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
                 // `Status.Circle(...)`
                 if let ExprKind::Ident(tn) = &recv.kind {
                     if self.lookup_local(tn).is_none() {
@@ -2656,17 +2713,6 @@ impl Checker {
                 let _ = self.try_unify(&r2, &e2);
             }
         }
-        if matches!(f.name.as_str(), "execute" | "execute_counting" | "query") && self.prog.module_names.get(f.module).map(|m| m == "db").unwrap_or(false) {
-            if let Some(a0) = args.first() {
-                let literal = match &a0.value.kind {
-                    ExprKind::Str(segs) => segs.iter().all(|s| matches!(s, ast::StrSeg::Lit(_))),
-                    _ => false,
-                };
-                if !literal {
-                    self.err_help(a0.span, "the SQL must be written right here, as text in quotes", "put values in with `?` and pass them in the list: `conn.query<User>(\"select * from users where id = ?\", [id])`");
-                }
-            }
-        }
         let what = format!("`{}`", f.name);
         let checked = self.check_args(&params, args, span, &what, true);
         let throws = self.rethrow_result(&f, &checked, f.throws);
@@ -2796,6 +2842,10 @@ impl Checker {
                 TExpr { kind: TK::Record { def: d, fields: fs }, ty, span }
             }
             TypeKind::Newtype(inner) => {
+                if self.sql_def(d, "Query") && self.prog.module_names.get(self.fc().module).map(|m| m != "sql").unwrap_or(true) {
+                    self.err_help(span, "SQL can't be made from text at run time", "write the SQL right in the call, and put values in as parameters");
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
                 if args.len() != 1 || args[0].name.is_some() {
                     self.err_help(span, format!("`{}` wraps one value", def.name), format!("write `{}(x)`", def.name));
                     return TExpr { kind: TK::Unit, ty: Ty::Err, span };
