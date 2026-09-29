@@ -9,14 +9,21 @@ typedef struct lt_dyn {
     bool b;
     bool is_int; // a number written without a fraction or exponent
     bool raw;    // strings: raw bytes (database blobs), not base64
-    int64_t i;
-    double num;
-    const char *s; // strings: not zero-terminated
-    int64_t slen;
-    int64_t n;                // array / object size
-    struct lt_dyn *items;     // array items / object values
-    const char **keys;        // object keys
-    int64_t *klens;
+    // a value is either a scalar or a container (40 bytes a node, not 80)
+    union {
+        struct {
+            int64_t i;
+            double num;
+            const char *s; // strings, and numbers as written: not zero-terminated
+            int64_t slen;
+        };
+        struct {
+            int64_t n;            // array / object size
+            struct lt_dyn *items; // array items / object values
+            const char **keys;    // object keys
+            int64_t *klens;
+        };
+    };
 } lt_dyn;
 
 // All nodes of one parse live in an arena freed at once.

@@ -36,11 +36,11 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] spawn: 0.18 s vs Go 0.06 s (~0.9 us per task: calloc, the stack
         pool lock, queue, wake, switch, finish); idle workers spin ~1 s of
         CPU in that benchmark
-  - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), json 332 vs
-        247 MB (80-byte lt_dyn nodes), maps 59 vs 43 MB
+  - [ ] memory: sort 151 vs 97 MB (key pairs + merge buffer), maps 59 vs
+        43 MB; json 332 -> 264 MB vs 247 (a JSON node is 40 bytes now)
   - [ ] other runtime buffers that grow with realloc and are freed to malloc
         (lt_grow for HTTP bodies, readers): same treatment where big
-  - [ ] lt_dyn is 80 bytes per JSON node: a union would halve it
+  - [x] lt_dyn is 80 bytes per JSON node: a union would halve it
 - [x] **A realistic backend vs Go** (Vlad, 2026-09-29): benchmarks/backend
       (notes service, SQLite, JSON, auth, logs): Lang 28k req/s, 91 us CPU
       per request, 10 MB vs Go 17k req/s, 348 us, 45 MB. Found and fixed: a
