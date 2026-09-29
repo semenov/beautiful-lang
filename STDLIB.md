@@ -1179,7 +1179,11 @@ pub builtin type Connection {
   fn execute_counting(self, query: sql.Query, params: List<sql.Value>) throws -> Int
   // The rows as records, columns matched to fields by name.
   fn query<T>(self, query: sql.Query, params: List<sql.Value>) throws -> List<T>
-  // The id of the row inserted last.
+  // An insert, returning the new row's id: `let id = try conn.insert(...)`.
+  // Safe when several tasks share the connection.
+  fn insert(self, query: sql.Query, params: List<sql.Value>) throws -> Int
+  // The id of the row inserted last on this connection (by any task: when
+  // tasks share the connection, use `insert`).
   fn last_id(self) -> Int
   fn close(self) throws
   // Runs `work` in a transaction: everything or nothing. An error inside

@@ -41,6 +41,11 @@ fn main() throws {
       print("rolled back: ${err.message()}")
       0
     }
+    let new_id = try conn.insert("insert into users (name, age) values (?, ?)", ["Inserted", 50])
+    print("inserted: ${new_id == conn.last_id()}")
+    // a bound `limit ?` makes SQLite prepare the statement again
+    let newest = try conn.query<User>("select id, name, age from users order by id desc limit ?", [2])
+    print("newest: ${newest.length}")
     let count = try conn.query<Count>("select count(*) as n from users", [])
     print("users: ${count[0].n}")
     let missing = try conn.query<User>("select id, name from users", []) catch err {

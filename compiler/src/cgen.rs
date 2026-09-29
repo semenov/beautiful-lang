@@ -3374,6 +3374,10 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                         let out = if n == "db.Connection.execute" { "NULL".to_string() } else { a[3].clone() };
                         format!("({{ lt_dbval *v_ = {}; lt_err e_ = lt_db_execute({}, {}, v_, {}->len, {}); free(v_); e_; }})", pv, a[0], a[1], a[2], out)
                     }
+                    "db.Connection.insert" => {
+                        let pv = params(self, &a[2], pty.as_ref().unwrap());
+                        format!("({{ lt_dbval *v_ = {}; lt_err e_ = lt_db_insert({}, {}, v_, {}->len, {}); free(v_); e_; }})", pv, a[0], a[1], a[2], a[3])
+                    }
                     "db.Connection.query" => {
                         let t = tys.last().unwrap().clone();
                         let rid = self.tid(&t);

@@ -1,0 +1,167 @@
+// A small notes service, shaped like a real app's backend: users, token
+// login, notes per user in SQLite, JSON in and out, validation, an auth
+// middleware and request logs. The Go version in ../go does the same.
+import crypto
+import db
+import env
+import http
+import json
+import time
+
+type User {
+  id: Int
+  name: String
+  email: String
+}
+
+type NewUser {
+  name: String
+  email: String
+}
+
+type Login {
+  email: String
+}
+
+type Token {
+  token: String
+  user_id: Int
+}
+
+type Note {
+  id: Int
+  user_id: Int
+  title: String
+  body: String
+  created_at: Int
+}
+
+type NewNote {
+  title: String
+  body: String
+}
+
+type ApiError {
+  error: String
+}
+
+let secret = "bench-secret"
+
+fn sign(user_id: Int) -> String {
+  let mac = crypto.hmac_sha256(secret.bytes(), data: "${user_id}".bytes())
+  return "${user_id}.${mac.hex()}"
+}
+
+// The user a request is from, if its token is good.
+fn user_of(req: http.Request) -> Int? {
+  let auth = req.header("authorization") ?? ""
+  if not auth.starts_with("Bearer ") {
+    return none
+  }
+  let token = auth.slice(from: 7, to: auth.length)
+  let parts = token.split(".")
+  if parts.length != 2 {
+    return none
+  }
+  let id = try parts[0].to_int() catch _ { return none }
+  if sign(id) != token {
+    return none
+  }
+  return id
+}
+
+fn failure(status: Int, message: String) -> http.Response {
+  return http.json(status, ApiError(error: message))
+}
+
+fn create_user(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let input = try json.decode<NewUser>(try req.text()) catch err {
+    return failure(400, message: err.message())
+  }
+  if input.name.trim().is_empty() or input.name.length > 100 {
+    return failure(422, message: "name: 1 to 100 characters")
+  }
+  if not input.email.contains("@") or input.email.length > 200 {
+    return failure(422, message: "email: not an email address")
+  }
+  let id = try conn.insert("insert into users (name, email) values (?, ?)", [input.name, input.email]) catch err {
+    return failure(409, message: "email: already registered")
+  }
+  return http.json(201, User(id: id, name: input.name, email: input.email))
+}
+
+fn login(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let input = try json.decode<Login>(try req.text()) catch err {
+    return failure(400, message: err.message())
+  }
+  let users = try conn.query<User>("select id, name, email from users where email = ?", [input.email])
+  if users.is_empty() {
+    return failure(404, message: "no such user")
+  }
+  return http.json(200, Token(token: sign(users[0].id), user_id: users[0].id))
+}
+
+fn list_notes(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let user = user_of(req) ?? 0
+  if user == 0 {
+    return failure(401, message: "log in first")
+  }
+  var limit = try (req.query("limit") ?? "20").to_int() catch _ { 20 }
+  limit = max(1, b: min(limit, b: 100))
+  let notes = try conn.query<Note>("select id, user_id, title, body, created_at from notes where user_id = ? order by id desc limit ?", [user, limit])
+  return http.json(200, notes)
+}
+
+fn get_note(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let user = user_of(req) ?? 0
+  if user == 0 {
+    return failure(401, message: "log in first")
+  }
+  let id = try (req.param("id") ?? "").to_int() catch _ {
+    return failure(400, message: "id: not a number")
+  }
+  let notes = try conn.query<Note>("select id, user_id, title, body, created_at from notes where id = ? and user_id = ?", [id, user])
+  if notes.is_empty() {
+    return failure(404, message: "no such note")
+  }
+  return http.json(200, notes[0])
+}
+
+fn create_note(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let user = user_of(req) ?? 0
+  if user == 0 {
+    return failure(401, message: "log in first")
+  }
+  let input = try json.decode<NewNote>(try req.text()) catch err {
+    return failure(400, message: err.message())
+  }
+  if input.title.trim().is_empty() or input.title.length > 200 {
+    return failure(422, message: "title: 1 to 200 characters")
+  }
+  if input.body.length > 10000 {
+    return failure(422, message: "body: at most 10000 characters")
+  }
+  let now = time.unix_now()
+  let id = try conn.insert("insert into notes (user_id, title, body, created_at) values (?, ?, ?, ?)", [user, input.title, input.body, now])
+  return http.json(201, Note(id: id, user_id: user, title: input.title, body: input.body, created_at: now))
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8300").to_int()
+  let path = env.get("DB") ?? "notes.db"
+  with conn = try db.open(path) {
+    try conn.execute("pragma journal_mode = wal", [])
+    try conn.execute("pragma synchronous = normal", [])
+    try conn.execute("create table if not exists users (id integer primary key, name text not null, email text not null unique)", [])
+    try conn.execute("create table if not exists notes (id integer primary key, user_id integer not null, title text not null, body text not null, created_at integer not null)", [])
+    try conn.execute("create index if not exists notes_user on notes (user_id, id)", [])
+    var router = http.Router()
+    router.use(http.log_requests())
+    router.post("/users", req => try create_user(req, conn))
+    router.post("/login", req => try login(req, conn))
+    router.get("/notes", req => try list_notes(req, conn))
+    router.post("/notes", req => try create_note(req, conn))
+    router.get("/notes/:id", req => try get_note(req, conn))
+    try http.serve(router, port: port)
+  }
+}

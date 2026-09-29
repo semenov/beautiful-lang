@@ -88,6 +88,34 @@ static lt_err lt_db_execute(lt_handle *h, lt_text *sql, const lt_dbval *vals, in
     return (lt_err){ 0 };
 }
 
+// db.Connection.insert: runs the statement and reads the new row's id
+// under the connection's lock, so another task's insert on the same
+// connection can't come in between
+static lt_err lt_db_insert(lt_handle *h, lt_text *sql, const lt_dbval *vals, int64_t n, int64_t *id) {
+    lt_db *d = (lt_db *)h;
+    if (!d->db) return lt_make_failure(lt_text_cstr("db: the connection is closed"));
+    sqlite3_mutex *mu = sqlite3_db_mutex(d->db);
+    sqlite3_mutex_enter(mu);
+    sqlite3_stmt *st;
+    lt_err e = lt_db_prepare(d, sql, vals, n, &st);
+    if (e.obj) {
+        sqlite3_mutex_leave(mu);
+        return e;
+    }
+    int r;
+    while ((r = sqlite3_step(st)) == SQLITE_ROW) {
+    }
+    sqlite3_finalize(st);
+    if (r != SQLITE_DONE) {
+        lt_err f = lt_db_error(d, "the statement failed", sql->data);
+        sqlite3_mutex_leave(mu);
+        return f;
+    }
+    *id = sqlite3_last_insert_rowid(d->db);
+    sqlite3_mutex_leave(mu);
+    return (lt_err){ 0 };
+}
+
 // runs a query and calls `row` with each row as an object
 static lt_err lt_db_query(lt_handle *h, lt_text *sql, const lt_dbval *vals, int64_t n, lt_err (*row)(const lt_dyn *, void *), void *ctx) {
     lt_db *d = (lt_db *)h;
@@ -103,9 +131,15 @@ static lt_err lt_db_query(lt_handle *h, lt_text *sql, const lt_dbval *vals, int6
     o.items = (lt_dyn *)lt_arena_alloc(&ar, sizeof(lt_dyn) * (size_t)(cols ? cols : 1));
     o.keys = (const char **)lt_arena_alloc(&ar, sizeof(char *) * (size_t)(cols ? cols : 1));
     o.klens = (int64_t *)lt_arena_alloc(&ar, sizeof(int64_t) * (size_t)(cols ? cols : 1));
+    // copied: SQLite may prepare the statement again on the first step (a
+    // bound `limit ?` can make it), which frees the names it gave out
     for (int c = 0; c < cols; c++) {
-        o.keys[c] = sqlite3_column_name(st, c);
-        o.klens[c] = (int64_t)strlen(o.keys[c]);
+        const char *name = sqlite3_column_name(st, c);
+        size_t len = strlen(name);
+        char *copy = (char *)lt_arena_alloc(&ar, len + 1);
+        memcpy(copy, name, len + 1);
+        o.keys[c] = copy;
+        o.klens[c] = (int64_t)len;
     }
     int r;
     while ((r = sqlite3_step(st)) == SQLITE_ROW) {

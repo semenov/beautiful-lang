@@ -61,6 +61,12 @@ for d in ../../../packages/*/; do
     fi
   done
 done
+# the benchmarks compile
+for f in ../../../benchmarks/lang/*.lang ../../../benchmarks/backend/lang/*.lang; do
+  if ! (cd "$(dirname "$f")" && $LANG_BIN check "$(basename "$f")" >/tmp/lang-port-err 2>&1); then
+    echo "FAIL benchmark $f: doesn't compile"; head -5 /tmp/lang-port-err; fail=1
+  fi
+done
 # the language's own code is laid out the standard way
 if ! $LANG_BIN fmt --check . ../../src/std ../../src/prelude.lang >/dev/null 2>/tmp/lang-fmt-err; then
   echo "FAIL lang fmt --check:"; cat /tmp/lang-fmt-err; fail=1

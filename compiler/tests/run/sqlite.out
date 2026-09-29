@@ -5,5 +5,7 @@ changed 1
 [User(id: 1, name: "Ada", age: 36, active: true, email: "ada@example.com")]
 db: the SQL is wrong: no such column: nme (in: select nme from users)
 rolled back: changed my mind
-users: 3
+inserted: true
+newest: 2
+users: 4
 db: the query result has no column `age`

@@ -41,7 +41,14 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] other runtime buffers that grow with realloc and are freed to malloc
         (lt_grow for HTTP bodies, readers): same treatment where big
   - [ ] lt_dyn is 80 bytes per JSON node: a union would halve it
-- [ ] **A realistic backend vs Go** (Vlad, 2026-09-29): a service shaped
+- [x] **A realistic backend vs Go** (Vlad, 2026-09-29): benchmarks/backend
+      (notes service, SQLite, JSON, auth, logs): Lang 28k req/s, 91 us CPU
+      per request, 10 MB vs Go 17k req/s, 348 us, 45 MB. Found and fixed: a
+      query with `limit ?` failed (column names freed by SQLite's re-prepare);
+      `last_id` racy with shared connections (now `conn.insert`)
+  - [ ] db: a connection pool (reads in parallel under WAL), or say why one
+        connection is enough
+  - [ ] a Postgres variant of the backend (packages/postgres vs pgx): a service shaped
       like a real app's backend (JSON API with routing, middleware, auth
       header, validation, a database (SQLite/Postgres), templates or JSON
       responses, logging), written idiomatically in both; load it and
