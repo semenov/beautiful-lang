@@ -40,6 +40,7 @@ enum Kind {
     Channel(usize),
     // a standard library handle (an open file, a temporary directory, ...)
     Handle(String),
+    Bytes,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -267,6 +268,8 @@ impl<'a> CGen<'a> {
                         } else if *d == self.prog.b.set {
                             let e = self.tid(&args[0]);
                             (format!("T{}", id), Kind::Set(e))
+                        } else if *d == self.prog.b.bytes {
+                            ("lt_bytes*".to_string(), Kind::Bytes)
                         } else if *d == self.prog.b.task {
                             self.threads = true;
                             let e = self.tid(&args[0]);
@@ -347,7 +350,7 @@ impl<'a> CGen<'a> {
         match &self.tys[id].kind {
             Kind::Int | Kind::Float => "0".into(),
             Kind::Bool => "false".into(),
-            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "NULL".into(),
+            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) | Kind::Bytes => "NULL".into(),
             Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => "NULL".into(),
             Kind::Opt { niche: Niche::Ptr, .. } => "NULL".into(),
             _ => format!("(({}){{0}})", c),
@@ -436,6 +439,7 @@ impl<'a> CGen<'a> {
             Kind::Iface => b = if dup { "lt_iface_dup(x);".into() } else { "lt_iface_drop(x);".into() },
             Kind::Task(_) => b = if dup { "lt_task_dup(x);".into() } else { "lt_task_drop(x);".into() },
             Kind::Handle(_) => b = if dup { "lt_handle_dup(x);".into() } else { "lt_handle_drop(x);".into() },
+            Kind::Bytes => b = if dup { "lt_bytes_dup(x);".into() } else { "lt_bytes_drop(x);".into() },
             Kind::Channel(_) => b = if dup { "lt_chan_dup(x);".into() } else { "lt_chan_drop(x);".into() },
             Kind::Shared(_) => {
                 self.need(H::Ops, id);
@@ -606,6 +610,7 @@ impl<'a> CGen<'a> {
             }
             Kind::Iface => "if (a.obj == b.obj) return true; if (a.vt->type_id != b.vt->type_id) return false; return a.vt->eq(a.obj, b.obj);".into(),
             Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "return a == b;".into(),
+            Kind::Bytes => "return lt_bytes_eq(a, b);".into(),
             Kind::Func => "(void)a; (void)b; lt_panic_at(\"functions can't be compared\", 0);".into(),
             Kind::Int | Kind::Float | Kind::Bool => "return a == b;".into(),
             Kind::Text => "return lt_text_eq(a, b);".into(),
@@ -669,6 +674,7 @@ impl<'a> CGen<'a> {
             }
             Kind::Iface => "return a.vt->hash(a.obj);".into(),
             Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "return lt_int_hash((int64_t)(intptr_t)a);".into(),
+            Kind::Bytes => "return lt_hash_bytes((const char *)a->data, a->len);".into(),
             Kind::Int => "return lt_int_hash(a);".into(),
             Kind::Float => "return lt_float_hash(a);".into(),
             Kind::Bool => "return lt_int_hash(a);".into(),
@@ -777,6 +783,7 @@ impl<'a> CGen<'a> {
                 let n = format!("<{}>", n);
                 lit(self, &mut s, &n)
             }
+            Kind::Bytes => s += " { char m_[48]; snprintf(m_, sizeof m_, \"<%lld bytes>\", (long long)a->len); lt_texts_push(&p, lt_text_cstr(m_)); }",
             Kind::Int => s += " lt_texts_push(&p, lt_int_to_text(a));",
             Kind::Float => s += " lt_texts_push(&p, lt_float_to_text(a));",
             Kind::Bool => s += " lt_texts_push(&p, lt_bool_to_text(a));",
@@ -1180,6 +1187,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             Kind::Float => "return lt_dec_float(src, d, p, lenient, out);".into(),
             Kind::Bool => "return lt_dec_bool(src, d, p, lenient, out);".into(),
             Kind::Text => "return lt_dec_text(src, d, p, lenient, out);".into(),
+            Kind::Bytes => "if (d->kind != LT_D_STR) return lt_dec_error(src, p, \"base64 text\", d); lt_text *t = lt_text_from(d->s, d->slen); lt_err e = lt_base64_decode(t, out); lt_text_drop(t); if (e.obj) { lt_iface_drop(e); return lt_dec_error(src, p, \"base64 text\", d); } return (lt_err){0};".into(),
             Kind::Opt { inner, .. } => {
                 let inner = *inner;
                 self.need(H::Dec, inner);
@@ -1327,6 +1335,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             Kind::Float => "lt_json_float(b, v);".into(),
             Kind::Bool => "if (v) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5);".into(),
             Kind::Text => "lt_json_str(b, v->data, v->len);".into(),
+            Kind::Bytes => "lt_text *t = lt_bytes_base64(v); lt_json_str(b, t->data, t->len); lt_text_drop(t);".into(),
             Kind::Opt { inner, .. } => {
                 let inner = *inner;
                 self.need(H::Enc, inner);
@@ -2252,6 +2261,17 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                         set(out, format!("{}_new({})", c, vals[0]));
                         return;
                     }
+                    Kind::Bytes => {
+                        if vals.is_empty() {
+                            set(out, "LT_EMPTY_BYTES".to_string());
+                        } else {
+                            let lt = self.op_ty(fi, &ops[0]);
+                            let lid = self.tid(&lt);
+                            let dl = self.drop_(lid, "l_");
+                            set(out, format!("({{ __typeof__({v}) l_ = {v}; lt_bytes *b_ = lt_bytes_new(l_->len); for (int64_t i_ = 0; i_ < l_->len; i_++) {{ if (l_->items[i_] < 0 || l_->items[i_] > 255) lt_panic_at(\"a byte is a number from 0 to 255\", {line}); b_->data[i_] = (unsigned char)l_->items[i_]; }} b_->len = l_->len; {dl} b_; }})", v = vals[0], line = line, dl = dl));
+                        }
+                        return;
+                    }
                     Kind::Channel(e) => {
                         let e = *e;
                         let dp = self.drop_ptr(e);
@@ -2610,6 +2630,17 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "random.between" => format!("lt_random_between({}, {}, {})", a[0], a[1], line),
             "random.fraction" => "lt_random_fraction()".to_string(),
             "random.token" => format!("lt_random_token({})", a[0]),
+            "random.uuid" => "lt_random_uuid()".to_string(),
+            "files.read_bytes" => format!("lt_files_read_bytes({}, {})", a[0], a[1]),
+            "files.write_bytes" => format!("lt_files_write_bytes({}, {})", a[0], a[1]),
+            "crypto.sha256" => format!("lt_crypto_sha256({})", a[0]),
+            "crypto.hmac_sha256" => format!("lt_crypto_hmac({}, {})", a[0], a[1]),
+            "crypto.pbkdf2_sha256" => format!("lt_crypto_pbkdf2({}, {}, {}, {}, {})", a[0], a[1], a[2], a[3], line),
+            "crypto.random_bytes" => format!("lt_crypto_random_bytes({}, {})", a[0], line),
+            "crypto.equal" => format!("lt_crypto_equal({}, {})", a[0], a[1]),
+            "crypto.__from_base64" | "encoding.from_base64" => format!("lt_base64_decode({}, {})", a[0], a[1]),
+            "encoding.from_hex" => format!("lt_hex_decode({}, {})", a[0], a[1]),
+            "encoding.base64_url" => format!("lt_base64_encode({b}->data, {b}->len, true)", b = a[0]),
             "http.__serve" => {
                 self.threads = true;
                 self.gen_http_glue();
@@ -2694,6 +2725,27 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 format!("{}_minmax({}, {})", lc, a[0], if name == "List.min" { 1 } else { -1 })
             }
             "List.join" => format!("lt_text_join({}, {})", a[0], a[1]),
+            "Text.bytes" => format!("lt_bytes_from({a}->data, {a}->len)", a = a[0]),
+            "Bytes.length" => format!("({}->len)", a[0]),
+            "Bytes.get" => format!("lt_bytes_get({}, {}, {})", a[0], a[1], line),
+            "Bytes.text" => format!("lt_bytes_text({}, {})", a[0], a[1]),
+            "Bytes.slice" => format!("lt_bytes_slice({}, {}, {})", a[0], a[1], a[2]),
+            "Bytes.concat" => format!("lt_bytes_concat({}, {})", a[0], a[1]),
+            "Bytes.hex" => format!("lt_bytes_hex({})", a[0]),
+            "Bytes.base64" => format!("lt_bytes_base64({})", a[0]),
+            "Bytes.int_at" => format!("lt_bytes_int_at({}, {}, {}, {})", a[0], a[1], a[2], line),
+            "Bytes.index_of" => {
+                let opt = self.opt_tid_of(&Ty::Int);
+                let some = self.opt_some(opt, "i_");
+                let none = self.opt_none(opt);
+                format!("({{ int64_t i_ = lt_bytes_index_of({}, {}); i_ >= 0 ? {} : {}; }})", a[0], a[1], some, none)
+            }
+            "Bytes.to_list" => {
+                let l = self.tid(&Ty::Adt(self.prog.b.list, vec![Ty::Int]));
+                self.need(H::Ops, l);
+                let lc = self.tys[l].c.clone();
+                format!("({{ lt_bytes *b_ = {}; {lc} l_ = {lc}_new(b_->len); for (int64_t i_ = 0; i_ < b_->len; i_++) l_->items[l_->len++] = b_->data[i_]; l_; }})", a[0], lc = lc)
+            }
             "List.count_each" => {
                 let e = match &self.tys[tid0.unwrap()].kind {
                     Kind::List(e) => *e,
@@ -2773,9 +2825,15 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
     fn mut_intrinsic(&mut self, fi: usize, name: &str, tys: &[Ty], p: &str, a: &[String], args: &[Op], throws: bool) -> String {
         let line = self.line();
         let tid0 = self.tid(&tys[0]);
-        self.need(H::Ops, tid0);
+        if !matches!(self.tys[tid0].kind, Kind::Bytes) {
+            self.need(H::Ops, tid0);
+        }
         let lc = self.tys[tid0].c.clone();
         match name {
+            "Bytes.append" => format!("lt_bytes_append({}, {}, {})", p, a[0], line),
+            "Bytes.append_all" => format!("({{ lt_bytes *o_ = {}; lt_bytes_append_raw({}, o_->data, o_->len); }})", a[0], p),
+            "Bytes.append_text" => format!("({{ lt_text *o_ = {}; lt_bytes_append_raw({}, o_->data, o_->len); }})", a[0], p),
+            "Bytes.append_int" => format!("lt_bytes_append_int({}, {}, {}, {})", p, a[0], a[1], line),
             "List.append" => format!("{}_push({}, {})", lc, p, a[0]),
             "List.append_all" => format!("{}_append_all({}, {})", lc, p, a[0]),
             "List.insert" => format!("{}_insert({}, {}, {}, {})", lc, p, a[0], a[1], line),

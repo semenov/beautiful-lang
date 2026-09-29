@@ -41,6 +41,8 @@ struct FnCtx {
     in_try: bool,
     // the expression is a statement: `if`/`match` produce no value
     stmt_pos: bool,
+    // inside the expression after `try`: whether a call in it can fail
+    try_hits: Vec<bool>,
     // set by `spawn` for the call right below it
     in_spawn: bool,
     spawn_call: bool,
@@ -132,7 +134,7 @@ impl Checker {
                 defs: vec![],
                 fns: vec![],
                 tests: vec![],
-                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0, task: 0, shared: 0, locked: 0, channel: 0, cancelled: 0, channel_closed: 0 },
+                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0, task: 0, shared: 0, locked: 0, channel: 0, cancelled: 0, channel_closed: 0, bytes: 0 },
                 main: None,
             },
             diags: vec![],
@@ -244,6 +246,7 @@ impl Checker {
             channel: pl(self, "Channel"),
             cancelled: pl(self, "Cancelled"),
             channel_closed: pl(self, "ChannelClosed"),
+            bytes: pl(self, "Bytes"),
         };
         let b = &self.prog.b;
         self.prim.insert(b.int, Ty::Int);
@@ -781,6 +784,7 @@ impl Checker {
             self_mutable: false,
             in_try: false,
             stmt_pos: false,
+            try_hits: vec![],
             in_spawn: false,
             spawn_call: false,
             with_value: false,
@@ -1647,9 +1651,7 @@ impl Checker {
         if in_spawn {
             self.fcx().spawn_call = true;
         }
-        if in_try && !matches!(e.kind, ExprKind::Call { .. }) {
-            self.err_help(span, "`try` goes right before a call that can fail", "write `try f(x)`");
-        }
+        let _ = in_try;
         match &e.kind {
             ExprKind::Int(v) => self.lit_int(*v, span, expected),
             ExprKind::Float(v) => {
@@ -1761,6 +1763,10 @@ impl Checker {
                         let k = self.expr_coerce(idx, &a[0]);
                         mk(TK::MapGet(Box::new(b), Box::new(k)), Ty::opt(a[1].clone()))
                     }
+                    Ty::Adt(d, _) if *d == self.prog.b.bytes => {
+                        let i = self.expr_coerce(idx, &Ty::Int);
+                        mk(TK::Index(Box::new(b), Box::new(i)), Ty::Int)
+                    }
                     Ty::Text => {
                         self.err_help(span, "text can't be indexed", "use `text.slice(from: i, to: i + 1)` or `text.chars()`");
                         mk(TK::Unit, Ty::Err)
@@ -1858,17 +1864,17 @@ impl Checker {
                 mk(TK::Is(Box::new(te), p), Ty::Bool)
             }
             ExprKind::Try { expr, catch } => {
-                if !matches!(expr.kind, ExprKind::Call { .. }) {
-                    self.err_help(expr.span, "`try` goes right before a call that can fail", "write `try f(x)`");
-                    let t = self.expr(expr, expected);
-                    return t;
+                // `try` covers every call in the expression after it
+                self.fcx().try_hits.push(false);
+                let call = self.expr(expr, expected);
+                let hit = self.fcx().try_hits.pop().unwrap_or(false);
+                if !hit && call.ty != Ty::Err {
+                    self.err_help(span, "nothing here can fail", "remove `try`");
                 }
-                self.fcx().in_try = true;
-                let call = self.expr(expr, if catch.is_some() { expected } else { expected });
                 let ty = call.ty.clone();
                 match catch {
                     None => {
-                        if let TK::Call { throws: true, .. } | TK::MutCall { throws: true, .. } | TK::IfaceMutCall { throws: true, .. } = call.kind {
+                        if hit {
                             self.note_throw(span);
                         }
                         mk(TK::Try { call: Box::new(call), catch: None }, ty)
@@ -1915,11 +1921,12 @@ impl Checker {
                 if !self.fc().in_test {
                     self.err(span, "`expect throws` is only allowed in tests");
                 }
-                if !matches!(x.kind, ExprKind::Call { .. }) {
-                    self.err(x.span, "`expect throws` goes right before a call that can fail");
-                }
-                self.fcx().in_try = true;
+                self.fcx().try_hits.push(false);
                 let call = self.expr(x, None);
+                let hit = self.fcx().try_hits.pop().unwrap_or(false);
+                if !hit && call.ty != Ty::Err {
+                    self.err(x.span, "nothing here can fail, so `expect throws` can never pass");
+                }
                 let et = self.prog.error_ty();
                 mk(TK::ExpectThrows(Box::new(call)), et)
             }
@@ -2297,11 +2304,12 @@ impl Checker {
             TK::Call { throws, .. } | TK::MutCall { throws, .. } | TK::IfaceMutCall { throws, .. } => *throws,
             _ => false,
         };
-        if throws && !in_try {
-            self.err_help(span, "this call can fail", "write `try` before it: `try f(x)`, or handle it: `try f(x) catch err { ... }`");
-        }
-        if !throws && in_try && result.ty != Ty::Err {
-            self.err_help(span, "this call can't fail", "remove `try`");
+        let _ = in_try;
+        if throws {
+            match self.fcx().try_hits.last_mut() {
+                Some(hit) => *hit = true,
+                None => self.err_help(span, "this call can fail", "write `try` before it: `try f(x)`, or handle it: `try f(x) catch err { ... }`"),
+            }
         }
         result
     }
@@ -2732,6 +2740,20 @@ impl Checker {
                 let v = self.expr_coerce(&args[0].value, inner);
                 TExpr { kind: TK::Wrap(Box::new(v)), ty, span }
             }
+            TypeKind::Builtin if d == self.prog.b.bytes => {
+                if args.len() > 1 || args.iter().any(|a| a.name.is_some()) {
+                    self.err_help(span, "`Bytes` takes nothing or a list of numbers", "write `Bytes()` or `Bytes([104, 105])`");
+                    return TExpr { kind: TK::Unit, ty: Ty::Err, span };
+                }
+                let fields = match args.first() {
+                    Some(a) => {
+                        let lt = self.prog.list_of(Ty::Int);
+                        vec![self.expr_coerce(&a.value, &lt)]
+                    }
+                    None => vec![],
+                };
+                TExpr { kind: TK::Record { def: d, fields }, ty, span }
+            }
             TypeKind::Builtin if d == self.prog.b.shared => {
                 if args.len() != 1 || args[0].name.is_some() {
                     self.err_help(span, "`Shared` wraps one value", "write `Shared(value)`");
@@ -2936,6 +2958,7 @@ impl Checker {
             pids.push(self.declare(*sp, n, ptys[i].clone(), false));
         }
         let saved_loops = std::mem::take(&mut self.fcx().loops);
+        let saved_hits = std::mem::take(&mut self.fcx().try_hits);
         let b = match &body.kind {
             ExprKind::Block(blk) => {
                 let tb = self.block(blk, true, Some(&ret));
@@ -2945,6 +2968,7 @@ impl Checker {
             _ => self.expr(body, Some(&ret)),
         };
         self.fcx().loops = saved_loops;
+        self.fcx().try_hits = saved_hits;
         let lc = self.fcx().lambdas.pop().unwrap();
         self.fcx().scopes.pop();
         let rty = self.resolve(&ret);

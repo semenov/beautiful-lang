@@ -56,6 +56,35 @@ builtin type Text {
   fn to_text(self) -> Text {
     return self
   }
+  // The text as UTF-8 bytes.
+  fn bytes(self) -> Bytes
+}
+
+// Raw bytes: file contents, network data, hashes. `Bytes()` is empty;
+// `Bytes([104, 105])` from numbers 0-255; `text.bytes()` from text (UTF-8).
+builtin type Bytes {
+  length: Int
+
+  fn is_empty(self) -> Bool {
+    return self.length == 0
+  }
+  // The text these bytes encode (UTF-8); an error if they aren't valid UTF-8.
+  fn text(self) throws -> Text
+  fn slice(self, from: Int, to: Int) -> Bytes
+  fn concat(self, other: Bytes) -> Bytes
+  fn index_of(self, part: Bytes) -> Int?
+  fn hex(self) -> Text
+  fn base64(self) -> Text
+  fn to_list(self) -> List<Int>
+  // An unsigned big-endian number of `size` bytes (1-8) at `offset`
+  // (network protocols).
+  fn int_at(self, offset: Int, size: Int) -> Int
+
+  mutating fn append(byte: Int)
+  mutating fn append_all(other: Bytes)
+  mutating fn append_text(text: Text)
+  // Adds `value` as `size` big-endian bytes.
+  mutating fn append_int(value: Int, size: Int)
 }
 
 builtin type List<T> {

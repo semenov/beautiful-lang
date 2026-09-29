@@ -68,6 +68,8 @@ fn std_module(name: &str) -> Option<&'static str> {
         "json" => include_str!("std/json.lang"),
         "cli" => include_str!("std/cli.lang"),
         "http" => include_str!("std/http.lang"),
+        "crypto" => include_str!("std/crypto.lang"),
+        "encoding" => include_str!("std/encoding.lang"),
         _ => return None,
     })
 }

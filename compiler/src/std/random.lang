@@ -26,3 +26,5 @@ pub fn shuffle<T>(items: List<T>) -> List<T> {
 }
 // Random letters and digits, for ids and secrets.
 pub fn token(length: Int) -> Text
+// A random UUID (version 4): "3f0b6c5e-...".
+pub fn uuid() -> Text

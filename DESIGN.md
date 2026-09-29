@@ -240,6 +240,10 @@ used result is always a mutation or an action. The rule also catches the
   to it starts with `try`.
 - `Error` is an interface (`fn message(self) -> Text`) that any record can
   implement. Handling checks the type: `if err is NotFound`.
+- **`try` covers the whole expression after it** (like Swift): in
+  `try encoding.from_hex(t).text()` both calls may fail. The reader still
+  sees at the start of the line that something in it can fail. A `try`
+  over an expression where nothing can fail is an error.
 - Two forms only:
 
   ```

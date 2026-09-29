@@ -306,6 +306,7 @@ pub struct Builtins {
     pub channel: DefId,
     pub cancelled: DefId,
     pub channel_closed: DefId,
+    pub bytes: DefId,
 }
 
 pub struct Program {

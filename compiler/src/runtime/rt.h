@@ -830,6 +830,232 @@ static int64_t lt_monotonic_nanos(void) {
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
+// ---------------------------------------------------------------- bytes
+
+typedef struct lt_bytes {
+    int64_t rc;
+    int64_t len;
+    int64_t cap;
+    unsigned char data[];
+} lt_bytes;
+
+#define LT_BYTES_SIZE(c) (sizeof(lt_bytes) + (size_t)(c))
+static struct { int64_t rc, len, cap; } lt_empty_bytes_obj = { -1, 0, 0 };
+#define LT_EMPTY_BYTES ((lt_bytes *)&lt_empty_bytes_obj)
+
+LT_INLINE void lt_bytes_dup(lt_bytes *b) {
+    if (b) LT_INC(b);
+}
+LT_INLINE void lt_bytes_drop(lt_bytes *b) {
+    if (b && LT_DEC_ZERO(b)) lt_free(b, LT_BYTES_SIZE(b->cap));
+}
+
+static lt_bytes *lt_bytes_new(int64_t cap) {
+    if (cap <= 0) return LT_EMPTY_BYTES;
+    lt_bytes *b = (lt_bytes *)lt_alloc(LT_BYTES_SIZE(cap));
+    b->rc = 1;
+    b->len = 0;
+    b->cap = cap;
+    return b;
+}
+
+static lt_bytes *lt_bytes_from(const void *p, int64_t n) {
+    lt_bytes *b = lt_bytes_new(n);
+    if (n > 0) memcpy(b->data, p, (size_t)n);
+    b->len = n;
+    return b;
+}
+
+// room for `more` bytes in a value only this variable holds
+static void lt_bytes_reserve(lt_bytes **p, int64_t more) {
+    lt_bytes *b = *p;
+    if (LT_UNIQUE(b) && b->len + more <= b->cap) return;
+    int64_t cap = b->cap * 2;
+    if (cap < b->len + more) cap = b->len + more;
+    if (cap < 16) cap = 16;
+    if (LT_UNIQUE(b)) {
+        b = (lt_bytes *)lt_realloc(b, LT_BYTES_SIZE(b->cap), LT_BYTES_SIZE(cap));
+        b->cap = cap;
+        *p = b;
+    } else {
+        lt_bytes *n = lt_bytes_new(cap);
+        memcpy(n->data, b->data, (size_t)b->len);
+        n->len = b->len;
+        lt_bytes_drop(b);
+        *p = n;
+    }
+}
+
+static void lt_bytes_append(lt_bytes **p, int64_t v, int line) {
+    if (v < 0 || v > 255) lt_panic_at("a byte is a number from 0 to 255", line);
+    lt_bytes_reserve(p, 1);
+    (*p)->data[(*p)->len++] = (unsigned char)v;
+}
+static void lt_bytes_append_raw(lt_bytes **p, const void *d, int64_t n) {
+    if (n <= 0) return;
+    lt_bytes_reserve(p, n);
+    memcpy((*p)->data + (*p)->len, d, (size_t)n);
+    (*p)->len += n;
+}
+static void lt_bytes_append_int(lt_bytes **p, int64_t v, int64_t size, int line) {
+    if (size < 1 || size > 8) lt_panic_at("the size of a number in bytes is 1 to 8", line);
+    lt_bytes_reserve(p, size);
+    for (int64_t i = size - 1; i >= 0; i--) (*p)->data[(*p)->len++] = (unsigned char)((uint64_t)v >> (8 * i));
+}
+static int64_t lt_bytes_get(lt_bytes *b, int64_t i, int line) {
+    if ((uint64_t)i >= (uint64_t)b->len) {
+        char m[96];
+        snprintf(m, sizeof m, "index %lld is out of range for %lld bytes", (long long)i, (long long)b->len);
+        lt_panic_at(m, line);
+    }
+    return b->data[i];
+}
+static int64_t lt_bytes_int_at(lt_bytes *b, int64_t off, int64_t size, int line) {
+    if (size < 1 || size > 8 || off < 0 || off + size > b->len) lt_panic_at("the number is outside the bytes", line);
+    uint64_t v = 0;
+    for (int64_t i = 0; i < size; i++) v = (v << 8) | b->data[off + i];
+    return (int64_t)v;
+}
+static lt_bytes *lt_bytes_slice(lt_bytes *b, int64_t from, int64_t to) {
+    if (from < 0) from = 0;
+    if (to > b->len) to = b->len;
+    if (to <= from) return LT_EMPTY_BYTES;
+    return lt_bytes_from(b->data + from, to - from);
+}
+static lt_bytes *lt_bytes_concat(lt_bytes *a, lt_bytes *b) {
+    lt_bytes *r = lt_bytes_new(a->len + b->len);
+    memcpy(r->data, a->data, (size_t)a->len);
+    memcpy(r->data + a->len, b->data, (size_t)b->len);
+    r->len = a->len + b->len;
+    return r;
+}
+static int64_t lt_bytes_index_of(lt_bytes *b, lt_bytes *part) {
+    const char *p = lt_find((const char *)b->data, b->len, (const char *)part->data, part->len);
+    return p ? (int64_t)(p - (const char *)b->data) : -1;
+}
+static bool lt_bytes_eq(lt_bytes *a, lt_bytes *b) { return a == b || (a->len == b->len && memcmp(a->data, b->data, (size_t)a->len) == 0); }
+
+static bool lt_utf8_valid(const unsigned char *s, int64_t n) {
+    int64_t i = 0;
+    while (i < n) {
+        unsigned char c = s[i];
+        int k; // continuation bytes that follow
+        if (c < 0x80) k = 0;
+        else if ((c >> 5) == 6) k = 1;
+        else if ((c >> 4) == 14) k = 2;
+        else if ((c >> 3) == 30) k = 3;
+        else return false;
+        if (i + k >= n && k > 0) return false;
+        for (int j = 1; j <= k; j++)
+            if ((s[i + j] & 0xC0) != 0x80) return false;
+        i += k + 1;
+    }
+    return true;
+}
+
+static lt_err lt_bytes_text(lt_bytes *b, lt_text **out) {
+    if (!lt_utf8_valid(b->data, b->len)) return lt_make_failure(lt_text_cstr("the bytes are not valid UTF-8 text"));
+    *out = lt_text_from((const char *)b->data, b->len);
+    return (lt_err){ 0 };
+}
+
+static lt_text *lt_bytes_hex(lt_bytes *b) {
+    static const char hx[] = "0123456789abcdef";
+    lt_text *t = lt_text_new(b->len * 2);
+    for (int64_t i = 0; i < b->len; i++) {
+        t->data[2 * i] = hx[b->data[i] >> 4];
+        t->data[2 * i + 1] = hx[b->data[i] & 15];
+    }
+    return t;
+}
+
+static const char lt_b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static lt_text *lt_base64_encode(const unsigned char *s, int64_t n, bool url) {
+    lt_text *t = lt_text_new(((n + 2) / 3) * 4);
+    char *w = t->data;
+    int64_t i = 0;
+    for (; i + 2 < n; i += 3) {
+        uint32_t v = (uint32_t)s[i] << 16 | (uint32_t)s[i + 1] << 8 | s[i + 2];
+        *w++ = lt_b64[v >> 18];
+        *w++ = lt_b64[(v >> 12) & 63];
+        *w++ = lt_b64[(v >> 6) & 63];
+        *w++ = lt_b64[v & 63];
+    }
+    if (i < n) {
+        uint32_t v = (uint32_t)s[i] << 16 | (i + 1 < n ? (uint32_t)s[i + 1] << 8 : 0);
+        *w++ = lt_b64[v >> 18];
+        *w++ = lt_b64[(v >> 12) & 63];
+        if (i + 1 < n) *w++ = lt_b64[(v >> 6) & 63];
+        else if (!url) *w++ = '=';
+        if (!url) *w++ = '=';
+    }
+    if (url) {
+        for (char *c = t->data; c < w; c++) {
+            if (*c == '+') *c = '-';
+            else if (*c == '/') *c = '_';
+        }
+    }
+    t->len = w - t->data;
+    *w = 0;
+    return t;
+}
+static lt_text *lt_bytes_base64(lt_bytes *b) { return lt_base64_encode(b->data, b->len, false); }
+
+static int lt_b64_val(char c) {
+    if (c >= 'A' && c <= 'Z') return c - 'A';
+    if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+    if (c >= '0' && c <= '9') return c - '0' + 52;
+    if (c == '+' || c == '-') return 62;
+    if (c == '/' || c == '_') return 63;
+    return -1;
+}
+
+// accepts standard and URL-safe alphabets, with or without padding
+static lt_err lt_base64_decode(lt_text *t, lt_bytes **out) {
+    lt_bytes *b = lt_bytes_new(t->len * 3 / 4 + 3);
+    uint32_t acc = 0;
+    int bits = 0;
+    for (int64_t i = 0; i < t->len; i++) {
+        char c = t->data[i];
+        if (c == '=' || c == '\n' || c == '\r' || c == ' ') continue;
+        int v = lt_b64_val(c);
+        if (v < 0) {
+            lt_bytes_drop(b);
+            return lt_make_failure(lt_text_cstr("the text is not valid base64"));
+        }
+        acc = (acc << 6) | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            b->data[b->len++] = (unsigned char)(acc >> bits);
+        }
+    }
+    *out = b;
+    return (lt_err){ 0 };
+}
+
+static int lt_hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+static lt_err lt_hex_decode(lt_text *t, lt_bytes **out) {
+    if (t->len % 2) return lt_make_failure(lt_text_cstr("hex text has an odd number of digits"));
+    lt_bytes *b = lt_bytes_new(t->len / 2);
+    for (int64_t i = 0; i < t->len; i += 2) {
+        int h = lt_hexval(t->data[i]), l = lt_hexval(t->data[i + 1]);
+        if (h < 0 || l < 0) {
+            lt_bytes_drop(b);
+            return lt_make_failure(lt_text_cstr("the text is not valid hex"));
+        }
+        b->data[b->len++] = (unsigned char)(h * 16 + l);
+    }
+    *out = b;
+    return (lt_err){ 0 };
+}
+
 // ---------------------------------------------------------------- output
 
 static void lt_print(lt_text *t) {

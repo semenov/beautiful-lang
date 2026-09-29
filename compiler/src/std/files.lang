@@ -3,8 +3,11 @@
 
 // The whole file as text.
 pub fn read(path: Text) throws -> Text
+// The whole file as bytes.
+pub fn read_bytes(path: Text) throws -> Bytes
 // Creates or replaces the file.
 pub fn write(path: Text, text: Text) throws
+pub fn write_bytes(path: Text, data: Bytes) throws
 // Adds to the end of the file, creating it if needed.
 pub fn append(path: Text, text: Text) throws
 pub fn exists(path: Text) -> Bool

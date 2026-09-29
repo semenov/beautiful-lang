@@ -1,0 +1,44 @@
+// crypto: hashes, signatures, passwords and secure random bytes.
+//
+//   crypto.sha256("hello".bytes()).hex()
+//   let stored = crypto.hash_password(password)       // keep this
+//   crypto.verify_password(attempt, stored)           // later
+
+pub fn sha256(data: Bytes) -> Bytes
+// A signature of `data` with a secret `key` (webhooks, tokens).
+pub fn hmac_sha256(key: Bytes, data: Bytes) -> Bytes
+// A key derived from a password (PBKDF2 with HMAC-SHA256).
+pub fn pbkdf2_sha256(password: Bytes, salt: Bytes, iterations: Int, length: Int) -> Bytes
+// Secure random bytes.
+pub fn random_bytes(count: Int) -> Bytes
+// Compares secrets (tokens, signatures) in constant time.
+pub fn equal(a: Bytes, b: Bytes) -> Bool
+
+// A salted, slow hash of a password, safe to store:
+// "pbkdf2-sha256$210000$<salt>$<hash>".
+pub fn hash_password(password: Text) -> Text {
+  let salt = random_bytes(16)
+  let hash = pbkdf2_sha256(password.bytes(), salt: salt, iterations: 210000, length: 32)
+  return "pbkdf2-sha256$210000$${salt.base64()}$${hash.base64()}"
+}
+
+// Checks a password against the result of `hash_password`.
+pub fn verify_password(password: Text, stored: Text) -> Bool {
+  let parts = stored.split("$")
+  if parts.length != 4 or parts[0] != "pbkdf2-sha256" {
+    return false
+  }
+  let iterations = try parts[1].to_int() catch err {
+    return false
+  }
+  let salt = try __from_base64(parts[2]) catch err {
+    return false
+  }
+  let expected = try __from_base64(parts[3]) catch err {
+    return false
+  }
+  let hash = pbkdf2_sha256(password.bytes(), salt: salt, iterations: iterations, length: expected.length)
+  return equal(hash, expected)
+}
+
+fn __from_base64(text: Text) throws -> Bytes

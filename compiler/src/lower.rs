@@ -22,7 +22,8 @@ struct Fb<'a> {
     // things to undo on every way out: locks, the function's tasks
     cleanups: Vec<Cleanup>,
     scope: Option<L>,
-    last_propagate: Option<B>,
+    // errors inside `try ... catch`: where they go
+    catch_targets: Vec<(B, L)>,
 }
 
 #[derive(Clone)]
@@ -191,7 +192,7 @@ impl<'a> Lowerer<'a> {
 
     fn build(&mut self, body: &'a TBody, subst: Vec<Ty>, no_throw: bool, name: String, kind: FnKind, ret: Ty, throws: bool, mutating: bool, src_name: String) -> Func {
         let func = Func { name, kind, params: vec![], ret: ret.clone(), throws, mutating, locals: vec![], blocks: vec![], source_name: src_name };
-        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals: &body.locals, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals: &body.locals, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, catch_targets: vec![] });
         self.new_block();
         for (i, p) in body.params.iter().enumerate() {
             let ty = self.local_ty(*p);
@@ -905,7 +906,8 @@ impl<'a> Lowerer<'a> {
                 let bv = self.expr(b);
                 let iv = self.expr(i);
                 self.set_line(e.span);
-                self.assign(ty, Rv::Call(MCallee::Intrinsic("List.get".into(), vec![bty]), vec![bv, iv]))
+                let name = if matches!(&bty, Ty::Adt(d, _) if *d == self.prog.b.bytes) { "Bytes.get" } else { "List.get" };
+                self.assign(ty, Rv::Call(MCallee::Intrinsic(name.into(), vec![bty]), vec![bv, iv]))
             }
             TK::MapGet(m, k) => {
                 let mty = self.ty(&m.ty);
@@ -1335,30 +1337,24 @@ impl<'a> Lowerer<'a> {
         let ok = self.new_block();
         self.term(Term::IfErr(err, bad, ok));
         self.switch_to(bad);
-        self.throw(Op::Local(err));
-        self.fb().last_propagate = Some(bad);
+        match self.fbr().catch_targets.last().copied() {
+            Some((target, cerr)) => {
+                self.emit(Stmt::Assign(cerr, Rv::Use(Op::Local(err))));
+                self.term(Term::Goto(target));
+            }
+            None => self.throw(Op::Local(err)),
+        }
         self.switch_to(ok);
     }
 
-    // The error block of the call just lowered, emptied for a `catch`.
-    fn take_error_block(&mut self) -> (B, L) {
-        let bad = self.fb().last_propagate.take().expect("try without a throwing call");
-        let err = match &self.fbr().f.blocks[bad].term {
-            Term::Throw(Op::Local(l)) => *l,
-            _ => unreachable!(),
-        };
-        // the error local of the call is the one tested by IfErr; find it via the Throw
-        // (cleanups only add statements before the Throw)
-        self.fb().f.blocks[bad].stmts.clear();
-        self.reopen(bad);
-        (bad, err)
-    }
-
     fn try_catch(&mut self, call: &'a TExpr, err_id: LocalId, blk: &'a TBlock, ty: Ty) -> Op {
-        // Lower the call, then turn its error edge into the catch block.
-        self.fb().last_propagate = None;
+        let catch_b = self.new_block();
+        let name = self.fbr().body_locals[err_id].name.clone();
+        let el = self.new_local(self.prog.error_ty(), &name);
+        self.fb().map.insert(err_id, el);
+        self.fb().catch_targets.push((catch_b, el));
         let v = self.expr(call);
-        let (bad, err_local) = self.take_error_block();
+        self.fb().catch_targets.pop();
         let res = if ty != Ty::Unit && ty != Ty::Never { Some(self.tmp(ty.clone())) } else { None };
         let join = self.new_block();
         if !self.terminated() {
@@ -1367,12 +1363,7 @@ impl<'a> Lowerer<'a> {
             }
             self.term(Term::Goto(join));
         }
-        // the catch block
-        self.switch_to(bad);
-        let name = self.fbr().body_locals[err_id].name.clone();
-        let el = self.new_local(self.prog.error_ty(), &name);
-        self.fb().map.insert(err_id, el);
-        self.emit(Stmt::Assign(el, Rv::Use(Op::Local(err_local))));
+        self.switch_to(catch_b);
         let cv = self.block(blk);
         if !self.terminated() {
             if let Some(r) = res {
@@ -1385,18 +1376,18 @@ impl<'a> Lowerer<'a> {
     }
 
     fn expect_throws(&mut self, call: &'a TExpr, span: Span) -> Op {
-        self.fb().last_propagate = None;
-        let _ = self.expr(call);
-        let (bad, err_local) = self.take_error_block();
+        let catch_b = self.new_block();
         let res = self.tmp(self.prog.error_ty());
+        self.fb().catch_targets.push((catch_b, res));
+        let _ = self.expr(call);
+        self.fb().catch_targets.pop();
         let join = self.new_block();
-        // success: the expectation fails
+        // no error: the expectation fails
         let text = self.src_text(call.span);
         let (line, _) = self.src.line_col(span);
         let e = self.assign(self.prog.error_ty(), Rv::Call(MCallee::Intrinsic("expect_throws_failed".into(), vec![]), vec![Op::Text(text), Op::Int(line as i64)]));
         self.throw(e);
-        self.switch_to(bad);
-        self.emit(Stmt::Assign(res, Rv::Use(Op::Local(err_local))));
+        self.switch_to(catch_b);
         self.term(Term::Goto(join));
         self.switch_to(join);
         Op::Local(res)
@@ -1494,7 +1485,7 @@ impl<'a> Lowerer<'a> {
         let ty = Ty::Adt(d, args.clone());
         let func = Func { name: format!("defaults{}", self.funcs.len()), kind: FnKind::Normal, params: vec![], ret: ty.clone(), throws: false, mutating: false, locals: vec![], blocks: vec![], source_name: format!("defaults of {}", prog.defs[d].name) };
         static NO_LOCALS: [LocalDef; 0] = [];
-        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst: args, no_throw_fns: false, body_locals: &NO_LOCALS, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst: args, no_throw_fns: false, body_locals: &NO_LOCALS, loops: vec![], line: 0, closed: vec![], cleanups: vec![], scope: None, catch_targets: vec![] });
         self.new_block();
         let mut ops = vec![];
         for f in fields {
@@ -1543,7 +1534,7 @@ impl<'a> Lowerer<'a> {
         self.funcs.push(Func { name: name.clone(), kind: FnKind::Normal, params: vec![], ret: Ty::Unit, throws: false, mutating: false, locals: vec![], blocks: vec![], source_name: src_name.clone() });
         let func = Func { name, kind: FnKind::Closure(cap_tys.clone()), params: vec![], ret: ft.ret.clone(), throws: ft.throws, mutating: false, locals: vec![], blocks: vec![], source_name: format!("lambda in {}", src_name) };
         let line = self.fbr().line;
-        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals, loops: vec![], line, closed: vec![], cleanups: vec![], scope: None, last_propagate: None });
+        self.fbs.push(Fb { f: func, cur: 0, map: HashMap::new(), subst, no_throw_fns: no_throw, body_locals, loops: vec![], line, closed: vec![], cleanups: vec![], scope: None, catch_targets: vec![] });
         self.new_block();
         self.switch_to(0);
         for p in params {
