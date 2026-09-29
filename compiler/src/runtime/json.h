@@ -200,6 +200,31 @@ static const lt_dyn *lt_dyn_get(const lt_dyn *o, const char *key, int64_t klen) 
     return NULL;
 }
 
+// the value for a record's field (as lt_dyn_get); in JSON, two keys that
+// would fill the same field ("name" and "NAME") are an error: which one
+// counts must not depend on the parser
+static lt_err lt_dyn_field(const char *src, const lt_dyn *o, const lt_path *p, const char *key, int64_t klen, const lt_dyn **out) {
+    *out = lt_dyn_get(o, key, klen);
+    if (!*out || strcmp(src, "json") != 0) return (lt_err){ 0 };
+    int64_t first = -1;
+    for (int64_t i = 0; i < o->n; i++) {
+        if (!lt_key_loose_eq(o->keys[i], o->klens[i], key, klen)) continue;
+        if (first < 0) {
+            first = i;
+            continue;
+        }
+        char buf[512];
+        size_t len = (size_t)snprintf(buf, sizeof buf, "json: at ");
+        lt_path_write(p, buf, sizeof buf, &len);
+        if (len < sizeof buf)
+            snprintf(buf + len, sizeof buf - len, ": the keys \"%.*s\" and \"%.*s\" both fill the field `%.*s`",
+                     (int)(o->klens[first] > 60 ? 60 : o->klens[first]), o->keys[first],
+                     (int)(o->klens[i] > 60 ? 60 : o->klens[i]), o->keys[i], (int)klen, key);
+        return lt_make_failure(lt_text_cstr(buf));
+    }
+    return (lt_err){ 0 };
+}
+
 // ---- scalar decoders; `lenient`: text is accepted for numbers and booleans
 // (environment variables and command-line arguments are always text)
 
@@ -276,10 +301,12 @@ typedef struct {
     lt_dyn *stk;
     const char **sk;
     int64_t *sl;
+    const char **sp; // where each key starts in the text (for errors)
     int64_t top, cap;
+    char msg[160];
 } lt_jp;
 
-static void lt_jp_push(lt_jp *p, const lt_dyn *d, const char *k, int64_t kl) {
+static void lt_jp_push(lt_jp *p, const lt_dyn *d, const char *k, int64_t kl, const char *at) {
     if (p->top == p->cap) {
         // the runtime's allocator: big ones go back to the system when freed
         int64_t nc = p->cap ? p->cap * 2 : 64;
@@ -287,16 +314,19 @@ static void lt_jp_push(lt_jp *p, const lt_dyn *d, const char *k, int64_t kl) {
             p->stk = (lt_dyn *)lt_realloc(p->stk, sizeof(lt_dyn) * (size_t)p->cap, sizeof(lt_dyn) * (size_t)nc);
             p->sk = (const char **)lt_realloc(p->sk, sizeof(char *) * (size_t)p->cap, sizeof(char *) * (size_t)nc);
             p->sl = (int64_t *)lt_realloc(p->sl, sizeof(int64_t) * (size_t)p->cap, sizeof(int64_t) * (size_t)nc);
+            p->sp = (const char **)lt_realloc(p->sp, sizeof(char *) * (size_t)p->cap, sizeof(char *) * (size_t)nc);
         } else {
             p->stk = (lt_dyn *)lt_alloc(sizeof(lt_dyn) * (size_t)nc);
             p->sk = (const char **)lt_alloc(sizeof(char *) * (size_t)nc);
             p->sl = (int64_t *)lt_alloc(sizeof(int64_t) * (size_t)nc);
+            p->sp = (const char **)lt_alloc(sizeof(char *) * (size_t)nc);
         }
         p->cap = nc;
     }
     p->stk[p->top] = *d;
     p->sk[p->top] = k;
     p->sl[p->top] = kl;
+    p->sp[p->top] = at;
     p->top++;
 }
 // moves the children above `base` into the arena
@@ -314,6 +344,41 @@ static void lt_jp_close(lt_jp *p, lt_dyn *d, int64_t base, bool keys) {
         }
     }
     p->top = base;
+}
+
+static __thread const lt_jp *lt_jp_sorting; // qsort has no context argument
+static int lt_jp_key_cmp(const void *a, const void *b) {
+    int64_t i = *(const int64_t *)a, j = *(const int64_t *)b;
+    const lt_jp *p = lt_jp_sorting;
+    int64_t n = p->sl[i] < p->sl[j] ? p->sl[i] : p->sl[j];
+    int c = memcmp(p->sk[i], p->sk[j], (size_t)n);
+    if (c) return c;
+    if (p->sl[i] != p->sl[j]) return p->sl[i] < p->sl[j] ? -1 : 1;
+    return i < j ? -1 : 1; // the same key: in the order written
+}
+
+// the index of a key written a second time in the object whose entries
+// start at `base`, or -1
+static int64_t lt_jp_duplicate(lt_jp *p, int64_t base) {
+    int64_t n = p->top - base;
+    if (n < 2) return -1;
+    if (n <= 16) {
+        for (int64_t j = base + 1; j < p->top; j++)
+            for (int64_t i = base; i < j; i++)
+                if (p->sl[i] == p->sl[j] && memcmp(p->sk[i], p->sk[j], (size_t)p->sl[i]) == 0) return j;
+        return -1;
+    }
+    int64_t *ix = (int64_t *)lt_alloc(sizeof(int64_t) * (size_t)n);
+    for (int64_t i = 0; i < n; i++) ix[i] = base + i;
+    lt_jp_sorting = p;
+    qsort(ix, (size_t)n, sizeof(int64_t), lt_jp_key_cmp);
+    int64_t dup = -1;
+    for (int64_t i = 1; i < n; i++) {
+        int64_t a = ix[i - 1], b = ix[i];
+        if (p->sl[a] == p->sl[b] && memcmp(p->sk[a], p->sk[b], (size_t)p->sl[a]) == 0 && (dup < 0 || b < dup)) dup = b;
+    }
+    lt_free(ix, sizeof(int64_t) * (size_t)n);
+    return dup;
 }
 
 static void lt_jp_ws(lt_jp *p) {
@@ -437,7 +502,7 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
             for (;;) {
                 lt_jp_ws(p);
                 if (p->s >= p->end || *p->s != '"') { ok = lt_jp_fail(p, "expected a key in quotes"); break; }
-                const char *k;
+                const char *k, *at = p->s;
                 int64_t kl;
                 if (!lt_jp_string(p, &k, &kl)) { ok = false; break; }
                 lt_jp_ws(p);
@@ -445,13 +510,20 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
                 p->s++;
                 lt_dyn v;
                 if (!lt_jp_value(p, &v)) { ok = false; break; }
-                lt_jp_push(p, &v, k, kl);
+                lt_jp_push(p, &v, k, kl, at);
                 lt_jp_ws(p);
                 if (p->s < p->end && *p->s == ',') { p->s++; continue; }
                 if (p->s < p->end && *p->s == '}') { p->s++; break; }
                 ok = lt_jp_fail(p, "expected `,` or `}`");
                 break;
             }
+        }
+        int64_t dup = ok ? lt_jp_duplicate(p, base) : -1;
+        if (dup >= 0 && !p->err) {
+            snprintf(p->msg, sizeof p->msg, "duplicate key \"%.*s\"", (int)(p->sl[dup] > 60 ? 60 : p->sl[dup]), p->sk[dup]);
+            p->err = p->msg;
+            p->err_at = p->sp[dup];
+            ok = false;
         }
         lt_jp_close(p, d, base, true);
     } else if (c == '[') {
@@ -465,7 +537,7 @@ static bool lt_jp_value(lt_jp *p, lt_dyn *d) {
             for (;;) {
                 lt_dyn v;
                 if (!lt_jp_value(p, &v)) { ok = false; break; }
-                lt_jp_push(p, &v, NULL, 0);
+                lt_jp_push(p, &v, NULL, 0, NULL);
                 lt_jp_ws(p);
                 if (p->s < p->end && *p->s == ',') { p->s++; continue; }
                 if (p->s < p->end && *p->s == ']') { p->s++; break; }
@@ -538,6 +610,7 @@ static lt_err lt_json_parse(lt_text *text, lt_arena *arena, lt_dyn *d) {
         lt_free(p.stk, sizeof(lt_dyn) * (size_t)p.cap);
         lt_free(p.sk, sizeof(char *) * (size_t)p.cap);
         lt_free(p.sl, sizeof(int64_t) * (size_t)p.cap);
+        lt_free(p.sp, sizeof(char *) * (size_t)p.cap);
     }
     if (ok) {
         lt_jp_ws(&p);

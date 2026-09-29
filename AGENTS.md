@@ -342,7 +342,8 @@ let user = try json.decode<User>(body)          // missing fields: an error
                                                 // naming the field
 let text = json.encode(user)
                                                 // `createdAt` in JSON fills
-                                                // `created_at` (case, _ and - ignored)
+                                                // `created_at` (case, _ and - ignored);
+                                                // a key twice, or `name` and `NAME`: an error
 let api_body = json.encode_camel(user)          // keys as createdAt
 let out = json.encode_with(user, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true))
                                                 // created-at; fields that are none left out

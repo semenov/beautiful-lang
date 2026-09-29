@@ -1,0 +1,42 @@
+// JSON: a key written twice in an object is an error, and in decode<T> so
+// are two keys that fill the same field ("name" and "NAME"), while one
+// loosely matching key (camelCase, other case) still fills it.
+import json
+
+type In {
+  name: String
+  age: Int
+  created_at: String = ""
+}
+
+fn try_decode(text: String) -> String {
+  let v = try json.decode<In>(text) catch err {
+    return "error: ${err}"
+  }
+  return "${v}"
+}
+
+fn try_parse(text: String) -> String {
+  let v = try json.parse(text) catch err {
+    return "error: ${err}"
+  }
+  return "ok ${json.encode(v)}"
+}
+
+fn main() {
+  print(try_decode("{\"NAME\": \"a\", \"Age\": 5}"))
+  print(try_decode("{\"name\": \"a\", \"createdAt\": \"x\", \"age\": 5}"))
+  print(try_decode("{\"name\": \"a\", \"name\": \"b\", \"age\": 5}"))
+  print(try_decode("{\"name\": \"a\", \"NAME\": \"b\", \"age\": 5}"))
+  print(try_decode("{\"name\": \"a\", \"age\": 5, \"created_at\": \"1\", \"createdAt\": \"2\"}"))
+  print(try_decode("{\"name\": \"a\", \"age\": 5, \"other\": 1, \"OTHER\": 2}"))
+  print(try_parse("{\"a\": 1, \"b\": {\"c\": 1,\n \"c\": 2}}"))
+  print(try_parse("{\"a\": 1, \"A\": 2}"))
+  var big = "{"
+  for i in 0..<100 {
+    big = "${big}\"k${i}\": ${i}, "
+  }
+  print(try_parse("${big}\"k0\": 0}").slice(from: 0, to: 50))
+  print(try_parse("${big}\"k100\": 0}").slice(from: 0, to: 20))
+  print(try_parse("[{\"a\": 1}, {\"a\": 2}]"))
+}

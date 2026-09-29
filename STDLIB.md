@@ -689,7 +689,8 @@ pub fn encode_with<T>(value: T, options: EncodeOptions) -> String
 
 // Reads JSON into a T, checking every field. A missing field is an error
 // unless it's optional (`T?`) or has a default. Extra fields are ignored.
-// Errors say where: `json: at $.users[2].age: expected a whole number`.
+// A key written twice is an error, and so are two keys that fill the same
+// field ("name" and "NAME"). Errors say where: `json: at $.users[2].age: expected a whole number`.
 pub fn decode<T>(text: String) throws -> T
 
 // A JSON Schema of T's JSON form: for describing data to other programs,
@@ -729,7 +730,8 @@ pub fn number(value: Float) -> Value
 // An Int as a JSON value.
 pub fn integer(value: Int) -> Value
 
-// Reads any JSON into a `Value`.
+// Reads any JSON into a `Value`. A key written twice in an object is an
+// error (`json: duplicate key "name" at line 1, column 15`).
 pub fn parse(text: String) throws -> Value
 ```
 

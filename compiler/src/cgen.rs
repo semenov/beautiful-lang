@@ -1225,7 +1225,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             };
             let _ = write!(
                 s,
-                " {{ const lt_dyn *f_ = lt_dyn_get(d, \"{n}\", {nl}); if (f_ && !(f_->kind == LT_D_NULL && {opt})) {{ lt_path q_ = {{ p, \"{n}\", {nl}, 0 }}; {fc} v_; lt_err e_ = dec_{fid}(src, f_, &q_, lenient, &v_); if (e_.obj) {{ {cleanup} return e_; }} {drop_old} {acc}{i} = v_; }}{missing} }}",
+                " {{ const lt_dyn *f_; lt_err a_ = lt_dyn_field(src, d, p, \"{n}\", {nl}, &f_); if (a_.obj) {{ {cleanup} return a_; }} if (f_ && !(f_->kind == LT_D_NULL && {opt})) {{ lt_path q_ = {{ p, \"{n}\", {nl}, 0 }}; {fc} v_; lt_err e_ = dec_{fid}(src, f_, &q_, lenient, &v_); if (e_.obj) {{ {cleanup} return e_; }} {drop_old} {acc}{i} = v_; }}{missing} }}",
                 n = fname,
                 nl = fname.len(),
                 opt = opt,
