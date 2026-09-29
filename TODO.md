@@ -86,7 +86,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] print without a line break without a `with` stream (`io.write`)
     - [x] errors: misplaced `catch` inside a lambda says "expected `)`"; a
           file named like a stdlib module gets an unclear error
-    - [ ] docs: `b[i]` on Bytes, `is_letter`, the stack and speed notes
+    - [x] docs: `b[i]` on Bytes, `is_letter`, the stack and speed notes
     - [x] a variant named `String` can't be built by its bare name: now it can where the enum is expected, else the error names `Value.String(...)`
     - [x] guide: a one-line record example doesn't parse
   - [x] mccutchen/go-httpbin (the HTTP server API end to end): all endpoints,

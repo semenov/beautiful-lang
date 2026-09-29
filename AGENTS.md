@@ -302,6 +302,9 @@ for t in tasks {
 }
 ```
 
+Every task, like `main`, has an 8 MB stack: recursion some 100,000 calls
+deep is fine; deeper stops the program with "stack overflow".
+
 A function waits for its tasks before it returns. No `async`/`await`:
 waiting code is written sequentially.
 

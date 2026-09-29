@@ -1742,6 +1742,7 @@ builtin type String {
 
 // Raw bytes: file contents, network data, hashes. `Bytes()` is empty;
 // `Bytes([104, 105])` from numbers 0-255; `text.bytes()` from text (UTF-8).
+// `b[i]` is the byte at `i`, an Int 0-255.
 builtin type Bytes {
   length: Int
   fn is_empty(self) -> Bool
