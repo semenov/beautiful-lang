@@ -96,22 +96,6 @@ __asm__(
 #error "tasks are not supported on this architecture yet"
 #endif
 
-// ---------------------------------------------------------------- spin locks
-
-typedef struct { int v; } lt_spin;
-LT_INLINE void lt_spin_lock(lt_spin *s) {
-    while (__atomic_exchange_n(&s->v, 1, __ATOMIC_ACQUIRE)) {
-        while (__atomic_load_n(&s->v, __ATOMIC_RELAXED)) {
-#if defined(__aarch64__)
-            __asm__ volatile("yield");
-#else
-            __asm__ volatile("pause");
-#endif
-        }
-    }
-}
-LT_INLINE void lt_spin_unlock(lt_spin *s) { __atomic_store_n(&s->v, 0, __ATOMIC_RELEASE); }
-
 // ---------------------------------------------------------------- tasks
 
 struct lt_task;

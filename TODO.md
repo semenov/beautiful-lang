@@ -40,6 +40,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [ ] **using http, spawn or net anywhere makes the whole program 1.7-2.4x
           slower** (the multi-threaded runtime: atomic refcounts?): measure,
           pay only where values are shared
+      - [x] 90% of it was the allocator (system malloc with tasks): now
+            per-thread free lists with a shared pool; 1.75x -> 1.16x
+      - [ ] the rest: atomic refcounts, and a call to find the thread's heap
     - [ ] top-level `let` list rebuilt on every use (230 ns per read of a
           2000-element table): make them static, built once
     - [ ] `json.parse` changes data: `-0` -> `0`, `1e400` -> Infinity -> null

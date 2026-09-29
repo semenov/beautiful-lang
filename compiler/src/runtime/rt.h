@@ -34,13 +34,27 @@ static const char *lt_file = "?";
 #define LT_INC(p) do { if (__atomic_load_n(&(p)->rc, __ATOMIC_RELAXED) > 0) __atomic_fetch_add(&(p)->rc, 1, __ATOMIC_RELAXED); } while (0)
 #define LT_DEC_ZERO(p) (__atomic_load_n(&(p)->rc, __ATOMIC_RELAXED) > 0 && __atomic_sub_fetch(&(p)->rc, 1, __ATOMIC_ACQ_REL) == 0)
 #define LT_UNIQUE(p) (__atomic_load_n(&(p)->rc, __ATOMIC_ACQUIRE) == 1)
-#define LT_TLS __thread
 #else
 #define LT_INC(p) do { if ((p)->rc > 0) (p)->rc++; } while (0)
 #define LT_DEC_ZERO(p) ((p)->rc > 0 && --(p)->rc == 0)
 #define LT_UNIQUE(p) ((p)->rc == 1)
-#define LT_TLS
 #endif
+
+// ---------------------------------------------------------------- spin locks
+
+typedef struct { int v; } lt_spin;
+LT_INLINE void lt_spin_lock(lt_spin *s) {
+    while (__atomic_exchange_n(&s->v, 1, __ATOMIC_ACQUIRE)) {
+        while (__atomic_load_n(&s->v, __ATOMIC_RELAXED)) {
+#if defined(__aarch64__)
+            __asm__ volatile("yield");
+#else
+            __asm__ volatile("pause");
+#endif
+        }
+    }
+}
+LT_INLINE void lt_spin_unlock(lt_spin *s) { __atomic_store_n(&s->v, 0, __ATOMIC_RELEASE); }
 
 // ---------------------------------------------------------------- memory
 
@@ -49,8 +63,30 @@ static const char *lt_file = "?";
 #define LT_CLASSES 32
 #define LT_CLASS_BYTES 16
 typedef struct lt_free_node { struct lt_free_node *next; } lt_free_node;
-static LT_TLS lt_free_node *lt_free_lists[LT_CLASSES];
-static LT_TLS char *lt_arena_cur, *lt_arena_end;
+// Freed blocks and the unused rest of the current arena chunk. With tasks
+// there is one per OS thread.
+typedef struct lt_heap {
+    lt_free_node *lists[LT_CLASSES];
+    char *cur, *end;
+#ifdef LT_THREADS
+    int32_t counts[LT_CLASSES];
+#endif
+} lt_heap;
+#ifdef LT_THREADS
+// A task can move to another OS thread at any wait, and C compilers may keep
+// the address of a thread-local variable across such a point (they assume
+// the thread never changes inside a function). So the heap is found through
+// a call the compiler can't see into, once per allocation.
+static __thread lt_heap lt_thread_heap;
+__attribute__((noinline)) static lt_heap *lt_heap_here(void) {
+    lt_heap *h = &lt_thread_heap;
+    __asm__ volatile("" : "+r"(h) : : "memory");
+    return h;
+}
+#else
+static lt_heap lt_the_heap;
+#define lt_heap_here() (&lt_the_heap)
+#endif
 
 LT_NOINLINE void lt_oom(void) {
     fflush(stdout);
@@ -97,12 +133,12 @@ LT_NOINLINE void *lt_big_realloc(void *p, size_t old, size_t n) {
     return r;
 }
 
-LT_NOINLINE void *lt_arena_refill(size_t n) {
+LT_NOINLINE void *lt_arena_refill(lt_heap *h, size_t n) {
     size_t chunk = 1 << 20;
     char *p = (char *)malloc(chunk);
     if (!p) lt_oom();
-    lt_arena_cur = p + n;
-    lt_arena_end = p + chunk;
+    h->cur = p + n;
+    h->end = p + chunk;
     return p;
 }
 
@@ -135,58 +171,78 @@ LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
     if (!q) lt_oom();
     return q;
 }
-#elif defined(LT_THREADS)
-// With tasks, a task can move to another OS thread at any wait, and C
-// compilers may keep the address of a thread-local variable across such a
-// point; so the small-object free lists (which are per thread) are not used:
-// the system allocator is thread-safe by itself.
-LT_INLINE void *lt_alloc(size_t n) {
-    if (n >= LT_BIG) return lt_big_alloc(n);
-    void *p = malloc(n);
-    if (!p) lt_oom();
-    return p;
-}
-LT_INLINE void lt_free(void *p, size_t n) {
-    if (n >= LT_BIG) {
-        lt_big_free(p, n);
-        return;
-    }
-    free(p);
-}
-LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
-    if (old >= LT_BIG && n >= LT_BIG) return lt_big_realloc(p, old, n);
-    if (old < LT_BIG && n >= LT_BIG) {
-        void *q = lt_big_map(2 * n);
-        memcpy(q, p, old);
-        free(p);
-        return q;
-    }
-    if (old >= LT_BIG) {
-        void *q = malloc(n);
-        memcpy(q, p, n);
-        lt_big_free(p, old);
-        return q;
-    }
-    void *q = realloc(p, n);
-    if (!q) lt_oom();
-    return q;
-}
 #else
+#ifdef LT_THREADS
+// With tasks, a block may be freed on another thread than the one that
+// allocated it, so a thread's free lists could grow without end (one task
+// produces, another consumes). A list that gets too long moves a batch of
+// blocks to a shared pool, where a thread whose list is empty takes them.
+static struct { lt_spin lock; lt_free_node *batches; } lt_pool[LT_CLASSES];
+// Blocks per batch: about 32 KB worth, at least 16. A batch's first block
+// links to the next batch in its second word (every class is >= 16 bytes).
+LT_INLINE int32_t lt_batch(size_t c) {
+    size_t b = 32768 / (c * LT_CLASS_BYTES);
+    return b < 16 ? 16 : (int32_t)b;
+}
+LT_NOINLINE void lt_pool_put(lt_heap *h, size_t c) {
+    int32_t b = lt_batch(c);
+    lt_free_node *first = h->lists[c], *last = first;
+    for (int32_t i = 1; i < b; i++) last = last->next;
+    h->lists[c] = last->next;
+    h->counts[c] -= b;
+    last->next = NULL;
+    lt_spin_lock(&lt_pool[c].lock);
+    ((lt_free_node **)first)[1] = lt_pool[c].batches;
+    lt_pool[c].batches = first;
+    lt_spin_unlock(&lt_pool[c].lock);
+}
+LT_NOINLINE void *lt_pool_take(lt_heap *h, size_t c) {
+    lt_free_node *got = NULL;
+    if (__atomic_load_n(&lt_pool[c].batches, __ATOMIC_RELAXED)) {
+        lt_spin_lock(&lt_pool[c].lock);
+        got = lt_pool[c].batches;
+        if (got) lt_pool[c].batches = ((lt_free_node **)got)[1];
+        lt_spin_unlock(&lt_pool[c].lock);
+    }
+    if (got) {
+        h->lists[c] = got->next;
+        h->counts[c] = lt_batch(c) - 1;
+        return got;
+    }
+    size_t sz = c * LT_CLASS_BYTES;
+    if (LT_LIKELY(h->cur + sz <= h->end)) {
+        void *p = h->cur;
+        h->cur += sz;
+        return p;
+    }
+    return lt_arena_refill(h, sz);
+}
+#endif
+
 LT_INLINE void *lt_alloc(size_t n) {
     size_t c = (n + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
     if (LT_LIKELY(c < LT_CLASSES)) {
-        lt_free_node *f = lt_free_lists[c];
+        if (LT_UNLIKELY(c == 0)) c = 1;
+        lt_heap *h = lt_heap_here();
+        lt_free_node *f = h->lists[c];
         if (f) {
-            lt_free_lists[c] = f->next;
+            h->lists[c] = f->next;
+#ifdef LT_THREADS
+            h->counts[c]--;
+#endif
             return f;
         }
+#ifdef LT_THREADS
+        return lt_pool_take(h, c);
+#else
         size_t sz = c * LT_CLASS_BYTES;
-        if (LT_LIKELY(lt_arena_cur + sz <= lt_arena_end)) {
-            void *p = lt_arena_cur;
-            lt_arena_cur += sz;
+        if (LT_LIKELY(h->cur + sz <= h->end)) {
+            void *p = h->cur;
+            h->cur += sz;
             return p;
         }
-        return lt_arena_refill(sz);
+        return lt_arena_refill(h, sz);
+#endif
     }
     if (n >= LT_BIG) return lt_big_alloc(n);
     void *p = malloc(n);
@@ -197,9 +253,14 @@ LT_INLINE void *lt_alloc(size_t n) {
 LT_INLINE void lt_free(void *p, size_t n) {
     size_t c = (n + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
     if (LT_LIKELY(c < LT_CLASSES)) {
+        if (LT_UNLIKELY(c == 0)) c = 1;
+        lt_heap *h = lt_heap_here();
         lt_free_node *f = (lt_free_node *)p;
-        f->next = lt_free_lists[c];
-        lt_free_lists[c] = f;
+        f->next = h->lists[c];
+        h->lists[c] = f;
+#ifdef LT_THREADS
+        if (LT_UNLIKELY(++h->counts[c] >= 2 * lt_batch(c))) lt_pool_put(h, c);
+#endif
         return;
     }
     if (n >= LT_BIG) {
@@ -212,6 +273,8 @@ LT_INLINE void lt_free(void *p, size_t n) {
 LT_INLINE void *lt_realloc(void *p, size_t old, size_t n) {
     size_t oc = (old + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
     size_t nc = (n + LT_CLASS_BYTES - 1) / LT_CLASS_BYTES;
+    if (oc == 0) oc = 1;
+    if (nc == 0) nc = 1;
     if (old >= LT_BIG && n >= LT_BIG) return lt_big_realloc(p, old, n);
     if (old < LT_BIG && n >= LT_BIG && oc >= LT_CLASSES) {
         void *q = lt_big_map(2 * n);
