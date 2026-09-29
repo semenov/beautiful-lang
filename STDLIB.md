@@ -625,6 +625,28 @@ pub fn encode_camel<T>(value: T) -> String
 // The value as indented JSON, for people.
 pub fn encode_pretty<T>(value: T) -> String
 
+// How to write record field names as JSON keys.
+pub enum Keys {
+  // created_at
+  AsWritten
+  // createdAt
+  Camel
+  // created-at (HTTP headers, some APIs)
+  Kebab
+}
+
+// `json.encode_with(user, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true))`
+pub type EncodeOptions {
+  keys: Keys = AsWritten
+  // leave out record fields that are none, instead of writing null
+  omit_none: Bool = false
+  // indented, for people
+  pretty: Bool = false
+}
+
+// The value as JSON, written as the options say.
+pub fn encode_with<T>(value: T, options: EncodeOptions) -> String
+
 // Reads JSON into a T, checking every field. A missing field is an error
 // unless it's optional (`T?`) or has a default. Extra fields are ignored.
 // Errors say where: `json: at $.users[2].age: expected a whole number`.

@@ -1475,16 +1475,15 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             }
             Kind::Record { fields, boxed, .. } => {
                 let acc = if *boxed { "v->v.f" } else { "v.f" };
-                let mut s = String::from("lt_buf_c(b, '{'); b->level++;");
+                let mut s = String::from("lt_buf_c(b, '{'); b->level++; bool first = true;");
                 for (i, (fname, fid)) in fields.iter().enumerate() {
                     self.need(H::Enc, *fid);
-                    let _ = write!(s, " lt_json_key(b, \"{}\", {}); enc_{}({}{}, b);", fname, i == 0, fid, acc, i);
+                    let field = format!("{}{}", acc, i);
+                    // an optional field that is none may be left out
+                    let skip = if matches!(self.tys[*fid].kind, Kind::Opt { .. }) { format!("if (!b->omit_none || {})", self.opt_is_some(*fid, &field)) } else { String::new() };
+                    let _ = write!(s, " {} {{ lt_json_key(b, \"{}\", first); first = false; enc_{}({}, b); }}", skip, fname, fid, field);
                 }
-                if !fields.is_empty() {
-                    s += " b->level--; lt_buf_newline(b); lt_buf_c(b, '}');";
-                } else {
-                    s += " b->level--; lt_buf_c(b, '}');";
-                }
+                s += " b->level--; if (!first) lt_buf_newline(b); lt_buf_c(b, '}');";
                 s
             }
             Kind::Enum { variants, boxed, .. } if self.is_json_value(id) => {
@@ -3276,7 +3275,13 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.need(H::Enc, id);
                 let indent = if name == "json.encode_pretty" { 2 } else { -1 };
                 let camel = if name == "json.encode_camel" { 1 } else { 0 };
-                format!("({{ lt_buf b_ = {{0}}; b_.indent = {}; b_.camel = {}; enc_{}({}, &b_); lt_buf_text(&b_); }})", indent, camel, id, a[0])
+                format!("({{ lt_buf b_ = {{0}}; b_.indent = {}; b_.keys = {}; enc_{}({}, &b_); lt_buf_text(&b_); }})", indent, camel, id, a[0])
+            }
+            // json.__encode(value, keys, omit_none, indent)
+            "json.__encode" => {
+                let id = tid0.unwrap();
+                self.need(H::Enc, id);
+                format!("({{ lt_buf b_ = {{0}}; b_.keys = (int){}; b_.omit_none = {}; b_.indent = (int){}; enc_{}({}, &b_); lt_buf_text(&b_); }})", a[1], a[2], a[3], id, a[0])
             }
             "json.decode" => {
                 let id = tid0.unwrap();

@@ -332,6 +332,8 @@ let text = json.encode(user)
                                                 // `createdAt` in JSON fills
                                                 // `created_at` (case, _ and - ignored)
 let api_body = json.encode_camel(user)          // keys as createdAt
+let out = json.encode_with(user, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true))
+                                                // created-at; fields that are none left out
 let config = try env.decode<Config>()           // CONFIG fields from env
 let opts = try cli.decode<Options>()            // --flag or -flag (-n for a field `n`),
                                                 // --help generated: a comment

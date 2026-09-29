@@ -10,7 +10,15 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
         (Duration, Date, DateTime, Zoned; errors print their message)
   - [ ] `?.`
   - [x] exact JSON numbers (`json.Value.Number` as written, `json.Number`)
-  - [ ] `json.encode` options: `keys:` naming, `omit_empty:`
+  - [x] `json.encode` options: `json.encode_with(x, options:
+        json.EncodeOptions(keys: Kebab, omit_none: true, pretty: true))`
+        (no default parameters in the language, so an options record, as
+        `http.serve_with`)
+- [ ] **More benchmarks against Go** (Vlad, 2026-09-29): different kinds of
+      programs (CPU, allocation, strings, maps, JSON, HTTP server and client,
+      files, concurrency); report memory (peak RSS) next to time / req/s.
+      Where we lose to Go, find out why (profile) and fix it or write down
+      the reason
 - [ ] **README: how our scheduler works** (Vlad, 2026-09-29): tasks on a
       pool of OS threads, stacks, parking, I/O and timers; its strengths and
       its possible weak spots
@@ -102,7 +110,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
           (`time.unix_millis`), env listing (`env.all`), Duration
           `divided_by` / `is_shorter_than`, `Int.wrapping_*`
     - [x] stdlib: relative `url.parse`, `url.resolve`, `String.last_index_of`
-    - [ ] JSON field renames / omit-empty: needs field attributes, to raise with Vlad
+    - [x] JSON field renames / omit-empty: `json.encode_with` options (Vlad chose options over attributes)
     - [x] docs: `http.bytes` example, query/path decoding, middleware order
     - [x] tests over real connections (compiler/tests/wire, curl)
 

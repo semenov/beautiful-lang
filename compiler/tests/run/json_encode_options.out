@@ -1,0 +1,8 @@
+{"created_at":5,"headers":{"user_agent":"curl","content_type":null,"extra":{"x_y":"1"}},"note":null}
+{"created-at":5,"headers":{"user-agent":"curl","extra":{"x_y":"1"}}}
+{"createdAt":5,"headers":{"userAgent":"curl","contentType":null,"extra":{"x_y":"1"}},"note":null}
+{
+  "user_agent": "a",
+  "extra": {}
+}
+{"created_at":1,"headers":{"user_agent":"b","extra":{}},"note":"hi"}

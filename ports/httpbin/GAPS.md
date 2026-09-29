@@ -44,7 +44,7 @@ easy; HEAD bodies are dropped automatically.
 | 22 | No seeded random generator; `random` is only the OS generator. | minor | xorshift (`helpers.Rng`); seeded `/bytes?seed=` can't match Go's sequence anyway |
 | 23 | No wall-clock milliseconds: `time.unix_now()` is whole seconds, `time.now().nanos` is monotonic. SSE `timestamp` is in ms. | minor | seconds×1000 + monotonic offset (so every stream starts at `…000`) |
 | 24 | `url.parse` rejects relative URLs (`"/get"`: "has no scheme"). | minor | only parse when `://` is present |
-| 25 | JSON: no `omitempty`, no field renaming (`"user-agent"` can't be a field name). | minor | two record types per optional field; `json.Value.Object` for `user-agent` |
+| 25 | *Fixed: `json.encode_with(x, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true))`.* JSON: no `omitempty`, no field renaming (`"user-agent"` can't be a field name). | minor | two record types per optional field; `json.Value.Object` for `user-agent` |
 | 26 | JSON numbers in `json.Value` are `Float`: `12345678901234567890` is echoed as `1.2345678901234567e+19` (Go: `12345678901234567000`). | minor | none |
 | 27 | No lossy UTF-8 decoding (Go's `string(bytes)` + U+FFFD on encode). A non-UTF-8 body gives `data: ""`. | minor | `""` |
 | 28 | No listing of environment variables (`env.get` only): `/env` can't collect `HTTPBIN_*`. | minor | `/env` returns an empty map |

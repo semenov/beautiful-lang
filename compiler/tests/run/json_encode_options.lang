@@ -1,0 +1,24 @@
+// json.encode_with: key naming (as written, camelCase, kebab-case), leaving
+// out fields that are none, indentation. Map keys stay as they are.
+import json
+
+type Headers {
+  user_agent: String
+  content_type: String? = none
+  extra: Map<String, String> = {}
+}
+
+type Reply {
+  created_at: Int
+  headers: Headers
+  note: String? = none
+}
+
+fn main() {
+  let r = Reply(created_at: 5, headers: Headers(user_agent: "curl", extra: {"x_y": "1"}))
+  print(json.encode(r))
+  print(json.encode_with(r, options: json.EncodeOptions(keys: json.Keys.Kebab, omit_none: true)))
+  print(json.encode_with(r, options: json.EncodeOptions(keys: json.Keys.Camel)))
+  print(json.encode_with(Headers(user_agent: "a"), options: json.EncodeOptions(omit_none: true, pretty: true)))
+  print(json.encode_with(Reply(created_at: 1, headers: Headers(user_agent: "b"), note: "hi"), options: json.EncodeOptions(omit_none: true)))
+}

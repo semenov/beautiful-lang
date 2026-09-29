@@ -507,7 +507,8 @@ typedef struct {
     int64_t len, cap;
     int indent; // < 0: compact
     int level;
-    int camel; // keys in camelCase: created_at -> createdAt
+    int keys; // record field names: 0 as written, 1 camelCase (createdAt), 2 kebab-case (created-at)
+    int omit_none; // leave out record fields that are none
 } lt_buf;
 
 static void lt_buf_grow(lt_buf *b, int64_t n) {
@@ -607,7 +608,12 @@ static void lt_json_number_put(lt_buf *b, lt_text *t) {
 static void lt_json_key(lt_buf *b, const char *k, bool first) {
     if (!first) lt_buf_c(b, ',');
     lt_buf_newline(b);
-    if (b->camel && strchr(k, '_')) {
+    if (b->keys == 2 && strchr(k, '_')) {
+        char c[256];
+        size_t w = 0;
+        for (const char *p = k; *p && w + 1 < sizeof c; p++) c[w++] = *p == '_' ? '-' : *p;
+        lt_json_str(b, c, (int64_t)w);
+    } else if (b->keys == 1 && strchr(k, '_')) {
         char c[256];
         size_t w = 0;
         bool up = false;
