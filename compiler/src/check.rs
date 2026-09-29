@@ -1852,6 +1852,27 @@ impl Checker {
                 let var = self.declare(*span, name, vt, false);
                 let b = self.block(body, false, None);
                 self.fcx().scopes.pop();
+                // a lambda using the resource must not outlive the block: it
+                // would find it closed
+                let mut escapes = vec![];
+                let start = span.lo;
+                let decl_at = self.fc().decl_at.clone();
+                let outside = |p: &TPlace| decl_at.get(p.root).map(|d| *d < start).unwrap_or(false);
+                walk_block(&b, &mut |node| match node {
+                    Node::Stmt(TStmt::Assign(p, v)) if outside(p) && keeps_lambda_of(v, var) => escapes.push(v.span),
+                    Node::Stmt(TStmt::Return(Some(v))) if keeps_lambda_of(v, var) => escapes.push(v.span),
+                    Node::Expr(TExpr { kind: TK::MutCall { place, args, .. } | TK::IfaceMutCall { place, args, .. }, .. }) if outside(place) => {
+                        for a in args {
+                            if keeps_lambda_of(a, var) {
+                                escapes.push(a.span);
+                            }
+                        }
+                    }
+                    _ => {}
+                });
+                for at in escapes {
+                    self.err_help(at, format!("this lambda uses `{}`, and it's kept after the `with` block, which closes `{}`", name, name), format!("open `{}` where the lambda runs, or open it before and pass it to the function that keeps the lambda (e.g. open the database in `main` and hand the connection to the routes)", name));
+                }
                 if self.prog.fns[close].throws {
                     self.note_throw(*span);
                 }
@@ -4292,6 +4313,107 @@ fn stmt_span(s: &Stmt) -> Span {
         Stmt::Let { span, .. } | Stmt::Assign { span, .. } | Stmt::While { span, .. } | Stmt::For { span, .. } | Stmt::With { span, .. } | Stmt::Expect { span, .. } => *span,
         Stmt::Return(_, s) | Stmt::Break(s) | Stmt::Continue(s) | Stmt::Throw(_, s) => *s,
         Stmt::Expr(e) => e.span,
+    }
+}
+
+// A lambda capturing `v`, as the value itself or inside a record, list,
+// map or optional (not an argument of a call: that is applied right away).
+fn keeps_lambda_of(e: &TExpr, v: LocalId) -> bool {
+    match &e.kind {
+        TK::Lambda { captures, .. } => captures.contains(&v),
+        TK::Record { fields, .. } | TK::Variant { fields, .. } | TK::List(fields) => fields.iter().any(|f| keeps_lambda_of(f, v)),
+        TK::Map(entries) => entries.iter().any(|(_, x)| keeps_lambda_of(x, v)),
+        TK::Some(x) | TK::ToIface(x) | TK::Wrap(x) => keeps_lambda_of(x, v),
+        _ => false,
+    }
+}
+
+enum Node<'a> {
+    Stmt(&'a TStmt),
+    Expr(&'a TExpr),
+}
+
+fn walk_block<'a>(b: &'a TBlock, f: &mut dyn FnMut(Node<'a>)) {
+    for s in &b.stmts {
+        walk_stmt(s, f);
+    }
+    if let Some(t) = &b.tail {
+        walk_expr(t, f);
+    }
+}
+
+fn walk_stmt<'a>(s: &'a TStmt, f: &mut dyn FnMut(Node<'a>)) {
+    f(Node::Stmt(s));
+    match s {
+        TStmt::Let(_, e) | TStmt::Discard(e) | TStmt::Assign(_, e) | TStmt::Expr(e) | TStmt::Throw(e) => walk_expr(e, f),
+        TStmt::Return(Some(e)) => walk_expr(e, f),
+        TStmt::While(c, b) => {
+            walk_expr(c, f);
+            walk_block(b, f);
+        }
+        TStmt::ForList { list: x, body, .. } | TStmt::ForMap { map: x, body, .. } | TStmt::ForSet { set: x, body, .. } | TStmt::ForChannel { chan: x, body, .. } => {
+            walk_expr(x, f);
+            walk_block(body, f);
+        }
+        TStmt::ForRange { lo, hi, body, .. } => {
+            walk_expr(lo, f);
+            walk_expr(hi, f);
+            walk_block(body, f);
+        }
+        TStmt::WithLock { shared: x, body, .. } | TStmt::With { value: x, body, .. } => {
+            walk_expr(x, f);
+            walk_block(body, f);
+        }
+        TStmt::Expect { cond, .. } => walk_expr(cond, f),
+        _ => {}
+    }
+}
+
+fn walk_expr<'a>(e: &'a TExpr, f: &mut dyn FnMut(Node<'a>)) {
+    f(Node::Expr(e));
+    match &e.kind {
+        TK::Call { args, .. } | TK::MutCall { args, .. } | TK::IfaceMutCall { args, .. } | TK::Record { fields: args, .. } | TK::Variant { fields: args, .. } | TK::Interp(args) | TK::List(args) => {
+            for a in args {
+                walk_expr(a, f);
+            }
+        }
+        TK::Map(entries) => {
+            for (k, v) in entries {
+                walk_expr(k, f);
+                walk_expr(v, f);
+            }
+        }
+        TK::Wrap(x) | TK::Unwrap(x) | TK::Field(x, _) | TK::Prop(x, _) | TK::Unary(_, x) | TK::Some(x) | TK::ToIface(x) | TK::ToText(x) | TK::ExpectThrows(x) | TK::Spawn(x) | TK::Is(x, _) => walk_expr(x, f),
+        TK::Index(a, b) | TK::MapGet(a, b) | TK::Binary(_, a, b) | TK::Coalesce(a, b) => {
+            walk_expr(a, f);
+            walk_expr(b, f);
+        }
+        TK::Lambda { body, .. } => walk_expr(body, f),
+        TK::Block(b) => walk_block(b, f),
+        TK::If { cond, then, els } => {
+            walk_expr(cond, f);
+            walk_block(then, f);
+            if let Some(x) = els {
+                walk_expr(x, f);
+            }
+        }
+        TK::Match { scrut, arms } => {
+            walk_expr(scrut, f);
+            for a in arms {
+                if let Some(g) = &a.guard {
+                    walk_expr(g, f);
+                }
+                walk_expr(&a.body, f);
+            }
+        }
+        TK::Try { call, catch } => {
+            walk_expr(call, f);
+            if let Some((_, b)) = catch {
+                walk_block(b, f);
+            }
+        }
+        TK::Diverge(s) => walk_stmt(s, f),
+        _ => {}
     }
 }
 
