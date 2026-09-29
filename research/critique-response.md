@@ -40,7 +40,7 @@ answer: does it keep the language simple and fast?
 | 29 | wrong hints | **fix** each |
 | 30 | mutating through an interface-typed element | **fix later** (TODO) |
 | 31 | no nested functions | **ask** |
-| 32 | ranges only in `for` | **ask** |
+| 32 | ranges only in `for` | **explain**: asked; left as they are (counting down is a `while`) |
 | 33 | module names take variable names; no shadowing | **explain** |
 | 34 | inconsistent member shapes | **fix** `chunks(0)`; **explain** the rest |
 | 35 | no operators for user types | **explain** (and `Duration <` from 22) |

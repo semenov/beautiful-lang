@@ -24,7 +24,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] `is` through `cause`
   - [ ] SQL from literal pieces; list parameters
   - [ ] name every argument after the first (2+ parameters)
-  - [ ] `.reversed()` / `.step(n)` on ranges in `for`
+  - [x] ranges: left as they are (Vlad, after a second look)
   - [ ] fixes: changed-a-copy error, pattern names, flow typing through
         `or`, `with` captured by an escaping lambda, Shared-in-Shared,
         Duration ordered, newtypes ordered, `is` crash, `plumb test` for
