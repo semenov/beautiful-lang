@@ -1197,6 +1197,7 @@ Types and functions available in every file.
 ```
 builtin type Int {
   fn to_float(self) -> Float
+  fn to_decimal(self) -> Decimal
   fn to_text(self) -> Text
   fn div(self, by: Int) -> Int
   fn abs(self) -> Int
@@ -1209,6 +1210,9 @@ builtin type Int {
 }
 
 builtin type Float {
+  // The closest decimal: 0.1 gives 0.1 (the shortest that reads back as
+  // the same Float).
+  fn to_decimal(self) -> Decimal
   fn round(self) -> Int
   fn floor(self) -> Int
   fn ceil(self) -> Int
@@ -1219,6 +1223,27 @@ builtin type Float {
   fn pow(self, exponent: Float) -> Float
   fn sqrt(self) -> Float
 }
+
+// An exact decimal number, for money: 0.1 + 0.2 == 0.3. Up to 18 digits.
+// A number literal becomes one where a Decimal is expected:
+// `let price: Decimal = 19.99`. `+ - *` are exact; division is `div`,
+// which says how many digits to keep. `1.50` keeps its two digits when
+// printed, and `1.50 == 1.5`.
+builtin type Decimal {
+  // Exactly `places` digits after the point, rounding half away from zero
+  // (2.345 -> 2.35, like Excel and SQL): money.round(2)
+  fn round(self, places: Int) -> Decimal
+  // self / other with `places` digits after the point, rounded the same way
+  fn div(self, other: Decimal, places: Int) -> Decimal
+  fn abs(self) -> Decimal
+  fn to_float(self) -> Float
+  // "19.99"
+  fn to_text(self) -> Text
+  // Rounded to `places` digits: 2.5.format(2) == "2.50"
+  fn format(self, places: Int) -> Text
+}
+
+fn __decimal(text: Text) -> Decimal
 
 builtin type Bool {
   fn to_text(self) -> Text
@@ -1245,6 +1270,8 @@ builtin type Text {
   fn pad_end(self, width: Int, fill: Text) -> Text
   fn to_int(self) throws -> Int
   fn to_float(self) throws -> Float
+  // "19.99" -> 19.99 exactly
+  fn to_decimal(self) throws -> Decimal
   fn to_text(self) -> Text
   // The text as UTF-8 bytes.
   fn bytes(self) -> Bytes

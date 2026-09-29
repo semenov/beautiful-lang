@@ -5,6 +5,9 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 
 ## Now
 
+- [ ] **Rename `Text` to `String`** (the type, its methods' docs, messages,
+      the guide, stdlib, packages, tests)
+
 - [x] **Postgres package** (`packages/postgres`, not stdlib): wire protocol v3
       over `net`, SCRAM-SHA-256 auth, parameters, typed rows, transactions,
       TLS. Installable with `lang add`.
@@ -40,7 +43,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       sources so it's never out of date
 - [ ] **Designed but never built** (DESIGN.md promises them):
   - [ ] `lang fmt`: the formatter the design calls mandatory
-  - [ ] `Decimal` for money
+  - [x] `Decimal` for money
   - [x] `time.timeout(duration, work)`
   - [x] `lang doc`
   - [x] a `Date` type (calendar dates apart from instants)
@@ -65,7 +68,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       questions (yes/no, password), a progress line
 - [x] `time`: format and parse with a pattern, time zones, `Date`,
       `parse_duration`, printing durations
-- [ ] `Decimal`
+- [x] `Decimal`
 - [x] `http`: middleware (`router.use`), cookies, forms (urlencoded,
       multipart), `http.mime_type`, CORS, request logging
 - [ ] WebSockets (server and client)

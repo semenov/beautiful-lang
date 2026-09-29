@@ -176,6 +176,10 @@ xs.map(x => try parse(x))        // a failing lambda needs `try` inside,
   `a.to_float() / b.to_float()`.
 - Bits: `a.bit_and(b)`, `bit_or`, `bit_xor`, `shift_left`, `shift_right`.
 - Text to numbers: `try text.to_int()`, `try text.to_float()`.
+- **Money is `Decimal`**, never `Float`: `let price: Decimal = 19.99`;
+  `+ - *` are exact; `/` is `a.div(b, places: 2)`; `x.round(2)`;
+  `n.to_decimal()` from an Int; `1.50` prints as `1.50` and equals `1.5`.
+  JSON and SQL carry it exactly.
 
 ## Resources: `with`
 

@@ -41,6 +41,8 @@ enum Kind {
     // a standard library handle (an open file, a temporary directory, ...)
     Handle(String),
     Bytes,
+    // an exact decimal (lt_decimal: a value, no counting)
+    Decimal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -209,6 +211,7 @@ impl<'a> CGen<'a> {
                 _ => Niche::Func,
             },
             Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
+                TypeKind::Builtin if *d == self.prog.b.decimal => Niche::No, // a value
                 TypeKind::Builtin => Niche::Ptr, // List, Map, Set, handles
                 TypeKind::Newtype(i) => {
                     let i = i.clone();
@@ -278,6 +281,8 @@ impl<'a> CGen<'a> {
                             (format!("T{}", id), Kind::Set(e))
                         } else if *d == self.prog.b.bytes {
                             ("lt_bytes*".to_string(), Kind::Bytes)
+                        } else if *d == self.prog.b.decimal {
+                            ("lt_decimal".to_string(), Kind::Decimal)
                         } else if *d == self.prog.b.task {
                             self.threads = true;
                             let e = self.tid(&args[0]);
@@ -357,6 +362,7 @@ impl<'a> CGen<'a> {
         let c = &self.tys[id].c;
         match &self.tys[id].kind {
             Kind::Int | Kind::Float => "0".into(),
+            Kind::Decimal => "((lt_decimal){0, 0})".into(),
             Kind::Bool => "false".into(),
             Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) | Kind::Bytes => "NULL".into(),
             Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => "NULL".into(),
@@ -504,6 +510,7 @@ impl<'a> CGen<'a> {
     fn eq_expr(&mut self, id: usize, a: &str, b: &str) -> String {
         match &self.tys[id].kind {
             Kind::Int | Kind::Float | Kind::Bool => format!("({} == {})", a, b),
+            Kind::Decimal => format!("lt_decimal_eq({}, {})", a, b),
             Kind::Text => format!("lt_text_eq({}, {})", a, b),
             _ => {
                 self.need(H::Eq, id);
@@ -516,6 +523,7 @@ impl<'a> CGen<'a> {
             Kind::Int => format!("lt_int_hash({})", a),
             Kind::Bool => format!("lt_int_hash((int64_t){})", a),
             Kind::Float => format!("lt_float_hash({})", a),
+            Kind::Decimal => format!("lt_decimal_hash({})", a),
             Kind::Text => format!("lt_text_hash({})", a),
             _ => {
                 self.need(H::Hash, id);
@@ -526,6 +534,7 @@ impl<'a> CGen<'a> {
     fn cmp_expr(&mut self, id: usize, a: &str, b: &str) -> String {
         match &self.tys[id].kind {
             Kind::Int | Kind::Float | Kind::Bool => format!("(({a}) < ({b}) ? -1 : (({a}) > ({b}) ? 1 : 0))", a = a, b = b),
+            Kind::Decimal => format!("lt_decimal_cmp({}, {})", a, b),
             Kind::Text => format!("lt_text_cmp({}, {})", a, b),
             _ => {
                 self.need(H::Cmp, id);
@@ -537,6 +546,7 @@ impl<'a> CGen<'a> {
         match &self.tys[id].kind {
             Kind::Int => format!("lt_int_to_text({})", a),
             Kind::Float => format!("lt_float_to_text({})", a),
+            Kind::Decimal => format!("lt_decimal_text({})", a),
             Kind::Bool => format!("lt_bool_to_text({})", a),
             Kind::Text => {
                 if debug {
@@ -621,6 +631,7 @@ impl<'a> CGen<'a> {
             Kind::Bytes => "return lt_bytes_eq(a, b);".into(),
             Kind::Func => "(void)a; (void)b; lt_panic_at(\"functions can't be compared\", 0);".into(),
             Kind::Int | Kind::Float | Kind::Bool => "return a == b;".into(),
+            Kind::Decimal => "return lt_decimal_eq(a, b);".into(),
             Kind::Text => "return lt_text_eq(a, b);".into(),
             _ => "(void)a; (void)b; return true;".into(),
         };
@@ -685,6 +696,7 @@ impl<'a> CGen<'a> {
             Kind::Bytes => "return lt_hash_bytes((const char *)a->data, a->len);".into(),
             Kind::Int => "return lt_int_hash(a);".into(),
             Kind::Float => "return lt_float_hash(a);".into(),
+            Kind::Decimal => "return lt_decimal_hash(a);".into(),
             Kind::Bool => "return lt_int_hash(a);".into(),
             Kind::Text => "return lt_text_hash(a);".into(),
             _ => "(void)a; return 0;".into(),
@@ -697,6 +709,7 @@ impl<'a> CGen<'a> {
         let _ = writeln!(self.protos, "static int64_t cmp_{}({} a, {} b);", id, c, c);
         let body = match &self.tys[id].kind {
             Kind::Int | Kind::Float | Kind::Bool => "return a < b ? -1 : (a > b ? 1 : 0);".to_string(),
+            Kind::Decimal => "return lt_decimal_cmp(a, b);".to_string(),
             Kind::Text => "return lt_text_cmp(a, b);".into(),
             _ => "(void)a; (void)b; lt_panic_at(\"these values can't be ordered\", 0);".into(),
         };
@@ -751,7 +764,7 @@ impl<'a> CGen<'a> {
                 // a present value prints like the value itself
                 let e = match &self.tys[inner].kind {
                     Kind::Text => format!("(debug ? lt_text_quote({v}) : lt_text_ret({v}))", v = va),
-                    Kind::Int | Kind::Float | Kind::Bool => self.totext_expr(inner, &va, false),
+                    Kind::Int | Kind::Float | Kind::Bool | Kind::Decimal => self.totext_expr(inner, &va, false),
                     _ => {
                         self.need(H::ToText, inner);
                         format!("totext_{}({}, debug)", inner, va)
@@ -802,6 +815,7 @@ impl<'a> CGen<'a> {
             Kind::Bytes => s += " { char m_[48]; snprintf(m_, sizeof m_, \"<%lld bytes>\", (long long)a->len); lt_texts_push(&p, lt_text_cstr(m_)); }",
             Kind::Int => s += " lt_texts_push(&p, lt_int_to_text(a));",
             Kind::Float => s += " lt_texts_push(&p, lt_float_to_text(a));",
+            Kind::Decimal => s += " lt_texts_push(&p, lt_decimal_text(a));",
             Kind::Bool => s += " lt_texts_push(&p, lt_bool_to_text(a));",
             Kind::Text => s += " lt_texts_push(&p, debug ? lt_text_quote(a) : lt_text_ret(a));",
             _ => {}
@@ -960,6 +974,9 @@ static void {l}_sort({l} *p) {{ {l}_unique(p); {l} l = *p; if (l->len < 2) retur
         if is_int || is_float {
             let add = if is_int { "r = lt_add(r, l->items[i], line);" } else { "r += l->items[i];" };
             let _ = writeln!(s, "static {ec} {l}_sum({l} l, int line) {{ {ec} r = 0; (void)line; for (int64_t i = 0; i < l->len; i++) {add} return r; }}", ec = ec, l = l, add = add);
+        }
+        if matches!(self.tys[e].kind, Kind::Decimal) {
+            let _ = writeln!(s, "static lt_decimal {l}_sum({l} l, int line) {{ lt_decimal r = {{0, 0}}; for (int64_t i = 0; i < l->len; i++) r = lt_decimal_add(r, l->items[i], line); return r; }}", l = l);
         }
         let _ = writeln!(
             s,
@@ -1201,6 +1218,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         let body: String = match &kind {
             Kind::Int => "return lt_dec_int(src, d, p, lenient, out);".into(),
             Kind::Float => "return lt_dec_float(src, d, p, lenient, out);".into(),
+            Kind::Decimal => "if (d->kind == LT_D_NUM) { if (d->is_int) { *out = (lt_decimal){ d->i, 0 }; return (lt_err){0}; } lt_text *t = lt_float_to_text(d->num); bool ok = lt_decimal_parse(t->data, t->len, out); lt_text_drop(t); if (ok) return (lt_err){0}; } if (d->kind == LT_D_STR && lt_decimal_parse(d->s, d->slen, out)) return (lt_err){0}; return lt_dec_error(src, p, \"a decimal number\", d);".into(),
             Kind::Bool => "return lt_dec_bool(src, d, p, lenient, out);".into(),
             Kind::Text => "return lt_dec_text(src, d, p, lenient, out);".into(),
             Kind::Bytes => "if (d->kind == LT_D_STR && d->raw) { *out = lt_bytes_from(d->s, d->slen); return (lt_err){0}; } if (d->kind != LT_D_STR) return lt_dec_error(src, p, \"base64 text\", d); lt_text *t = lt_text_from(d->s, d->slen); lt_err e = lt_base64_decode(t, out); lt_text_drop(t); if (e.obj) { lt_iface_drop(e); return lt_dec_error(src, p, \"base64 text\", d); } return (lt_err){0};".into(),
@@ -1351,7 +1369,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         let q = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
         let s = match &self.tys[id].kind {
             Kind::Int => r#"{"type":"integer"}"#.to_string(),
-            Kind::Float => r#"{"type":"number"}"#.to_string(),
+            Kind::Float | Kind::Decimal => r#"{"type":"number"}"#.to_string(),
             Kind::Bool => r#"{"type":"boolean"}"#.to_string(),
             Kind::Text => r#"{"type":"string"}"#.to_string(),
             Kind::Bytes => r#"{"type":"string","contentEncoding":"base64"}"#.to_string(),
@@ -1399,6 +1417,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
         let body: String = match &kind {
             Kind::Int => "lt_json_int(b, v);".into(),
             Kind::Float => "lt_json_float(b, v);".into(),
+            Kind::Decimal => "lt_text *t = lt_decimal_text(v); lt_buf_put(b, t->data, t->len); lt_text_drop(t);".into(),
             Kind::Bool => "if (v) lt_buf_put(b, \"true\", 4); else lt_buf_put(b, \"false\", 5);".into(),
             Kind::Text => "lt_json_str(b, v->data, v->len);".into(),
             Kind::Bytes => "lt_text *t = lt_bytes_base64(v); lt_json_str(b, t->data, t->len); lt_text_drop(t);".into(),
@@ -1526,7 +1545,7 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
             kinds.push(kind);
             let what = match &self.tys[inner].kind {
                 Kind::Int => " <whole number>",
-                Kind::Float => " <number>",
+                Kind::Float | Kind::Decimal => " <number>",
                 Kind::Bool | Kind::List(_) if kind == 1 || kind == 2 => "",
                 _ => " <text>",
             };
@@ -2410,7 +2429,17 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let at = self.op_ty(fi, a);
                 let x = self.op(a);
                 let y = self.op(b);
+                let is_dec = matches!(&at, Ty::Adt(d, _) if *d == self.prog.b.decimal);
                 let e = match (&at, op) {
+                    (_, BinOp::Add) if is_dec => format!("lt_decimal_add({}, {}, {})", x, y, line),
+                    (_, BinOp::Sub) if is_dec => format!("lt_decimal_sub({}, {}, {})", x, y, line),
+                    (_, BinOp::Mul) if is_dec => format!("lt_decimal_mul({}, {}, {})", x, y, line),
+                    (_, BinOp::Eq) if is_dec => format!("lt_decimal_eq({}, {})", x, y),
+                    (_, BinOp::Ne) if is_dec => format!("(!lt_decimal_eq({}, {}))", x, y),
+                    (_, BinOp::Lt) if is_dec => format!("(lt_decimal_cmp({}, {}) < 0)", x, y),
+                    (_, BinOp::Le) if is_dec => format!("(lt_decimal_cmp({}, {}) <= 0)", x, y),
+                    (_, BinOp::Gt) if is_dec => format!("(lt_decimal_cmp({}, {}) > 0)", x, y),
+                    (_, BinOp::Ge) if is_dec => format!("(lt_decimal_cmp({}, {}) >= 0)", x, y),
                     (Ty::Int, BinOp::Add) => format!("lt_add({}, {}, {})", x, y, line),
                     (Ty::Int, BinOp::Sub) => format!("lt_sub({}, {}, {})", x, y, line),
                     (Ty::Int, BinOp::Mul) => format!("lt_mul({}, {}, {})", x, y, line),
@@ -2438,6 +2467,7 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 let e = match (op, &at) {
                     (UnOp::Not, _) => format!("(!{})", x),
                     (UnOp::Neg, Ty::Int) => format!("lt_neg({}, {})", x, line),
+                    (UnOp::Neg, Ty::Adt(d, _)) if *d == self.prog.b.decimal => format!("lt_decimal_neg({}, {})", x, line),
                     (UnOp::Neg, _) => format!("(-{})", x),
                 };
                 set(out, e);
@@ -2749,6 +2779,15 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.totext_expr(t, &a[0], name == "debug_text")
             }
             "print" => format!("lt_print({})", a[0]),
+            "__decimal" => format!("lt_decimal_lit({}->data)", a[0]),
+            "Decimal.round" => format!("lt_decimal_round({}, {}, {})", a[0], a[1], line),
+            "Decimal.div" => format!("lt_decimal_div({}, {}, {}, {})", a[0], a[1], a[2], line),
+            "Decimal.abs" => format!("lt_decimal_abs({}, {})", a[0], line),
+            "Decimal.to_float" => format!("lt_decimal_to_float({})", a[0]),
+            "Decimal.to_text" => format!("lt_decimal_text({})", a[0]),
+            "Int.to_decimal" => format!("((lt_decimal){{ {}, 0 }})", a[0]),
+            "Float.to_decimal" => format!("lt_decimal_from_float({}, {})", a[0], line),
+            "Text.to_decimal" => format!("lt_text_to_decimal({}, {})", a[0], a[1]),
             "eprint" => format!("lt_eprint({})", a[0]),
             "scope_new" => {
                 self.threads = true;

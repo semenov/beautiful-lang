@@ -1,0 +1,46 @@
+import json
+import sql
+
+type Item {
+  name: Text
+  price: Decimal
+  qty: Int
+}
+
+type Order {
+  items: List<Item>
+  discount: Decimal = 0
+}
+
+fn total(o: Order) -> Decimal {
+  var sum: Decimal = 0
+  for i in o.items {
+    sum = sum + i.price * i.qty.to_decimal()
+  }
+  return sum - o.discount
+}
+
+fn main() throws {
+  let a: Decimal = 0.1
+  let b: Decimal = 0.2
+  print("${a + b} ${a + b == 0.3} ${0.1 + 0.2 == 0.3}")
+  let price: Decimal = 19.99
+  print("${price * 3} ${price * 1.5} ${(price * 1.5).round(2)} ${-price}")
+  print("${price.div(3, places: 2)} ${(10.0).to_decimal().div(3, places: 4)} ${(2.345).to_decimal().round(2)} ${(-2.345).to_decimal().round(2)} ${(2.5).to_decimal().format(2)}")
+  let big: Decimal = 1.50
+  print("${big} ${big == 1.5} ${big.round(0)} ${big < 2} ${price > big} ${[price, big, a].sorted()}")
+  let o = Order(items: [Item(name: "book", price: 12.99, qty: 2), Item(name: "pen", price: 0.35, qty: 10)], discount: 1.00)
+  print("total ${total(o)}")
+  let js = json.encode(o)
+  print(js)
+  let back = try json.decode<Order>(js)
+  print("${total(back) == total(o)} ${(try json.decode<Item>("{\"name\": \"x\", \"price\": \"7.10\", \"qty\": 1}")).price}")
+  print("${try "123.456".to_decimal()} ${(try " -0.5 ".to_decimal()).abs()}")
+  let bad = try "12,5".to_decimal() catch err {
+    print(err.message())
+    0
+  }
+  var m: Map<Decimal, Text> = {}
+  m[big] = "one and a half"
+  print("${m[1.5] ?? "?"} ${json.schema<Item>()}")
+}

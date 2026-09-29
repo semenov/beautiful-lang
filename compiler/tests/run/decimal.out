@@ -1,0 +1,10 @@
+0.3 true false
+59.97 29.985 29.99 -19.99
+6.66 3.3333 2.35 -2.35 2.50
+1.50 true 2 true true [0.1, 1.50, 19.99]
+total 28.48
+{"items":[{"name":"book","price":12.99,"qty":2},{"name":"pen","price":0.35,"qty":10}],"discount":1.00}
+true 7.10
+123.456 0.5
+"12,5" is not a decimal number (like 19.99)
+one and a half {"type":"object","properties":{"name":{"type":"string"},"price":{"type":"number"},"qty":{"type":"integer"}},"required":["name","price","qty"],"additionalProperties":false}

@@ -65,6 +65,8 @@ pub struct ModScope {
 pub struct Checker {
     pub prog: Program,
     pub diags: Vec<Diag>,
+    // the files' text, for literals whose spelling matters (1.50 as a Decimal)
+    pub source_texts: Vec<String>,
     modules: Vec<ModScope>,
     prim: HashMap<DefId, Ty>,
     f: Option<FnCtx>,
@@ -134,10 +136,11 @@ impl Checker {
                 defs: vec![],
                 fns: vec![],
                 tests: vec![],
-                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0, task: 0, shared: 0, locked: 0, channel: 0, cancelled: 0, channel_closed: 0, bytes: 0 },
+                b: Builtins { int: 0, float: 0, bool_: 0, text: 0, list: 0, map: 0, set: 0, entry: 0, indexed: 0, error: 0, failure: 0, task: 0, shared: 0, locked: 0, channel: 0, cancelled: 0, channel_closed: 0, bytes: 0, decimal: 0 },
                 main: None,
             },
             diags: vec![],
+            source_texts: vec![],
             modules: vec![],
             prim: HashMap::new(),
             f: None,
@@ -247,6 +250,7 @@ impl Checker {
             cancelled: pl(self, "Cancelled"),
             channel_closed: pl(self, "ChannelClosed"),
             bytes: pl(self, "Bytes"),
+            decimal: pl(self, "Decimal"),
         };
         let b = &self.prog.b;
         self.prim.insert(b.int, Ty::Int);
@@ -1147,6 +1151,11 @@ impl Checker {
             Ty::Text => 3,
             Ty::Bool => 5,
             Ty::Adt(b, _) if *b == self.prog.b.bytes => 4,
+            // a Decimal travels as text: exact
+            Ty::Adt(b, _) if *b == self.prog.b.decimal => {
+                let text = TExpr { kind: TK::ToText(Box::new(e)), ty: Ty::Text, span: sp };
+                return Some(TExpr { kind: TK::Variant { def: d, idx: 3, fields: vec![text] }, ty: exp.clone(), span: sp });
+            }
             _ => return None,
         };
         Some(TExpr { kind: TK::Variant { def: d, idx, fields: vec![e] }, ty: exp.clone(), span: sp })
@@ -1728,8 +1737,29 @@ impl Checker {
 
     // ================= expressions =================
 
+    fn is_decimal(&self, t: &Ty) -> bool {
+        matches!(t, Ty::Adt(d, _) if *d == self.prog.b.decimal)
+    }
+
+    // `let price: Decimal = 19.99`: the literal's digits, exactly
+    fn decimal_lit(&mut self, digits: String, span: Span) -> TExpr {
+        let id = match self.lookup_global("__decimal", 0) {
+            Some(Global::Fn(id)) => id,
+            _ => panic!("__decimal missing"),
+        };
+        let arg = TExpr { kind: TK::Text(digits), ty: Ty::Text, span };
+        TExpr { kind: TK::Call { callee: Callee::Fn(id, vec![]), args: vec![arg], throws: false }, ty: Ty::Adt(self.prog.b.decimal, vec![]), span }
+    }
+
     fn lit_int(&mut self, v: i64, span: Span, expected: Option<&Ty>) -> TExpr {
         let exp = expected.map(|t| self.resolve(t));
+        let exp_inner = match &exp {
+            Some(Ty::Opt(i)) => Some((**i).clone()),
+            e => e.clone(),
+        };
+        if exp_inner.as_ref().map(|t| self.is_decimal(t)).unwrap_or(false) {
+            return self.decimal_lit(v.to_string(), span);
+        }
         match exp {
             Some(Ty::Float) => TExpr { kind: TK::Float(v as f64), ty: Ty::Float, span },
             Some(Ty::Opt(inner)) if *inner == Ty::Float => TExpr { kind: TK::Float(v as f64), ty: Ty::Float, span },
@@ -1757,6 +1787,16 @@ impl Checker {
         match &e.kind {
             ExprKind::Int(v) => self.lit_int(*v, span, expected),
             ExprKind::Float(v) => {
+                let want = expected.map(|t| self.resolve(t));
+                let want_inner = match &want {
+                    Some(Ty::Opt(i)) => Some((**i).clone()),
+                    w => w.clone(),
+                };
+                if want_inner.as_ref().map(|t| self.is_decimal(t)).unwrap_or(false) {
+                    // the literal as written (1.50 keeps its two digits)
+                    let written = self.source_texts.get(span.file as usize).and_then(|s| s.get(span.lo as usize..span.hi as usize)).map(|s| s.replace('_', "")).filter(|s| s.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '-'));
+                    return self.decimal_lit(written.unwrap_or_else(|| format!("{}", v)), span);
+                }
                 if let Some(Ty::Int) = expected.map(|t| self.resolve(t)) {
                     self.err_help(span, "expected an `Int`, found a `Float` literal", "write a whole number, or convert: `x.round()`");
                 }
@@ -1889,7 +1929,7 @@ impl Checker {
                 UnOp::Neg => {
                     let t = self.expr(x, expected);
                     let ty = self.resolve(&t.ty);
-                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Err) {
+                    if !matches!(ty, Ty::Int | Ty::Float | Ty::Err) && !self.is_decimal(&ty) {
                         let s = self.prog.show(&ty);
                         self.err(span, format!("can't negate a `{}`", s));
                     }
@@ -2582,7 +2622,7 @@ impl Checker {
         let last = targs.last().map(|t| self.resolve(t));
         let need = |c: &mut Checker, t: Option<Ty>, ok: fn(&Ty) -> bool, what: &str| {
             if let Some(t) = t {
-                if matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) {
+                if matches!(t, Ty::Var(_) | Ty::Param(_) | Ty::Err) || c.is_decimal(&t) {
                     return;
                 }
                 if !ok(&t) {
@@ -3030,6 +3070,20 @@ impl Checker {
                 if matches!(lt, Ty::Adt(d, _) if d == self.prog.b.list) {
                     return bad(self, "there is no `+` on lists".into(), Some("use `a.concat(b)`, or `xs.append_all(ys)` on a `var`"));
                 }
+                if self.is_decimal(&lt) || self.is_decimal(&rt) {
+                    if !(self.is_decimal(&lt) && self.is_decimal(&rt)) {
+                        let (a, b) = (self.prog.show(&lt), self.prog.show(&rt));
+                        return bad(self, format!("can't combine `{}` and `{}`", a, b), Some("convert the other number: `n.to_decimal()`"));
+                    }
+                    if op == BinOp::Div {
+                        return bad(self, "`/` on `Decimal`s is not allowed: say how many digits to keep".into(), Some("write `a.div(b, places: 2)`"));
+                    }
+                    if op == BinOp::Rem {
+                        return bad(self, "`%` works on `Int` only".into(), None);
+                    }
+                    let t = lt.clone();
+                    return mk(TK::Binary(op, Box::new(l), Box::new(r)), t);
+                }
                 if !matches!(lt, Ty::Int | Ty::Float | Ty::Var(_)) {
                     let s = self.prog.show(&lt);
                     return bad(self, format!("arithmetic needs numbers, but this is `{}`", s), None);
@@ -3083,7 +3137,7 @@ impl Checker {
                     return bad(self, format!("can't compare `{}` and `{}`", a, b), None);
                 }
                 let t = self.resolve(&lt);
-                if !orderable(&t) && !matches!(t, Ty::Var(_)) {
+                if !orderable(&t) && !matches!(t, Ty::Var(_)) && !self.is_decimal(&t) {
                     let s = self.prog.show(&t);
                     let help = if matches!(t, Ty::Opt(_)) { Some("the value may be missing: unwrap it first") } else { Some("only numbers and text can be ordered; compare a field instead") };
                     return bad(self, format!("`{}` values can't be ordered", s), help);

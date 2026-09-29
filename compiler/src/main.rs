@@ -408,6 +408,7 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
     let mut mods: Vec<(String, ast::Module, bool)> = loaded.into_iter().map(|l| (l.key, l.module, l.privileged)).collect();
     mods.push((entry_key, user, false));
     let mut c = check::Checker::new();
+    c.source_texts = sources.files.iter().map(|f| f.text.clone()).collect();
     c.check_program(&mods);
     if !c.diags.is_empty() {
         let mut ds = c.diags.clone();

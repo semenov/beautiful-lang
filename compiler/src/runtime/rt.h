@@ -1128,3 +1128,198 @@ static lt_err lt_expect_throws_failed(const char *text, int64_t line) {
     snprintf(head, sizeof head, "expect throws failed at line %lld: %s didn't fail", (long long)line, text);
     return lt_make_failure(lt_text_cstr(head));
 }
+
+// ---------------------------------------------------------------- Decimal
+// value = c / 10^s: exact decimal numbers for money. Up to 18 digits;
+// going past that is a bug (like Int overflow). The scale is kept (1.50
+// prints as 1.50), and equality ignores it (1.50 == 1.5).
+
+typedef struct {
+    int64_t c;
+    int32_t s;
+} lt_decimal;
+
+static const int64_t lt_p10[19] = { 1LL, 10LL, 100LL, 1000LL, 10000LL, 100000LL, 1000000LL, 10000000LL, 100000000LL, 1000000000LL, 10000000000LL, 100000000000LL, 1000000000000LL, 10000000000000LL, 100000000000000LL, 1000000000000000LL, 10000000000000000LL, 100000000000000000LL, 1000000000000000000LL };
+
+static void lt_decimal_overflow(int line) { lt_panic_at("Decimal overflow: more than 18 digits", line); }
+
+// scale up to `s` (more digits after the point)
+static int64_t lt_decimal_scaled(lt_decimal a, int32_t s, int line) {
+    int64_t r;
+    if (s - a.s > 18 || __builtin_mul_overflow(a.c, lt_p10[s - a.s], &r)) lt_decimal_overflow(line);
+    return r;
+}
+
+// divides by 10^k, rounding half away from zero
+static __int128 lt_div_round(__int128 n, __int128 d) {
+    __int128 q = n / d, r = n % d;
+    if (r < 0) r = -r;
+    if (d < 0 ? 2 * r >= -d : 2 * r >= d) q += ((n < 0) != (d < 0)) ? -1 : 1;
+    return q;
+}
+
+static lt_decimal lt_decimal_from_i128(__int128 c, int32_t s, int line) {
+    // keep it in 64 bits, giving up digits after the point if needed
+    while ((c > INT64_MAX || c < INT64_MIN) && s > 0) {
+        c = lt_div_round(c, 10);
+        s--;
+    }
+    if (c > INT64_MAX || c < INT64_MIN) lt_decimal_overflow(line);
+    while (s > 18) {
+        c = lt_div_round(c, 10);
+        s--;
+    }
+    return (lt_decimal){ (int64_t)c, s };
+}
+
+static lt_decimal lt_decimal_add(lt_decimal a, lt_decimal b, int line) {
+    int32_t s = a.s > b.s ? a.s : b.s;
+    int64_t r;
+    if (__builtin_add_overflow(lt_decimal_scaled(a, s, line), lt_decimal_scaled(b, s, line), &r)) lt_decimal_overflow(line);
+    return (lt_decimal){ r, s };
+}
+
+static lt_decimal lt_decimal_sub(lt_decimal a, lt_decimal b, int line) {
+    int32_t s = a.s > b.s ? a.s : b.s;
+    int64_t r;
+    if (__builtin_sub_overflow(lt_decimal_scaled(a, s, line), lt_decimal_scaled(b, s, line), &r)) lt_decimal_overflow(line);
+    return (lt_decimal){ r, s };
+}
+
+static lt_decimal lt_decimal_mul(lt_decimal a, lt_decimal b, int line) {
+    return lt_decimal_from_i128((__int128)a.c * b.c, a.s + b.s, line);
+}
+
+static lt_decimal lt_decimal_neg(lt_decimal a, int line) {
+    if (a.c == INT64_MIN) lt_decimal_overflow(line);
+    return (lt_decimal){ -a.c, a.s };
+}
+
+static lt_decimal lt_decimal_abs(lt_decimal a, int line) { return a.c < 0 ? lt_decimal_neg(a, line) : a; }
+
+// exactly `places` digits after the point, rounding half away from zero
+static lt_decimal lt_decimal_round(lt_decimal a, int64_t places, int line) {
+    if (places < 0 || places > 18) lt_panic_at("round: places must be 0 to 18", line);
+    if (places >= a.s) return (lt_decimal){ lt_decimal_scaled(a, (int32_t)places, line), (int32_t)places };
+    return (lt_decimal){ (int64_t)lt_div_round(a.c, lt_p10[a.s - places]), (int32_t)places };
+}
+
+// a / b with `places` digits after the point, rounded
+static lt_decimal lt_decimal_div(lt_decimal a, lt_decimal b, int64_t places, int line) {
+    if (b.c == 0) lt_panic_at("division by zero", line);
+    if (places < 0 || places > 18) lt_panic_at("div: places must be 0 to 18", line);
+    // a.c/10^a.s / (b.c/10^b.s) * 10^places = a.c * 10^(places + b.s - a.s) / b.c
+    int64_t k = places + b.s - a.s;
+    __int128 n = a.c;
+    __int128 d = b.c;
+    if (k >= 0) {
+        for (int64_t i = 0; i < k; i++) n *= 10;
+    } else {
+        for (int64_t i = 0; i < -k; i++) d *= 10;
+    }
+    return lt_decimal_from_i128(lt_div_round(n, d), (int32_t)places, line);
+}
+
+static int lt_decimal_cmp(lt_decimal a, lt_decimal b) {
+    __int128 x = a.c, y = b.c;
+    for (int i = a.s; i < b.s; i++) x *= 10;
+    for (int i = b.s; i < a.s; i++) y *= 10;
+    return x < y ? -1 : x > y ? 1 : 0;
+}
+
+static bool lt_decimal_eq(lt_decimal a, lt_decimal b) { return lt_decimal_cmp(a, b) == 0; }
+
+static uint64_t lt_decimal_hash(lt_decimal a) {
+    // equal values hash alike: drop trailing zeros first
+    while (a.s > 0 && a.c % 10 == 0) {
+        a.c /= 10;
+        a.s--;
+    }
+    return (uint64_t)a.c * 0x9E3779B97F4A7C15ULL ^ (uint64_t)a.s;
+}
+
+static lt_text *lt_decimal_text(lt_decimal a) {
+    char digits[32], out[48];
+    uint64_t m = a.c < 0 ? (uint64_t)(-(a.c + 1)) + 1 : (uint64_t)a.c;
+    int n = snprintf(digits, sizeof digits, "%llu", (unsigned long long)m);
+    int w = 0;
+    if (a.c < 0) out[w++] = '-';
+    if (a.s == 0) {
+        memcpy(out + w, digits, (size_t)n);
+        w += n;
+    } else if (n <= a.s) {
+        out[w++] = '0';
+        out[w++] = '.';
+        for (int i = n; i < a.s; i++) out[w++] = '0';
+        memcpy(out + w, digits, (size_t)n);
+        w += n;
+    } else {
+        memcpy(out + w, digits, (size_t)(n - a.s));
+        w += n - a.s;
+        out[w++] = '.';
+        memcpy(out + w, digits + n - a.s, (size_t)a.s);
+        w += a.s;
+    }
+    return lt_text_from(out, w);
+}
+
+// "12", "-0.50", "1234.5678"; false if it isn't one
+static bool lt_decimal_parse(const char *s, int64_t len, lt_decimal *out) {
+    int64_t i = 0;
+    bool neg = false;
+    if (i < len && (s[i] == '-' || s[i] == '+')) neg = s[i++] == '-';
+    __int128 c = 0;
+    int32_t scale = 0, digits = 0;
+    bool point = false, any = false;
+    for (; i < len; i++) {
+        char ch = s[i];
+        if (ch == '.' && !point) {
+            point = true;
+            continue;
+        }
+        if (ch < '0' || ch > '9') return false;
+        any = true;
+        if (digits == 0 && ch == '0' && !point) continue;
+        c = c * 10 + (ch - '0');
+        digits++;
+        if (point) scale++;
+        if (digits > 18) return false;
+    }
+    if (!any) return false;
+    out->c = (int64_t)(neg ? -c : c);
+    out->s = scale;
+    return true;
+}
+
+static lt_decimal lt_decimal_lit(const char *s) {
+    lt_decimal d = { 0, 0 };
+    lt_decimal_parse(s, (int64_t)strlen(s), &d);
+    return d;
+}
+
+static lt_err lt_text_to_decimal(lt_text *t, lt_decimal *out) {
+    const char *s = t->data;
+    int64_t n = t->len;
+    while (n > 0 && (*s == ' ' || *s == '\t')) s++, n--;
+    while (n > 0 && (s[n - 1] == ' ' || s[n - 1] == '\t')) n--;
+    if (!lt_decimal_parse(s, n, out)) {
+        char buf[160];
+        snprintf(buf, sizeof buf, "\"%.*s\" is not a decimal number (like 19.99)", (int)(t->len > 100 ? 100 : t->len), t->data);
+        return lt_make_failure(lt_text_cstr(buf));
+    }
+    return (lt_err){ 0 };
+}
+
+static double lt_decimal_to_float(lt_decimal a) { return (double)a.c / (double)lt_p10[a.s]; }
+
+static lt_decimal lt_decimal_from_float(double v, int line) {
+    if (!isfinite(v)) lt_panic_at("a Decimal can't be NaN or infinite", line);
+    lt_text *t = lt_float_to_text(v);
+    lt_decimal d = { 0, 0 };
+    if (!lt_decimal_parse(t->data, t->len, &d)) {
+        lt_text_drop(t);
+        lt_decimal_overflow(line);
+    }
+    lt_text_drop(t);
+    return d;
+}
