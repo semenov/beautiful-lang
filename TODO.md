@@ -61,7 +61,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [x] crash on `spawn` inside a lambda -> a clear error
   - [x] `lang run` passes signals to the program (it execs it)
   - [x] guide: maps, shared state in handlers, tests with a body, task lists
-  - [ ] one "this call can fail" per chain, not per call
+  - [x] one "this call can fail" per chain, not per call (with the fixed line)
   - [x] String: character tests (is_letter of any script, is_digit, ...), index_of, trim_start/end
 
 - [ ] From the second newcomer test (invoice with Decimal and templates,

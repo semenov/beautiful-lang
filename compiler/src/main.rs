@@ -488,7 +488,7 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
     c.source_texts = sources.files.iter().map(|f| f.text.clone()).collect();
     c.check_program(&mods);
     if !c.diags.is_empty() {
-        let mut ds = c.diags.clone();
+        let mut ds = merge_can_fail(c.diags.clone(), &c.source_texts);
         ds.sort_by_key(|d| (d.span.file, d.span.lo));
         for d in &ds {
             eprint!("{}", sources.render(d));
@@ -497,6 +497,50 @@ fn front_end(path: &str, sources: &mut Sources) -> Option<(types::Program, u32)>
         return None;
     }
     Some((c.prog, uf))
+}
+
+// Calls that can fail nested in one another (`json.decode<C>(files.read(p))`)
+// give one error with the whole fix, not one per call.
+fn merge_can_fail(ds: Vec<diag::Diag>, texts: &[String]) -> Vec<diag::Diag> {
+    const MSG: &str = "this call can fail";
+    let inside = |a: &diag::Span, b: &diag::Span| a.file == b.file && b.lo <= a.lo && a.hi <= b.hi && (a.lo, a.hi) != (b.lo, b.hi);
+    let calls: Vec<diag::Span> = ds.iter().filter(|d| d.msg == MSG).map(|d| d.span).collect();
+    let mut out = vec![];
+    for d in ds {
+        if d.msg != MSG {
+            out.push(d);
+            continue;
+        }
+        // inner calls are reported with their outermost one
+        if calls.iter().any(|o| inside(&d.span, o)) {
+            continue;
+        }
+        let inner: Vec<diag::Span> = calls.iter().filter(|c| inside(c, &d.span)).cloned().collect();
+        if inner.is_empty() {
+            out.push(d);
+            continue;
+        }
+        let text = match texts.get(d.span.file as usize).and_then(|t| t.get(d.span.lo as usize..d.span.hi as usize)) {
+            Some(t) => t.to_string(),
+            None => {
+                out.push(d);
+                continue;
+            }
+        };
+        // `try ` before each call, from the back so offsets stay right
+        let mut fixed = text.clone();
+        let mut at: Vec<usize> = inner.iter().map(|c| (c.lo - d.span.lo) as usize).collect();
+        at.sort();
+        at.dedup();
+        for i in at.iter().rev() {
+            fixed.insert_str(*i, "try ");
+        }
+        let fixed = format!("try {}", fixed);
+        let mut nd = diag::Diag::new(d.span, format!("{} calls here can fail", inner.len() + 1));
+        nd = nd.help(if fixed.len() <= 100 && !at.contains(&0) { format!("write `try` before each: `{}`", fixed) } else { "write `try` before each call, or handle the errors with `catch`".to_string() });
+        out.push(nd);
+    }
+    out
 }
 
 // `lang new`, `lang add`, `lang fetch`, `lang update`
