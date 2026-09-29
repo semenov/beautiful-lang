@@ -44,6 +44,9 @@ struct FnCtx {
     // set by `spawn` for the call right below it
     in_spawn: bool,
     spawn_call: bool,
+    // the value of a `with`: may create a resource
+    with_value: bool,
+    resource_ok: bool,
     lock_depth: usize,
     module: usize,
 }
@@ -125,6 +128,7 @@ impl Checker {
     pub fn new() -> Checker {
         Checker {
             prog: Program {
+                module_names: vec![],
                 defs: vec![],
                 fns: vec![],
                 tests: vec![],
@@ -199,6 +203,7 @@ impl Checker {
     pub fn check_program(&mut self, mods: &[(String, ast::Module, bool)]) {
         for (name, m, privileged) in mods {
             let _ = m;
+            self.prog.module_names.push(name.clone());
             self.modules.push(ModScope { name: name.clone(), globals: HashMap::new(), imports: HashMap::new(), privileged: *privileged });
         }
         for (i, (_, m, _)) in mods.iter().enumerate() {
@@ -559,7 +564,8 @@ impl Checker {
             span: decl.span,
             is_prelude: md == 0,
             module: md,
-            is_pub: decl.is_pub || md == 0,
+            // the prelude and the standard library's methods are its API
+            is_pub: decl.is_pub || md == 0 || (owner.is_some() && self.modules[md].privileged),
         });
         self.fn_asts.push(Some((decl.clone(), md)));
         self.prog.fns.len() - 1
@@ -659,6 +665,21 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+
+    // A type from the standard library that must be closed: its `close` method.
+    fn resource_close(&self, t: &Ty) -> Option<FnId> {
+        match t {
+            Ty::Adt(d, _) => {
+                let def = &self.prog.defs[*d];
+                if matches!(def.kind, TypeKind::Builtin) && def.module != 0 && self.modules[def.module].privileged {
+                    def.methods.get("close").copied()
+                } else {
+                    None
+                }
+            }
+            _ => None,
         }
     }
 
@@ -762,6 +783,8 @@ impl Checker {
             stmt_pos: false,
             in_spawn: false,
             spawn_call: false,
+            with_value: false,
+            resource_ok: false,
             lock_depth: 0,
             module: md,
         });
@@ -1299,6 +1322,32 @@ impl Checker {
                 let v = if ok { self.coerce(v, &et) } else { v };
                 TStmt::Throw(v)
             }
+            Stmt::While { cond, body, span } if matches!(&cond.kind, ExprKind::Is(_, p) if pattern_binds(p)) => {
+                // `while x is some(v) { ... }`: loop { match x { some(v) => body, _ => break } }
+                let (scrut, pat) = match &cond.kind {
+                    ExprKind::Is(s, p) => (s, p),
+                    _ => unreachable!(),
+                };
+                let lvl = self.fc().lambdas.len();
+                self.fcx().loops.push(lvl);
+                let s = self.expr(scrut, None);
+                let sty = s.ty.clone();
+                self.fcx().scopes.push(HashMap::new());
+                let p = self.pattern(pat, &sty);
+                let b = self.block(body, false, None);
+                self.fcx().scopes.pop();
+                self.fcx().loops.pop();
+                let sp = *span;
+                let body_e = TExpr { ty: Ty::Unit, kind: TK::Block(b), span: sp };
+                let brk = TExpr { kind: TK::Diverge(Box::new(TStmt::Break)), ty: Ty::Never, span: sp };
+                let m = TExpr {
+                    kind: TK::Match { scrut: Box::new(s), arms: vec![TArm { pat: p, guard: None, body: body_e }, TArm { pat: TPat::Wild, guard: None, body: brk }] },
+                    ty: Ty::Unit,
+                    span: sp,
+                };
+                let loop_body = TBlock { stmts: vec![TStmt::Expr(m)], tail: None, ty: Ty::Unit };
+                TStmt::While(TExpr { kind: TK::Bool(true), ty: Ty::Bool, span: sp }, loop_body)
+            }
             Stmt::While { cond, body, .. } => {
                 let c = self.expr_coerce(cond, &Ty::Bool);
                 let lvl = self.fc().lambdas.len();
@@ -1376,9 +1425,28 @@ impl Checker {
                         }
                     }
                 }
-                let _ = self.expr(value, None);
-                self.err_help(*span, "`with` needs something that must be closed", "for example `with x = shared.lock() { ... }`");
-                TStmt::Expr(TExpr { kind: TK::Unit, ty: Ty::Unit, span: *span })
+                self.fcx().with_value = true;
+                let v = self.expr(value, None);
+                self.fcx().with_value = false;
+                let vt = self.resolve(&v.ty);
+                let close = match self.resource_close(&vt) {
+                    Some(c) => c,
+                    None => {
+                        if vt != Ty::Err {
+                            let s = self.show(&vt);
+                            self.err_help(*span, format!("`with` is for things that must be closed, and `{}` isn't one", s), "use `let` instead");
+                        }
+                        return TStmt::Expr(TExpr { kind: TK::Unit, ty: Ty::Unit, span: *span });
+                    }
+                };
+                self.fcx().scopes.push(HashMap::new());
+                let var = self.declare(*span, name, vt, false);
+                let b = self.block(body, false, None);
+                self.fcx().scopes.pop();
+                if self.prog.fns[close].throws {
+                    self.note_throw(*span);
+                }
+                TStmt::With { var, value: v, body: b, close }
             }
             Stmt::Expect { cond, span } => {
                 if !self.fc().in_test {
@@ -1570,6 +1638,12 @@ impl Checker {
         let in_try = std::mem::replace(&mut self.fcx().in_try, false);
         let stmt_pos = std::mem::replace(&mut self.fcx().stmt_pos, false);
         let in_spawn = std::mem::replace(&mut self.fcx().in_spawn, false);
+        let with_value = std::mem::replace(&mut self.fcx().with_value, false);
+        match &e.kind {
+            ExprKind::Try { .. } if with_value => self.fcx().with_value = true,
+            ExprKind::Call { .. } if with_value => self.fcx().resource_ok = true,
+            _ => {}
+        }
         if in_spawn {
             self.fcx().spawn_call = true;
         }
@@ -2114,6 +2188,7 @@ impl Checker {
     fn call(&mut self, e: &Expr, callee: &Expr, type_args: &[TypeExpr], args: &[ast::Arg], expected: Option<&Ty>, in_try: bool) -> TExpr {
         let span = e.span;
         let spawned_here = std::mem::replace(&mut self.fcx().spawn_call, false);
+        let resource_ok = std::mem::replace(&mut self.fcx().resource_ok, false);
         let generics = self.fc().generics.clone();
         let md = self.fc().module;
         let explicit: Vec<Ty> = type_args.iter().map(|t| self.resolve_texpr(t, &generics, md)).collect();
@@ -2207,6 +2282,13 @@ impl Checker {
                 self.value_call(f, args, span, in_try)
             }
         };
+        if !resource_ok {
+            let rt = self.resolve(&result.ty);
+            if self.resource_close(&rt).is_some() {
+                let s = self.show(&rt);
+                self.err_help(span, format!("a `{}` must be closed: get it with `with`", s), "write `with f = try ... { ... }`: it's closed at the end of the block, even on an error");
+            }
+        }
         // `try` rules (a spawned call's errors arrive at `wait`)
         if spawned_here {
             return result;
@@ -3279,7 +3361,7 @@ impl Checker {
                 self.zonk_expr(c, un);
                 self.zonk_block(b, un);
             }
-            TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } => {
+            TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } | TStmt::With { value: e, body, .. } => {
                 self.zonk_expr(e, un);
                 self.zonk_block(body, un);
             }

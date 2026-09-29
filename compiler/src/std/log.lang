@@ -1,0 +1,6 @@
+// log: messages for people running the program, on standard error, with the
+// time: `2026-09-29T12:00:00Z INFO server started`.
+
+pub fn info(message: Text)
+pub fn warn(message: Text)
+pub fn error(message: Text)

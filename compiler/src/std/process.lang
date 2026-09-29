@@ -1,0 +1,19 @@
+// process: this program, and running other programs.
+
+pub type Output {
+  // the exit status: 0 means success
+  status: Int
+  stdout: Text
+  stderr: Text
+}
+
+// Runs a program and waits for it to finish. The arguments are passed as
+// they are: there is no shell, so nothing needs quoting. A program that
+// exits with a non-zero status is not an error: check `output.status`.
+pub fn run(program: Text, args: List<Text>) throws -> Output
+
+// The command-line arguments, without the program's name.
+pub fn args() -> List<Text>
+
+// Stops the program with an exit status.
+pub fn exit(status: Int) -> Never

@@ -1,0 +1,45 @@
+import files
+import process
+import env
+import log
+import random
+import time
+
+fn main() throws {
+  with dir = try files.temp_dir() {
+    let path = files.join(dir.path, "notes.txt")
+    try files.write(path, "first\nsecond\n")
+    try files.append(path, "third\n")
+    print(try files.read(path))
+    with f = try files.open(path) {
+      var n = 0
+      while try f.read_line() is some(line) {
+        n += 1
+        print("${n}: ${line}")
+      }
+    }
+    with out = try files.create(files.join(dir.path, "out.txt")) {
+      try out.write("written piece by piece")
+    }
+    try files.make_dir(files.join(dir.path, "a/b/c"))
+    print("${try files.list(dir.path)}")
+    print("${files.name(path)} in ${files.name(files.parent(path)).starts_with("program-")}, ext ${files.extension(path) ?? "-"}")
+    let missing = try files.read(files.join(dir.path, "nope.txt")) catch err {
+      print("error: ${err.message().contains("No such file")}")
+      ""
+    }
+    print("missing = '${missing}'")
+  }
+  let r = try process.run("echo", ["hello", "from echo"])
+  print("status ${r.status}: ${r.stdout.trim()}")
+  let bad = try process.run("sh", ["-c", "echo oops >&2; exit 3"])
+  print("status ${bad.status}: ${bad.stderr.trim()}")
+  print("HOME set: ${env.get("HOME") != none}, NOPE: ${env.get("NO_SUCH_VARIABLE_X")}")
+  let dice = random.between(1, 6)
+  print("dice ok: ${dice >= 1 and dice <= 6}, token length ${random.token(16).length}")
+  print("shuffled keeps items: ${random.shuffle([1, 2, 3]).sorted() == [1, 2, 3]}")
+  let now = time.utc_now()
+  print("year ok: ${now.year >= 2025}, iso length ${now.iso().length}")
+  print("${time.from_unix(0).iso()} ${time.from_unix(1767225600).date()}")
+  log.info("done")
+}

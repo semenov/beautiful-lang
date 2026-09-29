@@ -283,6 +283,8 @@ pub enum TStmt {
     ForChannel { var: LocalId, chan: TExpr, body: TBlock },
     // `with x = shared.lock() { ... }`: `x` is a mutable copy of the value
     WithLock { var: LocalId, shared: TExpr, body: TBlock },
+    // `with f = try files.open(p) { ... }`: `close` runs on every way out
+    With { var: LocalId, value: TExpr, body: TBlock, close: FnId },
     Expect { cond: TExpr, text: String, span: Span },
 }
 
@@ -307,6 +309,7 @@ pub struct Builtins {
 }
 
 pub struct Program {
+    pub module_names: Vec<String>,
     pub defs: Vec<TypeDef>,
     pub fns: Vec<FnDef>,
     pub tests: Vec<TestDef>,

@@ -60,6 +60,11 @@ fn parse_args() -> Option<Opts> {
 fn std_module(name: &str) -> Option<&'static str> {
     Some(match name {
         "time" => include_str!("std/time.lang"),
+        "files" => include_str!("std/files.lang"),
+        "process" => include_str!("std/process.lang"),
+        "env" => include_str!("std/env.lang"),
+        "log" => include_str!("std/log.lang"),
+        "random" => include_str!("std/random.lang"),
         _ => return None,
     })
 }

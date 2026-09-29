@@ -1,0 +1,28 @@
+// random: numbers from the operating system's secure generator.
+
+// A whole number from `low` to `high`, both included.
+pub fn between(low: Int, high: Int) -> Int
+// A number from 0.0 (included) to 1.0 (not included).
+pub fn fraction() -> Float
+// A random item, none for an empty list.
+pub fn pick<T>(items: List<T>) -> T? {
+  if items.is_empty() {
+    return none
+  }
+  return items[between(0, items.length - 1)]
+}
+// The items in a random order.
+pub fn shuffle<T>(items: List<T>) -> List<T> {
+  var out = items
+  var i = out.length - 1
+  while i > 0 {
+    let j = between(0, i)
+    let tmp = out[i]
+    out[i] = out[j]
+    out[j] = tmp
+    i -= 1
+  }
+  return out
+}
+// Random letters and digits, for ids and secrets.
+pub fn token(length: Int) -> Text

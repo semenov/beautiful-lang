@@ -29,6 +29,7 @@ struct Fb<'a> {
 enum Cleanup {
     Unlock { shared: L, var: L, ty: Ty },
     Scope(L),
+    Close { res: L, close: FnId },
 }
 
 // Does the code start tasks (not counting nested lambdas)?
@@ -70,7 +71,7 @@ fn stmt_spawns(s: &TStmt) -> bool {
         TStmt::Assign(p, e) => place_spawns(p) || expr_spawns(e),
         TStmt::Return(e) => e.as_ref().map(expr_spawns).unwrap_or(false),
         TStmt::While(c, b) => expr_spawns(c) || block_spawns(b),
-        TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } => expr_spawns(e) || block_spawns(body),
+        TStmt::ForList { list: e, body, .. } | TStmt::ForMap { map: e, body, .. } | TStmt::ForSet { set: e, body, .. } | TStmt::ForChannel { chan: e, body, .. } | TStmt::WithLock { shared: e, body, .. } | TStmt::With { value: e, body, .. } => expr_spawns(e) || block_spawns(body),
         TStmt::ForRange { lo, hi, body, .. } => expr_spawns(lo) || expr_spawns(hi) || block_spawns(body),
         TStmt::Expect { cond, .. } => expr_spawns(cond),
         TStmt::Break | TStmt::Continue => false,
@@ -323,8 +324,9 @@ impl<'a> Lowerer<'a> {
     // Undo cleanups down to `depth`. On the error path, tasks are cancelled
     // and their errors ignored (the function already has one).
     fn run_cleanups(&mut self, depth: usize, error: bool) {
-        let items: Vec<Cleanup> = self.fbr().cleanups[depth..].iter().rev().cloned().collect();
-        for c in items {
+        let n = self.fbr().cleanups.len();
+        for i in (depth..n).rev() {
+            let c = self.fbr().cleanups[i].clone();
             match c {
                 Cleanup::Unlock { shared, var, ty } => {
                     let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![ty]), vec![Op::Local(shared), Op::Local(var)]));
@@ -335,15 +337,53 @@ impl<'a> Lowerer<'a> {
                     } else {
                         let err = self.tmp(self.prog.error_ty());
                         self.emit(Stmt::CallT { dst: None, err, callee: MCallee::Intrinsic("scope_end".into(), vec![]), args: vec![Op::Local(s)] });
-                        let bad = self.new_block();
-                        let ok = self.new_block();
-                        self.term(Term::IfErr(err, bad, ok));
-                        self.switch_to(bad);
-                        self.term(Term::Throw(Op::Local(err)));
-                        self.switch_to(ok);
+                        self.fail_below(err, i);
+                    }
+                }
+                Cleanup::Close { res, close } => {
+                    let rty = self.fbr().f.locals[res].ty.clone();
+                    let (callee, throws) = self.method_callee(close, &rty);
+                    if throws {
+                        let err = self.tmp(self.prog.error_ty());
+                        self.emit(Stmt::CallT { dst: None, err, callee, args: vec![Op::Local(res)] });
+                        if !error {
+                            self.fail_below(err, i);
+                        }
+                    } else {
+                        let _ = self.assign(Ty::Unit, Rv::Call(callee, vec![Op::Local(res)]));
                     }
                 }
             }
+        }
+    }
+
+    // After a cleanup at level `level` failed with `err`: undo the levels
+    // below it on the error path and leave the function.
+    fn fail_below(&mut self, err: L, level: usize) {
+        let bad = self.new_block();
+        let ok = self.new_block();
+        self.term(Term::IfErr(err, bad, ok));
+        self.switch_to(bad);
+        let saved = self.fbr().cleanups.clone();
+        self.fb().cleanups.truncate(level);
+        self.run_cleanups(0, true);
+        self.fb().cleanups = saved;
+        self.term(Term::Throw(Op::Local(err)));
+        self.switch_to(ok);
+    }
+
+    // How to call a method of the standard library on a value of type `recv`.
+    fn method_callee(&mut self, id: FnId, recv: &Ty) -> (MCallee, bool) {
+        let f = &self.prog.fns[id];
+        if f.intrinsic {
+            let owner = &self.prog.defs[f.owner.unwrap()].name;
+            (MCallee::Intrinsic(format!("{}.{}", owner, f.name), vec![recv.clone()]), f.throws)
+        } else {
+            let targs = match recv {
+                Ty::Adt(_, a) => a.clone(),
+                _ => vec![],
+            };
+            (MCallee::Fn(self.instance(id, targs, false)), f.throws)
         }
     }
 
@@ -484,6 +524,22 @@ impl<'a> Lowerer<'a> {
                 if !self.terminated() {
                     let _ = self.assign(Ty::Unit, Rv::Call(MCallee::Intrinsic("Shared.release".into(), vec![vty]), vec![Op::Local(sl), Op::Local(x)]));
                 }
+            }
+            TStmt::With { var, value, body, close } => {
+                self.set_line(value.span);
+                let rty = self.ty(&value.ty);
+                let v = self.expr(value);
+                let name = self.fbr().body_locals[*var].name.clone();
+                let r = self.new_local(rty, &name);
+                self.fb().map.insert(*var, r);
+                self.emit(Stmt::Assign(r, Rv::Use(v)));
+                let level = self.fbr().cleanups.len();
+                self.fb().cleanups.push(Cleanup::Close { res: r, close: *close });
+                self.block(body);
+                if !self.terminated() {
+                    self.run_cleanups(level, false);
+                }
+                self.fb().cleanups.pop();
             }
             TStmt::ForChannel { var, chan, body } => {
                 self.set_line(chan.span);
@@ -1346,6 +1402,7 @@ impl<'a> Lowerer<'a> {
         let f = &self.prog.fns[id];
         let name = match f.owner {
             Some(d) => format!("{}.{}", self.prog.defs[d].name, f.name),
+            None if f.module != 0 => format!("{}.{}", self.prog.module_names[f.module], f.name),
             None => f.name.clone(),
         };
         // the receiver's type first, then the function's own type arguments
@@ -1457,6 +1514,7 @@ impl<'a> Lowerer<'a> {
                 if f.intrinsic {
                     let name = match f.owner {
                         Some(d) => format!("{}.{}", self.prog.defs[d].name, f.name),
+                        None if f.module != 0 => format!("{}.{}", self.prog.module_names[f.module], f.name),
                         None => f.name.clone(),
                     };
                     let mut itys = vec![];

@@ -41,3 +41,53 @@ pub fn sleep(duration: Duration) throws {
 }
 
 fn __sleep_nanos(nanos: Int) throws
+
+// A moment in UTC, from the wall clock.
+pub type DateTime {
+  year: Int
+  month: Int
+  day: Int
+  hour: Int
+  minute: Int
+  second: Int
+
+  // "2026-09-29T12:00:00Z"
+  pub fn iso(self) -> Text {
+    let d = "${self.year}-${pad(self.month)}-${pad(self.day)}"
+    return "${d}T${pad(self.hour)}:${pad(self.minute)}:${pad(self.second)}Z"
+  }
+
+  // "2026-09-29"
+  pub fn date(self) -> Text {
+    return "${self.year}-${pad(self.month)}-${pad(self.day)}"
+  }
+}
+
+fn pad(n: Int) -> Text {
+  return n.to_text().pad_start(width: 2, fill: "0")
+}
+
+// The current date and time in UTC.
+pub fn utc_now() -> DateTime {
+  return from_unix(unix_now())
+}
+
+// Seconds since 1970-01-01 UTC.
+pub fn unix_now() -> Int
+
+// The date and time of a Unix timestamp.
+pub fn from_unix(seconds: Int) -> DateTime {
+  // days since 1970 -> civil date (Howard Hinnant's algorithm)
+  let days = seconds.div(86400)
+  let rest = seconds - days * 86400
+  let z = days + 719468
+  let era = z.div(146097)
+  let doe = z - era * 146097
+  let yoe = (doe - doe.div(1460) + doe.div(36524) - doe.div(146096)).div(365)
+  let doy = doe - (365 * yoe + yoe.div(4) - yoe.div(100))
+  let mp = (5 * doy + 2).div(153)
+  let day = doy - (153 * mp + 2).div(5) + 1
+  let month = if mp < 10 { mp + 3 } else { mp - 9 }
+  let year = yoe + era * 400 + (if month <= 2 { 1 } else { 0 })
+  return DateTime(year: year, month: month, day: day, hour: rest.div(3600), minute: (rest % 3600).div(60), second: rest % 60)
+}

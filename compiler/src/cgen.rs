@@ -38,6 +38,8 @@ enum Kind {
     Task(usize),
     Shared(usize),
     Channel(usize),
+    // a standard library handle (an open file, a temporary directory, ...)
+    Handle(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -192,7 +194,7 @@ impl<'a> CGen<'a> {
                 _ => Niche::Func,
             },
             Ty::Adt(d, _) => match &self.prog.defs[*d].kind {
-                TypeKind::Builtin => Niche::Ptr, // List, Map, Set
+                TypeKind::Builtin => Niche::Ptr, // List, Map, Set, handles
                 TypeKind::Newtype(i) => {
                     let i = i.clone();
                     self.niche_of(&i)
@@ -272,7 +274,7 @@ impl<'a> CGen<'a> {
                             let e = self.tid(&args[0]);
                             ("lt_chan*".to_string(), Kind::Channel(e))
                         } else {
-                            panic!("unexpected builtin type {}", def.name)
+                            ("lt_handle*".to_string(), Kind::Handle(def.name.clone()))
                         }
                     }
                     TypeKind::Record { fields } => {
@@ -339,7 +341,7 @@ impl<'a> CGen<'a> {
         match &self.tys[id].kind {
             Kind::Int | Kind::Float => "0".into(),
             Kind::Bool => "false".into(),
-            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "NULL".into(),
+            Kind::Text | Kind::List(_) | Kind::Map(..) | Kind::Set(_) | Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "NULL".into(),
             Kind::Record { boxed: true, .. } | Kind::Enum { boxed: true, .. } => "NULL".into(),
             Kind::Opt { niche: Niche::Ptr, .. } => "NULL".into(),
             _ => format!("(({}){{0}})", c),
@@ -425,6 +427,7 @@ impl<'a> CGen<'a> {
             Kind::Func => b = if dup { "lt_fn_dup(x);".into() } else { "lt_fn_drop(x);".into() },
             Kind::Iface => b = if dup { "lt_iface_dup(x);".into() } else { "lt_iface_drop(x);".into() },
             Kind::Task(_) => b = if dup { "lt_task_dup(x);".into() } else { "lt_task_drop(x);".into() },
+            Kind::Handle(_) => b = if dup { "lt_handle_dup(x);".into() } else { "lt_handle_drop(x);".into() },
             Kind::Channel(_) => b = if dup { "lt_chan_dup(x);".into() } else { "lt_chan_drop(x);".into() },
             Kind::Shared(_) => {
                 self.need(H::Ops, id);
@@ -594,7 +597,7 @@ impl<'a> CGen<'a> {
                 format!("if (a == b) return true; if (a->len != b->len) return false; for (int64_t i = 0; i < a->n; i++) {{ if (!a->e[i].h) continue; if ({c}_find(b, a->e[i].k, a->e[i].h) < 0) return false; }} return true;", c = c)
             }
             Kind::Iface => "if (a.obj == b.obj) return true; if (a.vt->type_id != b.vt->type_id) return false; return a.vt->eq(a.obj, b.obj);".into(),
-            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "return a == b;".into(),
+            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "return a == b;".into(),
             Kind::Func => "(void)a; (void)b; lt_panic_at(\"functions can't be compared\", 0);".into(),
             Kind::Int | Kind::Float | Kind::Bool => "return a == b;".into(),
             Kind::Text => "return lt_text_eq(a, b);".into(),
@@ -657,7 +660,7 @@ impl<'a> CGen<'a> {
                 format!("uint64_t h = 9; for (int64_t i = 0; i < a->n; i++) if (a->e[i].h) h += {}; return lt_mix(h);", hk)
             }
             Kind::Iface => "return a.vt->hash(a.obj);".into(),
-            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) => "return lt_int_hash((int64_t)(intptr_t)a);".into(),
+            Kind::Task(_) | Kind::Shared(_) | Kind::Channel(_) | Kind::Handle(_) => "return lt_int_hash((int64_t)(intptr_t)a);".into(),
             Kind::Int => "return lt_int_hash(a);".into(),
             Kind::Float => "return lt_float_hash(a);".into(),
             Kind::Bool => "return lt_int_hash(a);".into(),
@@ -762,6 +765,10 @@ impl<'a> CGen<'a> {
             Kind::Task(_) => lit(self, &mut s, "<task>"),
             Kind::Shared(_) => lit(self, &mut s, "<shared>"),
             Kind::Channel(_) => lit(self, &mut s, "<channel>"),
+            Kind::Handle(n) => {
+                let n = format!("<{}>", n);
+                lit(self, &mut s, &n)
+            }
             Kind::Int => s += " lt_texts_push(&p, lt_int_to_text(a));",
             Kind::Float => s += " lt_texts_push(&p, lt_float_to_text(a));",
             Kind::Bool => s += " lt_texts_push(&p, lt_bool_to_text(a));",
@@ -2047,11 +2054,44 @@ static {ret_t} {name}({l} *p, lt_fn f) {{
                 }
             }
             "Channel.close" => format!("lt_chan_close({})", a[0]),
-            "__sleep_nanos" => {
+            "time.__sleep_nanos" => {
                 self.threads = true;
                 format!("lt_sleep_nanos({})", a[0])
             }
-            "__monotonic_nanos" => "lt_monotonic_nanos()".to_string(),
+            "time.__monotonic_nanos" => "lt_monotonic_nanos()".to_string(),
+            "time.unix_now" => "lt_unix_now()".to_string(),
+            "files.read" => format!("lt_files_read({}, {})", a[0], a[1]),
+            "files.write" => format!("lt_files_write_mode({}, {}, \"wb\")", a[0], a[1]),
+            "files.append" => format!("lt_files_write_mode({}, {}, \"ab\")", a[0], a[1]),
+            "files.exists" => format!("lt_files_exists({})", a[0]),
+            "files.is_dir" => format!("lt_files_is_dir({})", a[0]),
+            "files.list" => format!("lt_files_list({}, {})", a[0], a[1]),
+            "files.delete" => format!("lt_files_delete({})", a[0]),
+            "files.make_dir" => format!("lt_files_make_dir({})", a[0]),
+            "files.copy" => format!("lt_files_copy({}, {})", a[0], a[1]),
+            "files.rename" => format!("lt_files_rename({}, {})", a[0], a[1]),
+            "files.join" => format!("lt_files_join({}, {})", a[0], a[1]),
+            "files.name" => format!("lt_files_name({})", a[0]),
+            "files.parent" => format!("lt_files_parent({})", a[0]),
+            "files.extension" => format!("lt_files_extension({})", a[0]),
+            "files.open" => format!("lt_files_open_mode({}, \"rb\", {})", a[0], a[1]),
+            "files.create" => format!("lt_files_open_mode({}, \"wb\", {})", a[0], a[1]),
+            "files.temp_dir" => format!("lt_files_temp_dir({})", a[0]),
+            "File.read_line" => format!("lt_file_read_line({}, {})", a[0], a[1]),
+            "File.write" => format!("lt_file_write({}, {})", a[0], a[1]),
+            "File.close" => format!("lt_file_close({})", a[0]),
+            "TempDir.close" => format!("lt_tempdir_close({})", a[0]),
+            "TempDir.path" => format!("lt_text_ret(((lt_tempdir *){})->path)", a[0]),
+            "process.run" => format!("({{ int64_t s_; lt_text *o_, *e_; lt_err r_ = lt_process_run({}, {}, &s_, &o_, &e_); if (!r_.obj) *{out} = (__typeof__(*{out})){{ s_, o_, e_ }}; r_; }})", a[0], a[1], out = a[2]),
+            "process.args" => "lt_process_args()".to_string(),
+            "process.exit" => format!("lt_process_exit({})", a[0]),
+            "env.get" => format!("lt_env_get({})", a[0]),
+            "log.info" => format!("lt_log(\"INFO\", {})", a[0]),
+            "log.warn" => format!("lt_log(\"WARN\", {})", a[0]),
+            "log.error" => format!("lt_log(\"ERROR\", {})", a[0]),
+            "random.between" => format!("lt_random_between({}, {}, {})", a[0], a[1], line),
+            "random.fraction" => "lt_random_fraction()".to_string(),
+            "random.token" => format!("lt_random_token({})", a[0]),
             "assert" => format!("lt_assert({}, {})", a[0], line),
             "panic" => format!("lt_panic_text({}, {})", a[0], line),
             "min" | "max" => {
@@ -2411,6 +2451,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.threads {
             out += include_str!("runtime/sched.h");
         }
+        out += include_str!("runtime/std.h");
         out += "\n// ---- generated ----\n";
         out += "static void lt_index_panic(int64_t i, int64_t n, int line) { char b[128]; snprintf(b, sizeof b, \"index %lld is out of range for a list of length %lld\", (long long)i, (long long)n); lt_panic_at(b, line); }\n";
         out += "static void lt_panic_error(lt_err e, int line);\n";
@@ -2428,7 +2469,7 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         out += &self.helpers;
         out += &fns;
         let _ = writeln!(out, "static const char *lt_file_init = {};", c_str(&self.file));
-        out += &main.replacen("lt_init();", "lt_init(); lt_file = lt_file_init;", 1);
+        out += &main.replacen("int main(void) {", "int main(int argc, char **argv) {\n  lt_argc = argc;\n  lt_argv = argv;", 1).replacen("lt_init();", "lt_init(); lt_file = lt_file_init;", 1);
         out
     }
 }

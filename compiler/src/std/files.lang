@@ -1,0 +1,49 @@
+// files: read and write files and directories. Paths are text; errors say
+// which path failed and why.
+
+// The whole file as text.
+pub fn read(path: Text) throws -> Text
+// Creates or replaces the file.
+pub fn write(path: Text, text: Text) throws
+// Adds to the end of the file, creating it if needed.
+pub fn append(path: Text, text: Text) throws
+pub fn exists(path: Text) -> Bool
+pub fn is_dir(path: Text) -> Bool
+// Names of the entries in a directory, sorted.
+pub fn list(dir: Text) throws -> List<Text>
+// Deletes a file or an empty directory.
+pub fn delete(path: Text) throws
+// Creates a directory and any missing parents.
+pub fn make_dir(path: Text) throws
+pub fn copy(from: Text, to: Text) throws
+pub fn rename(from: Text, to: Text) throws
+// "a/b" + "c.txt" -> "a/b/c.txt"
+pub fn join(dir: Text, name: Text) -> Text
+// "a/b/c.txt" -> "c.txt"
+pub fn name(path: Text) -> Text
+// "a/b/c.txt" -> "a/b"
+pub fn parent(path: Text) -> Text
+// "a/b/c.txt" -> "txt" (none without a dot)
+pub fn extension(path: Text) -> Text?
+
+// An open file, for reading or writing it piece by piece.
+// Get one with `with f = try files.open(path) { ... }`.
+builtin type File {
+  // The next line without its line break; none at the end of the file.
+  fn read_line(self) throws -> Text?
+  fn write(self, text: Text) throws
+  fn close(self) throws
+}
+
+// Opens a file for reading, line by line.
+pub fn open(path: Text) throws -> File
+// Creates (or replaces) a file for writing, piece by piece.
+pub fn create(path: Text) throws -> File
+
+// A new empty directory, deleted with everything in it at the end of `with`.
+builtin type TempDir {
+  path: Text
+  fn close(self) throws
+}
+
+pub fn temp_dir() throws -> TempDir
