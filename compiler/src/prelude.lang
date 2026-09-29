@@ -73,6 +73,26 @@ builtin type String {
   fn words(self) -> List<String>
   fn chars(self) -> List<String>
   fn contains(self, part: String) -> Bool
+  // The position of the first `part` (in characters, as `slice` counts);
+  // none if it isn't there. From a position: s.slice(from: i, to: s.length).index_of(x)
+  fn index_of(self, part: String) -> Int? {
+    let i = self.__find(part, 0)
+    if i < 0 {
+      return none
+    }
+    return i
+  }
+  fn __find(self, part: String, from: Int) -> Int
+  fn trim_start(self) -> String
+  fn trim_end(self) -> String
+  // Every character is 0-9 (and there is at least one).
+  fn is_digit(self) -> Bool
+  // Every character is a letter, of any script (and there is at least one).
+  fn is_letter(self) -> Bool
+  // Every character is a space, tab or line break.
+  fn is_space(self) -> Bool
+  fn is_upper(self) -> Bool
+  fn is_lower(self) -> Bool
   fn starts_with(self, prefix: String) -> Bool
   fn ends_with(self, suffix: String) -> Bool
   fn replace(self, old: String, new: String) -> String

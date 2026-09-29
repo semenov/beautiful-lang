@@ -1356,3 +1356,67 @@ static lt_decimal lt_decimal_from_float(double v, int line) {
     lt_text_drop(t);
     return d;
 }
+
+// ---------------------------------------------------------------- more text
+
+// the character position of `part` at or after character `from`; -1 if absent
+static int64_t lt_text_find(lt_text *t, lt_text *part, int64_t from) {
+    if (from < 0) from = 0;
+    int64_t start = lt_text_char_offset(t, from);
+    if (start > t->len) return -1;
+    const char *hit = lt_find(t->data + start, t->len - start, part->data, part->len);
+    if (!hit) return -1;
+    int64_t n = 0;
+    for (const char *p = t->data; p < hit; p++)
+        if (((unsigned char)*p & 0xC0) != 0x80) n++;
+    return n;
+}
+
+static lt_text *lt_text_trim_side(lt_text *t, bool start, bool end) {
+    int64_t a = 0, b = t->len;
+    if (start)
+        while (a < b && isspace((unsigned char)t->data[a])) a++;
+    if (end)
+        while (b > a && isspace((unsigned char)t->data[b - 1])) b--;
+    return lt_text_from(t->data + a, b - a);
+}
+
+static uint32_t lt_utf8_next(const unsigned char **s, const unsigned char *e) {
+    uint32_t c = **s;
+    int n = 1;
+    if (c >= 0xf0) c &= 0x07, n = 4;
+    else if (c >= 0xe0) c &= 0x0f, n = 3;
+    else if (c >= 0xc0) c &= 0x1f, n = 2;
+    for (int i = 1; i < n && *s + i < e; i++) c = (c << 6) | ((*s)[i] & 0x3f);
+    *s += n;
+    return c;
+}
+
+// letters of any script: ASCII letters, and code points past Latin-1's
+// symbols that aren't punctuation, symbols or spaces
+static bool lt_cp_letter(uint32_t c) {
+    if (c < 0x80) return isalpha((int)c);
+    if (c < 0xC0 || c == 0xD7 || c == 0xF7) return false;
+    if ((c >= 0x2000 && c <= 0x2BFF) || (c >= 0x3000 && c <= 0x303F) || (c >= 0xFE30 && c <= 0xFE6F) || (c >= 0xFF00 && c <= 0xFF20) || (c >= 0x1F000 && c <= 0x1FAFF) || (c >= 0x2E00 && c <= 0x2E7F)) return false;
+    return true;
+}
+
+// every character passes (and there is at least one): 0 digit, 1 letter,
+// 2 space, 3 upper, 4 lower
+static bool lt_text_all(lt_text *t, int what) {
+    if (t->len == 0) return false;
+    const unsigned char *s = (const unsigned char *)t->data, *e = s + t->len;
+    while (s < e) {
+        uint32_t c = lt_utf8_next(&s, e);
+        bool ok;
+        switch (what) {
+        case 0: ok = c >= '0' && c <= '9'; break;
+        case 1: ok = lt_cp_letter(c); break;
+        case 2: ok = c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == 0xA0 || c == 0x3000 || (c >= 0x2000 && c <= 0x200A); break;
+        case 3: ok = c < 0x80 ? (c >= 'A' && c <= 'Z') : (lt_cp_letter(c) && ((c >= 0x410 && c <= 0x42F) || c == 0x401 || (c >= 0xC0 && c <= 0xDE) || (c >= 0x391 && c <= 0x3A9))); break;
+        default: ok = c < 0x80 ? (c >= 'a' && c <= 'z') : (lt_cp_letter(c) && ((c >= 0x430 && c <= 0x44F) || c == 0x451 || (c >= 0xDF && c <= 0xFF) || (c >= 0x3B1 && c <= 0x3C9))); break;
+        }
+        if (!ok) return false;
+    }
+    return true;
+}
