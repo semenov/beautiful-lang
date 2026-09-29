@@ -217,11 +217,14 @@ fn file_in(dir: Text, name: Text) -> Response {
 }
 
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
+// With a body: `var req = http.request("POST", "/notes")`, then
+// `req.body = "{\"title\": \"x\"}".bytes()`.
 pub fn request(method: Text, path: Text) -> Request {
   return Request(method: method, path: path, headers: {}, body: Bytes())
 }
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
+// It logs "listening on http://localhost:<port>" when ready, and "stopped".
 pub fn serve(router: Router, port: Int) throws {
   try __serve(port, req => try router.handle(req))
 }
@@ -245,6 +248,9 @@ pub type ClientRequest {
 }
 
 pub fn send(request: ClientRequest) throws -> Response {
+  if not request.url.contains("://") {
+    throw Failure(message: "http: \"${request.url}\" is not a URL: it needs a scheme like https://")
+  }
   return try __send(request.method, url: request.url, headers: request.headers, body: request.body, timeout: request.timeout)
 }
 

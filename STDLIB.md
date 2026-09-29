@@ -444,9 +444,12 @@ pub type Router {
 }
 
 // A request for tests: `router.handle(http.request("GET", "/notes/1"))`.
+// With a body: `var req = http.request("POST", "/notes")`, then
+// `req.body = "{\"title\": \"x\"}".bytes()`.
 pub fn request(method: Text, path: Text) -> Request
 
 // Serves the router until the program is stopped (Ctrl-C), then returns.
+// It logs "listening on http://localhost:<port>" when ready, and "stopped".
 pub fn serve(router: Router, port: Int) throws
 
 // A request to send: http.send(http.ClientRequest(url: u, headers: {...}))
@@ -984,6 +987,8 @@ builtin type List<T> {
   fn filter(self, test: fn(T) throws -> Bool) rethrows -> List<T>
   fn fold<A>(self, start: A, step: fn(A, T) throws -> A) rethrows -> A
   fn sorted(self) -> List<T>
+  // Sorted by a key, smallest first; equal keys keep their order (stable).
+  // Largest first: `xs.sorted_by(x => x.score).reversed()`.
   fn sorted_by<K>(self, key: fn(T) throws -> K) rethrows -> List<T>
   fn reversed(self) -> List<T>
   fn take(self, n: Int) -> List<T>
@@ -1039,11 +1044,22 @@ builtin type Task<T> {
   fn cancel(self)
 }
 
-// State shared between tasks; read and change it inside `with x = s.lock() { ... }`.
+// State shared between tasks (and between HTTP requests):
+//
+//   let counter = Shared<Int>(0)
+//   with n = counter.lock() {
+//     n += 1                       // other tasks wait at `with`
+//   }
+//
+// Inside the block the value is used and changed like a variable, fields
+// and all (`s.todos.append(x)`); the lock is released at the end of the
+// block, even on an error. A lock directly inside another is an error.
 builtin type Shared<T> {
   fn lock(self) -> Locked<T>
 }
 
+// What `lock()` gives: only for `with v = s.lock() { }`, where `v` is the
+// value itself.
 builtin type Locked<T> {
 }
 

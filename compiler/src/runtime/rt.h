@@ -8,6 +8,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <unistd.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1079,6 +1080,12 @@ LT_INLINE void lt_assert(bool c, int line) {
 }
 
 static void lt_init(void) {
+    // started by `lang run`: remove the temporary executable (still running)
+    const char *self = getenv("LANG_RUN_EXE");
+    if (self) {
+        unlink(self);
+        unsetenv("LANG_RUN_EXE");
+    }
     static char buf[1 << 16];
     setvbuf(stdout, buf, _IOFBF, sizeof buf);
 #ifdef LT_DEBUG_ALLOC

@@ -105,7 +105,10 @@ pub fn parse(src: &str, prelude: bool) -> ModuleDoc {
                 continue;
             }
             text.push_str(&signature(line));
-            items.push(Item { name: decl_name(s), text, members: vec![] });
+            let name = decl_name(s);
+            if !name.starts_with("__") {
+                items.push(Item { name, text, members: vec![] });
+            }
             depth += delta;
             if delta > 0 {
                 skip_to = Some(0);
@@ -152,6 +155,9 @@ pub fn parse(src: &str, prelude: bool) -> ModuleDoc {
 
 pub fn render_item(it: &Item) -> String {
     let mut out = it.text.clone();
+    if it.members.is_empty() && out.trim_end().ends_with('{') {
+        out.push_str("\n}");
+    }
     if !it.members.is_empty() {
         out.push('\n');
         for m in &it.members {

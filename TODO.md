@@ -26,7 +26,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
 - [ ] **Port a small open-source project** to the language; note what's
       missing in the language and libraries and add it as I go
 
-- [ ] **Learn from fasthttp**: why Go's fasthttp beats net/http (buffer and
+- [x] **Learn from fasthttp** (benchmarks/http/README.md; next step below): why Go's fasthttp beats net/http (buffer and
       object reuse, no per-request allocations, lazy header parsing, worker
       pool...) and apply what fits to our HTTP server; measure before/after
 
@@ -47,6 +47,16 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
   - [ ] decode key naming (`keys: CamelCase`) for JSON APIs with camelCase
   - [ ] test doubles: a fixed clock, calling handlers without a network (done
         for http), temporary directories (done)
+
+- [ ] **Scheduler I/O path** (from the fasthttp study): register sockets
+      once edge-triggered; idle workers poll I/O themselves; per-worker run
+      queues. Measure with benchmarks/http/cpu.sh (45 us/request now)
+- [ ] From the newcomer-agent test (all 3 programs worked first try):
+  - [x] crash on `spawn` inside a lambda -> a clear error
+  - [x] `lang run` passes signals to the program (it execs it)
+  - [x] guide: maps, shared state in handlers, tests with a body, task lists
+  - [ ] one "this call can fail" per chain, not per call
+  - [ ] `Text` has no character tests (letters, digits); regex is ASCII-only
 
 ## Then: my own review of what's missing or weak
 

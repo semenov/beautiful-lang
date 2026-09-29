@@ -1571,7 +1571,7 @@ impl Checker {
                 let l = self.fc().locals[id].clone();
                 if write {
                     if self.is_captured(id) {
-                        self.err(e.span, format!("can't change `{}` inside a lambda: lambdas capture a copy", name));
+                        self.err_help(e.span, format!("can't change `{}` inside a lambda: lambdas capture a copy", name), "compute the value with the lambda's result (`map`, `fold`, `filter`), or share it through `Shared<T>` and change it in `with v = s.lock() { }`");
                         return None;
                     }
                     if !l.mutable {
@@ -1974,6 +1974,11 @@ impl Checker {
             ExprKind::Spawn(x) => {
                 if !matches!(x.kind, ExprKind::Call { .. }) {
                     self.err_help(x.span, "`spawn` goes right before a call", "write `spawn f(x)`");
+                    return self.expr(x, None);
+                }
+                if !self.fc().lambdas.is_empty() {
+                    // a task belongs to a function; a lambda would carry it away
+                    self.err_help(span, "`spawn` can't be used inside a lambda", "for a list, use `try xs.parallel_map(limit: 8, transform: x => try f(x))`; or a loop: `for x in xs { tasks.append(spawn f(x)) }`");
                     return self.expr(x, None);
                 }
                 self.fcx().in_spawn = true;

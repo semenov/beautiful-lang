@@ -651,15 +651,14 @@ fn main() -> ExitCode {
             if !compile(&opts, tests, false, &exe) {
                 return ExitCode::from(1);
             }
-            let status = Command::new(&exe).args(&opts.args).status();
+            // `lang run` becomes the program, so signals (Ctrl-C, kill), the exit
+            // status and standard input are its own; it deletes its temporary
+            // file when it starts (LANG_RUN_EXE)
+            use std::os::unix::process::CommandExt;
+            let err = Command::new(&exe).args(&opts.args).env("LANG_RUN_EXE", &exe).exec();
             let _ = std::fs::remove_file(&exe);
-            match status {
-                Ok(s) => ExitCode::from(s.code().unwrap_or(1) as u8),
-                Err(e) => {
-                    eprintln!("error: can't run the program: {}", e);
-                    ExitCode::from(1)
-                }
-            }
+            eprintln!("error: can't run the program: {}", err);
+            ExitCode::from(1)
         }
         "build" => {
             if opts.static_link && cfg!(target_os = "macos") {

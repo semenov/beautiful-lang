@@ -12,9 +12,9 @@ lang doc --search gzip       find by name or description
 lang guide errors            one section of this guide
 ```
 
-`lang doc` also shows the packages of the project you're in. The same
-reference is in [`STDLIB.md`](STDLIB.md); the reasons behind the rules are
-in [`DESIGN.md`](DESIGN.md).
+`lang doc` also shows the packages of the project you're in. In the
+language's repository, the same reference is in `STDLIB.md` and the
+reasons behind the rules are in `DESIGN.md`.
 
 ## Files and programs
 
@@ -52,6 +52,15 @@ for i in 0..<10 { ... }        // 0..<n excludes n, 1..=n includes it
 while running { ... }
 for entry in map { print("${entry.key}: ${entry.value}") }
 for item in list.indexed() { print("${item.index}: ${item.value}") }
+
+var names: List<Text> = []     // empty literals need a type: [] and {}
+names.append("Ada")
+var ages: Map<Text, Int> = {}
+ages["Ada"] = 36               // add or replace
+let age = ages["Ada"] ?? 0     // reading gives Int?
+ages.remove("Ada")
+let counts = words.count_each()               // Map<Text, Int>
+let top = counts.entries().sorted_by(e => e.value).reversed().take(10)
 
 let size = if n > 100 { "big" } else { "small" }   // if and match give values
 let label = match shape {
@@ -209,8 +218,21 @@ with n = counter.lock() {
 let jobs = Channel<Text>(capacity: 100)   // passing data between tasks
 ```
 
-A task can't be returned, stored or captured. A function waits for its tasks
-before it returns. No `async`/`await`: waiting code is written sequentially.
+A task can't be returned, put in a record or captured by a lambda (so no
+`spawn` inside a lambda); a local list of tasks is fine:
+
+```
+var tasks: List<Task<http.Response>> = []
+for u in urls {
+  tasks.append(spawn http.get(u))
+}
+for t in tasks {
+  let res = try t.wait()
+}
+```
+
+A function waits for its tasks before it returns. No `async`/`await`:
+waiting code is written sequentially.
 
 ## Data in and out: `decode<T>`
 
@@ -246,7 +268,45 @@ let api = try http.send(http.ClientRequest(url: u, method: "POST",
 ```
 
 Bodies are `Bytes`: `try req.text()`, `try res.text()`. A handler's error
-becomes a 500 and a log line.
+becomes a 500 and a log line. `http.serve` logs "listening on ..." itself.
+
+State shared by all requests goes in a `Shared<T>`, passed to the handlers
+through lambdas (there are no global variables):
+
+```
+type Store {
+  todos: List<Todo> = []
+  next_id: Int = 1
+}
+
+fn add_todo(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let input = try json.decode<NewTodo>(try req.text())
+  with s = store.lock() {               // fields change in place under the lock
+    let todo = Todo(id: s.next_id, title: input.title)
+    s.next_id += 1
+    s.todos.append(todo)
+    return http.json(201, todo)
+  }
+}
+
+fn make_router(store: Shared<Store>) -> http.Router {
+  var router = http.Router()
+  router.post("/todos", req => try add_todo(req, store))
+  return router
+}
+
+fn main() throws {
+  try http.serve(make_router(Shared<Store>(Store())), port: 8080)
+}
+
+test "adding a todo" {                  // handlers are tested without a network
+  let router = make_router(Shared<Store>(Store()))
+  var req = http.request("POST", "/todos")
+  req.body = "{\"title\": \"milk\"}".bytes()
+  let res = try router.handle(req)
+  expect res.status == 201
+}
+```
 
 ## Tests
 
