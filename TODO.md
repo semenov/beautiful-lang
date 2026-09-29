@@ -57,7 +57,8 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
     - [x] 204/304 without content-length or content-type; Content-Length on a stream
     - [x] test helper `http.request` splits off the query
     - [ ] repeated headers; trailers; cookie Domain/Expires
-    - [ ] server options: bind address, body size limit, timeouts
+    - [x] server options: bind address, body size limit (`http.serve_with`)
+    - [ ] server timeouts (slow clients, idle keep-alive)
     - [x] language: hex literals, `\u{...}` escapes, calling a stored
           function `r.handler(x)`, `if a is some(x) or ...` message, named
           function types take plain functions

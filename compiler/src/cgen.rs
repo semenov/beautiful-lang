@@ -3166,6 +3166,11 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
                 self.gen_http_glue();
                 format!("lt_http_serve({}, {})", a[0], a[1])
             }
+            "http.__serve_on" => {
+                self.threads = true;
+                self.gen_http_glue();
+                format!("lt_http_serve_on({}, {}, {}, {})", a[0], a[1], a[2], a[3])
+            }
             "http.download" => {
                 self.curl = true;
                 self.gen_http_glue();

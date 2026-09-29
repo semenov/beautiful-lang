@@ -562,6 +562,21 @@ pub fn serve(router: Router, port: Int) throws {
 
 fn __serve(port: Int, handler: fn(Request) throws -> Response) throws
 
+// How to serve: `http.serve_with(router, options: http.ServerOptions(port: 8080, host: "127.0.0.1"))`.
+pub type ServerOptions {
+  port: Int = 8080
+  // "" for every address; "127.0.0.1" (or "::1") for this machine only
+  host: String = ""
+  // bigger request bodies are answered with 413
+  max_body: Int = 67108864
+}
+
+pub fn serve_with(router: Router, options: ServerOptions) throws {
+  try __serve_on(options.host, port: options.port, max_body: options.max_body, handler: req => try router.handle(req))
+}
+
+fn __serve_on(host: String, port: Int, max_body: Int, handler: fn(Request) throws -> Response) throws
+
 // ---- client (HTTPS works) ----
 // A response with any status is not an error: check `response.status`.
 // Errors are for failures to talk to the server at all.

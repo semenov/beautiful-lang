@@ -9,5 +9,5 @@ fn main() throws {
   router.get("/ip", req => http.text(200, req.client_ip))
   router.get("/empty", req => http.text(204, ""))
   router.get("/sized", req => http.stream(200, content_type: "text/plain", writer: out => try out.write_text("12345")).with_header("content-length", "5"))
-  try http.serve(router, port: port)
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1", max_body: 3000000))
 }

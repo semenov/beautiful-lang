@@ -353,6 +353,8 @@ var router = http.Router()
 router.get("/notes/:id", get_note)
 router.files("/static", dir: "public")
 try http.serve(router, port: 8080)
+// or: http.serve_with(router, options: http.ServerOptions(port: 8080,
+//   host: "127.0.0.1", max_body: 10_000_000))
 
 let res = try http.get("https://example.com")               // client
 let api = try http.send(http.ClientRequest(url: u, method: "POST",

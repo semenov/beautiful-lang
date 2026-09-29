@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <ctype.h>
 
 typedef struct {
@@ -324,7 +325,9 @@ static bool lt_http_send_file(int fd, const lt_http_raw *r, lt_http_out *out, bo
 }
 
 #define LT_HTTP_MAX_HEAD (64 * 1024)
-#define LT_HTTP_MAX_BODY (64 * 1024 * 1024)
+#define LT_HTTP_MAX_BODY lt_http_max_body
+// http.ServerOptions.max_body
+static int64_t lt_http_max_body = 64 * 1024 * 1024;
 
 // The buffer grows to `need`; the parsed pointers into it move along.
 static char *lt_http_grow(char *buf, size_t *cap, size_t need, lt_http_raw *r) {
@@ -574,14 +577,48 @@ done:
     lt_fn_drop(a.handler);
 }
 
+// `host`: "" listens on every address (IPv4 and IPv6), "127.0.0.1" or
+// "::1" only on this machine, or an interface's address.
+static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, lt_fn handler);
 static lt_err lt_http_serve(int64_t port, lt_fn handler) {
-    int fd = socket(AF_INET6, SOCK_STREAM, 0);
-    bool v6 = fd >= 0;
+    lt_text *all = lt_text_cstr("");
+    lt_err e = lt_http_serve_on(all, port, 64 * 1024 * 1024, handler);
+    lt_text_drop(all);
+    return e;
+}
+static lt_err lt_http_serve_on(lt_text *host, int64_t port, int64_t max_body, lt_fn handler) {
+    lt_http_max_body = max_body;
+    int fd;
+    int one = 1, zero = 0;
+    int r;
+    bool v6 = false;
+    if (host->len > 0) {
+        struct addrinfo hints, *res = NULL;
+        memset(&hints, 0, sizeof hints);
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV;
+        char ps[16];
+        snprintf(ps, sizeof ps, "%lld", (long long)port);
+        if (getaddrinfo(host->data, ps, &hints, &res) != 0 || !res) {
+            char buf[160];
+            snprintf(buf, sizeof buf, "http: can't listen on \"%s\": no such address", host->data);
+            return lt_make_failure(lt_text_cstr(buf));
+        }
+        fd = socket(res->ai_family, SOCK_STREAM, 0);
+        if (fd < 0) {
+            freeaddrinfo(res);
+            return lt_make_failure(lt_text_cstr("http: can't create a socket"));
+        }
+        setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        r = bind(fd, res->ai_addr, res->ai_addrlen);
+        freeaddrinfo(res);
+        goto bound;
+    }
+    fd = socket(AF_INET6, SOCK_STREAM, 0);
+    v6 = fd >= 0;
     if (!v6) fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) return lt_make_failure(lt_text_cstr("http: can't create a socket"));
-    int one = 1, zero = 0;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    int r;
     if (v6) {
         setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &zero, sizeof zero);
         struct sockaddr_in6 addr;
@@ -598,6 +635,7 @@ static lt_err lt_http_serve(int64_t port, lt_fn handler) {
         addr.sin_addr.s_addr = htonl(INADDR_ANY);
         r = bind(fd, (struct sockaddr *)&addr, sizeof addr);
     }
+bound:
     if (r != 0 || listen(fd, 1024) != 0) {
         char buf[128];
         snprintf(buf, sizeof buf, "http: can't listen on port %lld: %s", (long long)port, strerror(errno));
@@ -612,7 +650,7 @@ static lt_err lt_http_serve(int64_t port, lt_fn handler) {
     signal(SIGPIPE, SIG_IGN);
     {
         char msg[96];
-        snprintf(msg, sizeof msg, "listening on http://localhost:%lld", (long long)port);
+        snprintf(msg, sizeof msg, "listening on http://%s:%lld", host->len == 0 ? "localhost" : strchr(host->data, ':') ? "[::1]" : host->data, (long long)port);
         lt_text *m = lt_text_cstr(msg);
         lt_log("INFO", m);
         lt_text_drop(m);

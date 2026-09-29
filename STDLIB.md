@@ -862,6 +862,17 @@ pub fn status_text(status: Int) -> String
 // It logs "listening on http://localhost:<port>" when ready, and "stopped".
 pub fn serve(router: Router, port: Int) throws
 
+// How to serve: `http.serve_with(router, options: http.ServerOptions(port: 8080, host: "127.0.0.1"))`.
+pub type ServerOptions {
+  port: Int = 8080
+  // "" for every address; "127.0.0.1" (or "::1") for this machine only
+  host: String = ""
+  // bigger request bodies are answered with 413
+  max_body: Int = 67108864
+}
+
+pub fn serve_with(router: Router, options: ServerOptions) throws
+
 // A request to send: http.send(http.ClientRequest(url: u, headers: {...}))
 pub type ClientRequest {
   url: String
