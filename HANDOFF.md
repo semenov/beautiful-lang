@@ -36,7 +36,7 @@ State at the end of 2026-09-29 (all pushed unless noted):
   tpidr_el0/%fs:0 + a local-exec TLS offset).
 - **A port is running/ran in a git worktree:** the RealWorld "Conduit"
   API (ports/realworld, with GAPS.md and newman API tests), by a newcomer
-  agent. Find its branch with `git worktree list` / `git branch -a`; review
+  agent. Its worktree: `.claude/worktrees/agent-a314d3b5bbeb9cea7`, branch `worktree-agent-a314d3b5bbeb9cea7` (`git worktree list`); review
   it, merge ports/realworld into main, and fix the gaps it lists (as with
   gron and httpbin).
 

@@ -4,3 +4,4 @@ benchmarks/rust/target/
 *.o
 .DS_Store
 /build/
+.claude/worktrees/
