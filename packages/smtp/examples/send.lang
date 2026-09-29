@@ -1,0 +1,7 @@
+import smtp
+
+fn main() throws {
+  let msg = smtp.Message(from: "Магазин <shop@example.com>", to: ["ada@example.com"], cc: ["bob@example.com"], bcc: ["audit@example.com"], subject: "Заказ №42 готов", text: "Hello Ada,\n.a line starting with a dot\nThanks!", html: "<p>Hello <b>Ada</b></p>", attachments: [smtp.Attachment(name: "invoice.txt", content_type: "text/plain", data: "total: 19.99".bytes())])
+  try smtp.send(msg, server: smtp.Server(host: "127.0.0.1", port: 2525, user: "shop", password: "secret", security: "none"))
+  print("sent")
+}

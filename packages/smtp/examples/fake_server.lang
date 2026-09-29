@@ -1,0 +1,39 @@
+// A fake SMTP server: accepts one message per connection and saves it.
+import files
+import io
+import net
+
+fn session(conn: io.Stream) throws {
+  try conn.write_text("220 fake ESMTP\r\n")
+  var log: List<String> = []
+  while try conn.read_line() is some(line) {
+    log.append(line)
+    let cmd = line.split(" ")[0].upper()
+    if cmd == "EHLO" {
+      try conn.write_text("250-fake greets you\r\n250-AUTH PLAIN\r\n250 8BITMIME\r\n")
+    } else if cmd == "AUTH" {
+      try conn.write_text("235 ok\r\n")
+    } else if cmd == "DATA" {
+      try conn.write_text("354 go ahead\r\n")
+      var data: List<String> = []
+      while try conn.read_line() is some(d) {
+        if d == "." {
+          break
+        }
+        data.append(if d.starts_with("..") { d.slice(from: 1, to: d.length) } else { d })
+      }
+      try files.write("/tmp/sm2/received.eml", data.join("\r\n"))
+      try conn.write_text("250 queued\r\n")
+    } else if cmd == "QUIT" {
+      try conn.write_text("221 bye\r\n")
+      break
+    } else {
+      try conn.write_text("250 ok\r\n")
+    }
+  }
+  try files.write("/tmp/sm2/commands.txt", log.join("\n"))
+}
+
+fn main() throws {
+  try net.serve(2525, handler: conn => try session(conn))
+}
