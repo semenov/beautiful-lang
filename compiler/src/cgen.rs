@@ -98,6 +98,7 @@ pub struct CGen<'a> {
     zlib: bool,
     tls: bool,
     wants_interrupt: bool,
+    pkey: bool,
 }
 
 fn c_str(s: &str) -> String {
@@ -173,6 +174,7 @@ impl<'a> CGen<'a> {
             zlib: false,
             tls: false,
             wants_interrupt: false,
+            pkey: false,
         }
     }
 
@@ -3001,6 +3003,17 @@ static lt_err lt_http_call(lt_fn handler, {rqc} *req, {rsc} *resp) {{
             "files.read_bytes" => format!("lt_files_read_bytes({}, {})", a[0], a[1]),
             "files.write_bytes" => format!("lt_files_write_bytes({}, {})", a[0], a[1]),
             "crypto.sha256" => format!("lt_crypto_sha256({})", a[0]),
+            "crypto.public_key" | "crypto.rsa_public_key" | "crypto.ec_public_key" | "crypto.private_key" | "crypto.verify" | "crypto.sign" => {
+                self.pkey = true;
+                match name {
+                    "crypto.public_key" => format!("lt_crypto_public_key({}, {})", a[0], a[1]),
+                    "crypto.rsa_public_key" => format!("lt_crypto_rsa_public({}, {}, {})", a[0], a[1], a[2]),
+                    "crypto.ec_public_key" => format!("lt_crypto_ec_public({}, {}, {})", a[0], a[1], a[2]),
+                    "crypto.private_key" => format!("lt_crypto_private_key({}, {})", a[0], a[1]),
+                    "crypto.verify" => format!("lt_pkey_verify({}, {}, {})", a[0], a[1], a[2]),
+                    _ => format!("lt_pkey_sign({}, {}, {})", a[0], a[1], a[2]),
+                }
+            }
             "crypto.sha1" | "http.__sha1" => format!("lt_crypto_sha1({})", a[0]),
             "http.__ws_mask" => format!("lt_ws_mask({}, {})", a[0], a[1]),
             "crypto.hmac_sha256" => format!("lt_crypto_hmac({}, {})", a[0], a[1]),
@@ -3592,6 +3605,11 @@ static void lt_panic_error(lt_err e, int line) { lt_text *m = lt_error_message(e
         if self.zlib {
             out = format!("// link: -lz\n{}", out);
             out += include_str!("runtime/zlib.h");
+        }
+        if self.pkey {
+            let link = if cfg!(target_os = "macos") { "-framework Security -framework CoreFoundation" } else { "-lcrypto" };
+            out = format!("// link: {}\n{}", link, out);
+            out += include_str!("runtime/pkey.h");
         }
         if self.tls {
             let link = if cfg!(target_os = "macos") { "-framework Security -framework CoreFoundation" } else { "-lssl -lcrypto" };

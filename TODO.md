@@ -81,7 +81,7 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       chunks, partition, index_of, find_index), log levels and JSON logs
 - [ ] still small: decode key naming, log fields, cli subcommands
 - [x] signals: Ctrl-C cancels `main` so `with` blocks close
-- [ ] `crypto`: Ed25519, ECDSA P-256, RSA verification (for JWT and webhooks)
+- [x] `crypto`: RSA and ECDSA P-256 sign/verify, keys from PEM or JWK (Ed25519: not yet)
 - [x] **markdown package** (Vlad asked; `packages/markdown`): Markdown -> HTML (CommonMark)
 - [ ] packages: jwt, smtp, s3, mysql, semver, yaml (maybe stdlib)
 

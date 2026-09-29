@@ -1,0 +1,3 @@
+rsa.pem: true false 256
+ec_trad.pem: true false 64
+openssl's signature: true

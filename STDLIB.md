@@ -1013,6 +1013,26 @@ pub fn hash_password(password: String) -> String
 
 // Checks a password against the result of `hash_password`.
 pub fn verify_password(password: String, stored: String) -> Bool
+
+pub builtin type PublicKey {
+}
+
+pub builtin type PrivateKey {
+}
+
+// From PEM text: "-----BEGIN PUBLIC KEY-----" (or RSA PUBLIC KEY).
+pub fn public_key(pem: String) throws -> PublicKey
+// From a JWK's RSA numbers (n and e, base64url-decoded).
+pub fn rsa_public_key(n: Bytes, e: Bytes) throws -> PublicKey
+// From a JWK's P-256 point (x and y, 32 bytes each).
+pub fn ec_public_key(x: Bytes, y: Bytes) throws -> PublicKey
+// From PEM text: "-----BEGIN PRIVATE KEY-----" (PKCS#8), RSA PRIVATE KEY or
+// EC PRIVATE KEY.
+pub fn private_key(pem: String) throws -> PrivateKey
+
+// Whether `signature` is `key`'s signature of `data`.
+pub fn verify(key: PublicKey, data: Bytes, signature: Bytes) -> Bool
+pub fn sign(key: PrivateKey, data: Bytes) throws -> Bytes
 ```
 
 ## encoding

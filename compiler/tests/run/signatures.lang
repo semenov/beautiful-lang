@@ -1,0 +1,15 @@
+import crypto
+import files
+
+fn main() throws {
+  let dir = "keys_fixture"
+  let msg = try files.read_bytes("${dir}/msg.txt")
+  for pair in [["rsa.pem", "rsa_pub.pem"], ["ec_trad.pem", "ec_pub.pem"]] {
+    let private_key = try crypto.private_key(try files.read("${dir}/${pair[0]}"))
+    let public_key = try crypto.public_key(try files.read("${dir}/${pair[1]}"))
+    let sig = try crypto.sign(private_key, data: msg)
+    print("${pair[0]}: ${crypto.verify(public_key, data: msg, signature: sig)} ${crypto.verify(public_key, data: "x".bytes(), signature: sig)} ${sig.length}")
+  }
+  let theirs = try files.read_bytes("${dir}/rsa_by_openssl.sig")
+  print("openssl's signature: ${crypto.verify(try crypto.public_key(try files.read("${dir}/rsa_pub.pem")), data: msg, signature: theirs)}")
+}

@@ -45,3 +45,28 @@ pub fn verify_password(password: String, stored: String) -> Bool {
 }
 
 fn __from_base64(text: String) throws -> Bytes
+
+// ---- public-key signatures: RSA (PKCS#1 v1.5) and ECDSA P-256, with
+// SHA-256 (JWT's RS256 and ES256). ECDSA signatures are the raw 64 bytes
+// (r then s) that JWT uses.
+
+pub builtin type PublicKey {
+}
+
+pub builtin type PrivateKey {
+}
+
+// From PEM text: "-----BEGIN PUBLIC KEY-----" (or RSA PUBLIC KEY).
+pub fn public_key(pem: String) throws -> PublicKey
+// From a JWK's RSA numbers (n and e, base64url-decoded).
+pub fn rsa_public_key(n: Bytes, e: Bytes) throws -> PublicKey
+// From a JWK's P-256 point (x and y, 32 bytes each).
+pub fn ec_public_key(x: Bytes, y: Bytes) throws -> PublicKey
+// From PEM text: "-----BEGIN PRIVATE KEY-----" (PKCS#8), RSA PRIVATE KEY or
+// EC PRIVATE KEY.
+pub fn private_key(pem: String) throws -> PrivateKey
+
+// Whether `signature` is `key`'s signature of `data`.
+pub fn verify(key: PublicKey, data: Bytes, signature: Bytes) -> Bool
+pub fn sign(key: PrivateKey, data: Bytes) throws -> Bytes
+
