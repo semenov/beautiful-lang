@@ -1,0 +1,31 @@
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:159:31
+    |
+159 |   let after_time = line.slice(bracket_close ?? 0 + 1, line.length)
+    |                               ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:167:20
+    |
+167 |   let start_pos = (bracket_close ?? 0) + 1 + (quote_start_pos ?? 0)
+    |                    ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:167:47
+    |
+167 |   let start_pos = (bracket_close ?? 0) + 1 + (quote_start_pos ?? 0)
+    |                                               ^^^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:176:48
+    |
+176 |   let request_text = after_quote_open.slice(0, quote_end_pos ?? 0)
+    |                                                ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:198:58
+    |
+198 |   let after_request_quote = line.slice((start_pos + 1 + (quote_end_pos ?? 0) + 1), line.length)
+    |                                                          ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+5 error(s)

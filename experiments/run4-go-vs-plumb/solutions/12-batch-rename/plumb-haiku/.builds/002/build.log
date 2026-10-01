@@ -1,0 +1,5 @@
+error: expected `:` and the field type, found `(`
+  --> main.plumb:6:8
+  |
+6 |   Regex(pattern: String, template: String)
+  |        ^

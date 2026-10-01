@@ -1,0 +1,7 @@
+error: `value_matches` must return a `Bool` at the end
+  --> main.plumb:132:60
+    |
+132 | fn value_matches(val: json.Value?, target: String) -> Bool {
+    |                                                            ^
+    = help: add `return ...` as the last line
+1 error(s)

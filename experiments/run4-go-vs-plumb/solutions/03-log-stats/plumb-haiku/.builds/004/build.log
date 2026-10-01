@@ -1,0 +1,73 @@
+error: a `Stream` must be closed: get it with `with`
+  --> main.plumb:43:46
+   |
+43 |     let result = try read_and_process_stream(io.stdin(), all_stats)
+   |                                              ^^^^^^^^^^
+   = help: write `with f = ... { ... }`: it's closed at the end of the block, even on an error
+error: expected `Int`, found `String`
+  --> main.plumb:64:56
+   |
+64 |   let sorted = entries.sorted_by(e => [-e.value.count, e.value.endpoint])
+   |                                                        ^^^^^^^^^^^^^^^^
+   = help: parse it: `try text.to_int()`
+error: can't change `existing_stat`: it's declared with `let`
+  --> main.plumb:90:7
+   |
+90 |       existing_stat.count += new_stat.count
+   |       ^^^^^^^^^^^^^
+   = help: declare it with `var existing_stat = ...`
+error: can't change `existing_stat`: it's declared with `let`
+  --> main.plumb:91:7
+   |
+91 |       existing_stat.error_count += new_stat.error_count
+   |       ^^^^^^^^^^^^^
+   = help: declare it with `var existing_stat = ...`
+error: this value may be missing
+  --> main.plumb:92:21
+   |
+92 |       existing_stat.latencies.append_all(new_stat.latencies)
+   |                     ^^^^^^^^^
+   = help: unwrap it first: `if x is some(v) { v.latencies }`, or give a fallback with `??`
+error: nothing here can fail
+  --> main.plumb:111:8
+    |
+111 |     if try parse_log_line(line) is some(entry) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: can't change `stat`: it's declared with `let`
+  --> main.plumb:116:9
+    |
+116 |         stat.count += 1
+    |         ^^^^
+    = help: declare it with `var stat = ...`
+error: can't change `stat`: it's declared with `let`
+  --> main.plumb:118:11
+    |
+118 |           stat.error_count += 1
+    |           ^^^^
+    = help: declare it with `var stat = ...`
+error: this value may be missing
+  --> main.plumb:120:14
+    |
+120 |         stat.latencies.append(entry.latency)
+    |              ^^^^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.latencies }`, or give a fallback with `??`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:212:20
+    |
+212 |   let status_val = status ?? 0
+    |                    ^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:222:21
+    |
+222 |   let latency_val = latency ?? 0
+    |                     ^^^^^^^
+    = help: remove `?? ...`
+error: `/` on two `Int`s is not allowed
+  --> main.plumb:275:14
+    |
+275 |   let pos = (percentile * n + 99) / 100
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `a.div(b)` for whole-number division, or `a.to_float() / b.to_float()`
+12 error(s)

@@ -1,0 +1,109 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all 2xx exit 0, whitespace trimmed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no URLs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "any status is a response",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "redirects followed, at most 10",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='http://127.0.0.1:54292/redirect/5 200 6\\nhttp://127.0.0.1:54292/absredirect 200 7\\nhttp://127.0.0.1:54292/redirect/10 302 0\\nhttp://127.0.0.1:54292/redirect/11 307 0\\nhttp://127.0.0.1:54292/loop 302 0\\ntotal 5 ok 2 bad-status 3 failed 0\\n' stderr=''"
+  },
+  {
+   "name": "connect and invalid-url errors",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "connection closed without response",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='http://127.0.0.1:54292/drop error connect\\nhttp://127.0.0.1:54292/ok/2 200 2\\ntotal 2 ok 1 bad-status 0 failed 1\\n' stderr=''"
+  },
+  {
+   "name": "large and unsized bodies",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "timeout on a slow response",
+   "ok": false,
+   "detail": "(0.005441188812255859, exit=2 timed_out=False stdout='' stderr='invalid value \"0.5\" for flag -timeout: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n')"
+  },
+  {
+   "name": "timeout covers a trickling body",
+   "ok": false,
+   "detail": "(0.004638195037841797, exit=2 timed_out=False stdout='' stderr='invalid value \"1\" for flag -timeout: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n')"
+  },
+  {
+   "name": "fetch within the timeout",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='invalid value \"2.5\" for flag -timeout: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'"
+  },
+  {
+   "name": "concurrency 3 is reached and not exceeded",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "default concurrency 4",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrency 1 is sequential",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrency above the number of URLs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "200 URLs from a file, in input order",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='usage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'"
+  },
+  {
+   "name": "200 URLs: limit 16 respected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "duplicate lines fetched separately",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "each line fetched exactly once",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unreadable file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": false,
+   "detail": "[(['--concurrency', 'x'], exit=2 timed_out=False stdout='' stderr='invalid value \"x\" for flag -concurrency: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'), (['--concurrency'], exit=2 timed_out=False stdout='' stderr='flag needs an argument: -concurrency\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'), (['--timeout', '-1'], exit=2 timed_out=False stdout='' stderr='invalid value \"-1\" for flag -timeout: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'), (['--timeout', 'soon'], exit=2 timed_out=False stdout='' stderr='invalid value \"soon\" for flag -timeout: parse error\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n'), (['--bogus'], exit=2 timed_out=False stdout='' stderr='flag provided but not defined: -bogus\\nusage: app [--concurrency N] [--timeout SECONDS] [FILE]\\n')]"
+  }
+ ]
+}

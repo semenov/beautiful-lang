@@ -1,0 +1,5 @@
+error: text uses double quotes only
+  --> main.plumb:207:20
+    |
+207 |   if trimmed[0] == '-' {
+    |                    ^

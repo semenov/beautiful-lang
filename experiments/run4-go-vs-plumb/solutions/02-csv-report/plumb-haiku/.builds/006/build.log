@@ -1,0 +1,49 @@
+error: there is no `+` on text
+  --> main.plumb:72:19
+   |
+72 |                   field += "\""
+   |                   ^^^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:90:13
+   |
+90 |             field += ch.char
+   |             ^^^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:108:13
+    |
+108 |             field += ch.char
+    |             ^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no parameter `i`
+  --> main.plumb:129:26
+    |
+129 |     if parse_field(text, i: i) is some(field_result) {
+    |                          ^^^^
+    = help: the parameter here is `pos`
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:323:18
+    |
+323 |   let group_by = by_column ?? ""
+    |                  ^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:375:20
+    |
+375 |   let amount_col = amount_index ?? 0
+    |                    ^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:376:19
+    |
+376 |   let group_col = group_index ?? 0
+    |                   ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `i` is already declared
+  --> main.plumb:382:3
+    |
+382 |   for i in 1..<records.length {
+    |   ^^^
+    = help: names can't be redeclared (no shadowing): pick another name, or use `var` and assign
+8 error(s)

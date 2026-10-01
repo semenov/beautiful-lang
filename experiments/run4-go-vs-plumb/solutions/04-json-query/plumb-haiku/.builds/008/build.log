@@ -1,0 +1,41 @@
+error: `some(...)` can't match a `Value`: it's never missing
+  --> main.plumb:137:13
+    |
+137 |   if val is some(v) {
+    |             ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:138:8
+    |
+138 |     if v is json.Value.String(s) {
+    |        ^
+error: unknown name `s`
+  --> main.plumb:139:14
+    |
+139 |       return s == target
+    |              ^
+error: unknown name `v`
+  --> main.plumb:140:15
+    |
+140 |     } else if v is json.Value.Number(n) {
+    |               ^
+error: unknown name `n`
+  --> main.plumb:141:14
+    |
+141 |       return n.text == target
+    |              ^
+error: unknown name `v`
+  --> main.plumb:142:15
+    |
+142 |     } else if v is json.Value.Bool(b) {
+    |               ^
+error: unknown name `b`
+  --> main.plumb:143:17
+    |
+143 |       return if b { "true" } else { "false" } == target
+    |                 ^
+error: unknown name `v`
+  --> main.plumb:144:15
+    |
+144 |     } else if v is json.Value.Null {
+    |               ^
+8 error(s)

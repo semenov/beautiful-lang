@@ -1,0 +1,49 @@
+error: `some(...)` can't match a `String`: it's never missing
+  --> main.plumb:114:15
+    |
+114 |   if title is some(t) {
+    |               ^^^^^^^
+error: unknown name `t`
+  --> main.plumb:115:8
+    |
+115 |     if t.is_empty() or t.contains("\n") or t.contains("\r") {
+    |        ^
+error: unknown name `t`
+  --> main.plumb:115:24
+    |
+115 |     if t.is_empty() or t.contains("\n") or t.contains("\r") {
+    |                        ^
+error: unknown name `t`
+  --> main.plumb:115:44
+    |
+115 |     if t.is_empty() or t.contains("\n") or t.contains("\r") {
+    |                                            ^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:130:19
+    |
+130 |   let title_str = title ?? ""
+    |                   ^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:153:16
+    |
+153 |     let code = c.code_points()[0] ?? 0
+    |                ^^^^^^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `some(...)` can't match a `String`: it's never missing
+  --> main.plumb:383:21
+    |
+383 |   if search_text is some(t) {
+    |                     ^^^^^^^
+error: unknown name `t`
+  --> main.plumb:384:8
+    |
+384 |     if t.is_empty() {
+    |        ^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:390:14
+    |
+390 |   let text = search_text ?? ""
+    |              ^^^^^^^^^^^
+    = help: remove `?? ...`
+9 error(s)

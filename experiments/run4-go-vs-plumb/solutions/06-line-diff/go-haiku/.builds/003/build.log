@@ -1,0 +1,2 @@
+# app
+./main.go:85:42: invalid operation: cannot indirect U (variable of type int)

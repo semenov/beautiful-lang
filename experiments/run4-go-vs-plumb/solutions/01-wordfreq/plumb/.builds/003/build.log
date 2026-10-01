@@ -1,0 +1,7 @@
+error: there is no `+` on text
+  --> main.plumb:113:11
+    |
+113 |           word += lower_char(run[k])
+    |           ^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+1 error(s)

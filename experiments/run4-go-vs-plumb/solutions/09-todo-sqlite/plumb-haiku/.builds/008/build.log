@@ -1,0 +1,5 @@
+error: expected `>`, found `|`
+  --> main.plumb:135:24
+    |
+135 |   var params: List<Int | String | Bool> = [title, false]
+    |                        ^

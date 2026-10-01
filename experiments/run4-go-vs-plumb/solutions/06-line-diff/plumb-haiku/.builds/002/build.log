@@ -1,0 +1,5 @@
+error: expected an expression, found `fn`
+  --> main.plumb:38:3
+   |
+38 |   fn lcs_helper(i: Int, j: Int) -> Int {
+   |   ^^

@@ -1,0 +1,5 @@
+error: expected `{`, found `=`
+  --> main.plumb:67:23
+   |
+67 |           match start = try args[i].to_int() catch _ {
+   |                       ^

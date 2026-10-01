@@ -1,0 +1,279 @@
+import http
+import json
+import env
+import crypto
+import time
+
+// Event status
+enum EventStatus {
+  Pending
+  Delivered
+  Failed
+}
+
+// An event that was accepted
+type Event {
+  id: Int
+  source: String
+  payload_bytes: Bytes
+  status: EventStatus = Pending
+  attempts: Int = 0
+}
+
+// The store holds all events and pending delivery queue per source
+type Store {
+  events: Map<Int, Event> = {}
+  next_id: Int = 1
+  pending_by_source: Map<String, List<Int>> = {}
+  active_sources: Set<String> = {}
+}
+
+// Configuration from environment
+type Config {
+  target_url: String
+  secret: String
+  max_attempts: Int = 5
+  backoff_ms: Int = 1000
+  attempt_timeout_ms: Int = 5000
+}
+
+type EventResponse {
+  id: Int
+  source: String
+  status: String
+  attempts: Int
+}
+
+type ErrorResp {
+  error: String
+}
+
+type IdResp {
+  id: Int
+}
+
+// Handler for POST /events
+fn post_events(req: http.Request, store: Shared<Store>, config: Config) throws -> http.Response {
+  // Parse the body as JSON to validate structure
+  let body_text = req.text()
+  let value = try json.parse(body_text)
+
+  // Validate it's an object with required fields
+  let event_obj = match value {
+    json.Value.Object(fields) => fields
+    _ => throw Failure(message: "body is not a JSON object")
+  }
+
+  // Check for source field (required, non-empty string)
+  let source_val = event_obj["source"] ?? throw Failure(message: "source is missing")
+  let source = match source_val {
+    json.Value.String(s) => s
+    _ => throw Failure(message: "source is not a string")
+  }
+
+  if source.is_empty() {
+    throw Failure(message: "source is empty")
+  }
+
+  // Check for payload field (required)
+  let _ = event_obj["payload"] ?? throw Failure(message: "payload is missing")
+
+  // Add event to store
+  var id: Int = 0
+  var should_start_worker = false
+  with s = store.lock() {
+    id = s.next_id
+    let event = Event(
+      id: id,
+      source: source,
+      payload_bytes: body_text.bytes()
+    )
+    s.events[id] = event
+    s.next_id += 1
+
+    // Add to pending queue for this source
+    if s.pending_by_source[source] is none {
+      s.pending_by_source[source] = [id]
+    } else {
+      var queue = s.pending_by_source[source] ?? []
+      queue.append(id)
+      s.pending_by_source[source] = queue
+    }
+
+    // Check if we need to start a worker for this source
+    if not s.active_sources.contains(source) {
+      s.active_sources.add(source)
+      should_start_worker = true
+    }
+  }
+
+  // Start worker task if this is a new source
+  if should_start_worker {
+    let _ = spawn process_source(source: source, store: store, config: config)
+  }
+
+  return http.json(202, IdResp(id: id))
+}
+
+// Handler for GET /events/<id>
+fn get_event(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch err {
+    throw Failure(message: "invalid event id")
+  }
+
+  with s = store.read() {
+    if s.events[id] is some(event) {
+      let status_str = match event.status {
+        EventStatus.Pending => "pending"
+        EventStatus.Delivered => "delivered"
+        EventStatus.Failed => "failed"
+      }
+
+      let response = EventResponse(
+        id: id,
+        source: event.source,
+        status: status_str,
+        attempts: event.attempts
+      )
+
+      return http.json(200, response)
+    }
+  }
+
+  return http.json(404, ErrorResp(error: "no event with that id"))
+}
+
+// Attempt to deliver a single event
+fn attempt_delivery(event_id: Int, payload_bytes: Bytes, config: Config) throws -> Bool {
+  let signature = crypto.hmac_sha256(
+    key: config.secret.bytes(),
+    data: payload_bytes
+  ).hex()
+
+  let response = try time.timeout(
+    time.millis(config.attempt_timeout_ms),
+    () => try http.send(http.ClientRequest(
+      url: config.target_url,
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-event-id": "${event_id}",
+        "x-signature": "sha256=${signature}"
+      },
+      body: payload_bytes
+    ))
+  ) catch err {
+    return false
+  }
+
+  // Success if 2xx status
+  return response.status >= 200 and response.status < 300
+}
+
+// Process delivery queue for one source continuously
+fn process_source(source: String, store: Shared<Store>, config: Config) throws {
+  while true {
+    // Check if there's an event to process
+    var should_process = false
+    var event_id_to_process = 0
+    var payload_to_deliver = Bytes()
+
+    with s = store.lock() {
+      if s.pending_by_source[source] is some(queue) and queue.length > 0 {
+        let first_id = queue[0]
+
+        // Get the event
+        if s.events[first_id] is some(event) {
+          should_process = true
+          event_id_to_process = first_id
+          payload_to_deliver = event.payload_bytes
+        }
+
+        // Remove from pending queue
+        s.pending_by_source[source] = queue.drop(1)
+      }
+    }
+
+    if not should_process {
+      // No more events for this source, wait a bit before checking again
+      try time.sleep(time.millis(100))
+      continue
+    }
+
+    // Try to deliver with retries
+    var delivered = false
+    var attempt = 0
+
+    while not delivered and attempt < config.max_attempts {
+      attempt += 1
+
+      // Update attempt count
+      with s = store.lock() {
+        if s.events[event_id_to_process] is some(event) {
+          s.events[event_id_to_process] = Event(
+            id: event.id,
+            source: event.source,
+            payload_bytes: event.payload_bytes,
+            status: event.status,
+            attempts: attempt
+          )
+        }
+      }
+
+      // Try delivery
+      if try attempt_delivery(event_id_to_process, payload_bytes: payload_to_deliver, config: config) {
+        delivered = true
+      } else {
+        // Wait before retry, if not last attempt
+        if attempt < config.max_attempts {
+          let backoff_ms = config.backoff_ms * (1.shift_left(attempt - 1))
+          try time.sleep(time.millis(backoff_ms))
+        }
+      }
+    }
+
+    // Mark as delivered or failed
+    with s = store.lock() {
+      if s.events[event_id_to_process] is some(event) {
+        let new_status = if delivered { EventStatus.Delivered } else { EventStatus.Failed }
+        s.events[event_id_to_process] = Event(
+          id: event.id,
+          source: event.source,
+          payload_bytes: event.payload_bytes,
+          status: new_status,
+          attempts: attempt
+        )
+      }
+    }
+  }
+}
+
+fn main() throws {
+  let config = try env.decode<Config>()
+
+  if config.target_url.is_empty() {
+    throw Failure(message: "TARGET_URL is required")
+  }
+
+  if config.secret.is_empty() {
+    throw Failure(message: "SECRET is required")
+  }
+
+  if config.max_attempts < 1 or config.backoff_ms < 1 or config.attempt_timeout_ms < 1 {
+    throw Failure(message: "MAX_ATTEMPTS, BACKOFF_MS, ATTEMPT_TIMEOUT_MS must be >= 1")
+  }
+
+  let store = Shared<Store>(Store())
+
+  var router = http.Router()
+  router.post("/events", req => try post_events(req, store: store, config: config))
+  router.get("/events/:id", req => try get_event(req, store: store))
+
+  let port = try (env.get("PORT") ?? "8080").to_int()
+
+  try http.serve_with(router, options: http.ServerOptions(
+    port: port,
+    host: "127.0.0.1"
+  ))
+}

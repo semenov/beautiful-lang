@@ -1,0 +1,114 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "whole record compact, key order kept",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "numbers keep exact text",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "string escapes and unicode",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where number by exact text",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where true matches boolean and string",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where unicode string, nested path",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where filters are AND-ed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where value may contain =",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where null matches null, not missing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where through non-object finds nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "where empty value; objects and arrays never match",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "select: order, missing, nested, non-object path, arrays not indexed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad lines reported with line numbers, others printed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --where",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --where abc",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --where =x",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --select a,,b",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --select a..b",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --bogus",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,23 @@
+error: `String` has no method `text_lossy`
+  --> main.plumb:36:11
+   |
+36 |     bytes.text_lossy()
+   |           ^^^^^^^^^^
+error: `String` has no method `text_lossy`
+  --> main.plumb:45:40
+   |
+45 |       all_text = "${all_text}${content.text_lossy()}"
+   |                                        ^^^^^^^^^^
+error: expected `Int`, found `String`
+  --> main.plumb:61:54
+   |
+61 |   let sorted = sortable.sorted_by(w => [w.neg_count, w.word]).take(opts.top)
+   |                                                      ^^^^^^
+   = help: parse it: `try text.to_int()`
+error: a range can only be used in `for`
+  --> main.plumb:120:13
+    |
+120 |   for i in (start..<chars.length).reversed() {
+    |             ^^^^^^^^^^^^^^^^^^^^
+    = help: write `for i in 0..<n { ... }`
+4 error(s)

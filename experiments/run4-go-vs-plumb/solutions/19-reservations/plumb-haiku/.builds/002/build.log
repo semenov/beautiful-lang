@@ -1,0 +1,5 @@
+error: expected an expression, found `type`
+  --> main.plumb:250:3
+    |
+250 |   type Config {
+    |   ^^^^

@@ -1,0 +1,277 @@
+import http
+import json
+import csv
+import db
+import env
+
+type User {
+  email: String
+  name: String
+  age: Int
+}
+
+type ImportedResponse {
+  imported: Int
+}
+
+type ErrorDetail {
+  row: Int
+  field: String
+  message: String
+}
+
+type ErrorResponse {
+  imported: Int
+  errors: List<ErrorDetail>
+}
+
+type BadCsvResponse {
+  error: String
+}
+
+type UsersResponse {
+  users: List<User>
+}
+
+type ParseResult {
+  rows: List<List<String>>
+  error: String?
+}
+
+fn validate_email(email: String, stored_emails: Map<String, Bool>, file_emails: Map<String, Bool>) -> String? {
+  // Check: exactly one @
+  var at_count = 0
+  for ch in email.chars() {
+    if ch == "@" {
+      at_count += 1
+    }
+  }
+  if at_count != 1 {
+    return "invalid email"
+  }
+
+  let at_pos = email.index_of("@") ?? return "invalid email"
+  let before = email.slice(0, at_pos)
+  let after = email.slice(at_pos + 1, email.length())
+
+  // Check: non-empty part before @
+  if before.is_empty() {
+    return "invalid email"
+  }
+
+  // Check: part after @ has . not at start/end
+  if not after.contains(".") {
+    return "invalid email"
+  }
+  let dot_pos = after.index_of(".") ?? return "invalid email"
+  if dot_pos == 0 or dot_pos == after.length() - 1 {
+    return "invalid email"
+  }
+
+  // Check: no spaces or whitespace
+  if email.contains(" ") or email.contains("\n") or email.contains("\r") or email.contains("\t") {
+    return "invalid email"
+  }
+
+  // Check: at most 254 characters
+  if email.length() > 254 {
+    return "invalid email"
+  }
+
+  // Check: not already stored (case-insensitive)
+  let lower = email.lower()
+  if stored_emails[lower] ?? false {
+    return "email already exists"
+  }
+
+  // Check: not used earlier in this file (case-insensitive)
+  if file_emails[lower] ?? false {
+    return "duplicate email in file"
+  }
+
+  return none
+}
+
+fn validate_name(name: String) -> String? {
+  let len = name.chars().length()
+  if len < 1 or len > 100 {
+    return "invalid name"
+  }
+  return none
+}
+
+fn validate_age(age_str: String) -> String? {
+  // Check: only decimal digits
+  if not age_str.is_digit() {
+    return "invalid age"
+  }
+
+  // Parse and check range 13-120
+  let age = try age_str.to_int() catch _ { return "invalid age" }
+  if age < 13 or age > 120 {
+    return "invalid age"
+  }
+
+  return none
+}
+
+fn parse_csv_body(body: String) throws -> ParseResult {
+  if body.is_empty() {
+    return ParseResult(rows: [], error: "invalid csv")
+  }
+
+  let rows = try csv.parse(body)
+  if rows.is_empty() {
+    return ParseResult(rows: [], error: "invalid csv")
+  }
+
+  return ParseResult(rows: rows, error: none)
+}
+
+fn handle_import(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let body = req.text()
+
+  // Parse CSV
+  let parse_result = try parse_csv_body(body) catch _ {
+    return http.json(400, BadCsvResponse(error: "invalid csv"))
+  }
+
+  if parse_result.error is some(e) {
+    return http.json(400, BadCsvResponse(error: e))
+  }
+
+  let rows = parse_result.rows
+  if rows.length() < 1 {
+    return http.json(400, BadCsvResponse(error: "invalid csv"))
+  }
+
+  // Check header
+  let header = rows[0]
+  if header.length() != 3 {
+    return http.json(400, BadCsvResponse(error: "invalid csv"))
+  }
+
+  // Find column indices for email, name, age
+  var email_col: Int? = none
+  var name_col: Int? = none
+  var age_col: Int? = none
+
+  for i in 0..<header.length() {
+    match header[i] {
+      "email" => { email_col = i }
+      "name" => { name_col = i }
+      "age" => { age_col = i }
+      _ => { return http.json(400, BadCsvResponse(error: "invalid csv")) }
+    }
+  }
+
+  if email_col is none or name_col is none or age_col is none {
+    return http.json(400, BadCsvResponse(error: "invalid csv"))
+  }
+
+  let email_idx = email_col ?? 0
+  let name_idx = name_col ?? 0
+  let age_idx = age_col ?? 0
+
+  // Collect stored emails from database
+  var stored_emails: Map<String, Bool> = {}
+  let existing = try conn.query<User>("select email, name, age from users", [])
+  for user in existing {
+    stored_emails[user.email] = true
+  }
+
+  // Validate rows
+  var errors: List<ErrorDetail> = []
+  var file_emails: Map<String, Bool> = {}
+  var users_to_insert: List<User> = []
+
+  for row_idx in 1..<rows.length() {
+    let row = rows[row_idx]
+
+    // Check: exactly 3 fields
+    if row.length() != 3 {
+      errors.append(ErrorDetail(row: row_idx, field: "row", message: "wrong number of fields"))
+      continue
+    }
+
+    let email = row[email_idx]
+    let name = row[name_idx]
+    let age_str = row[age_idx]
+
+    // Validate each field
+    if validate_email(email, stored_emails, file_emails) is some(msg) {
+      errors.append(ErrorDetail(row: row_idx, field: "email", message: msg))
+    } else {
+      file_emails[email.lower()] = true
+    }
+
+    if validate_name(name) is some(msg) {
+      errors.append(ErrorDetail(row: row_idx, field: "name", message: msg))
+    }
+
+    if validate_age(age_str) is some(msg) {
+      errors.append(ErrorDetail(row: row_idx, field: "age", message: msg))
+    }
+
+    // If no errors for this row, prepare to insert
+    if not errors.any(e => e.row == row_idx) {
+      let age = try age_str.to_int() ?? 0
+      users_to_insert.append(User(email: email.lower(), name: name, age: age))
+    }
+  }
+
+  // If there are errors, return them
+  if not errors.is_empty() {
+    return http.json(422, ErrorResponse(imported: 0, errors: errors))
+  }
+
+  // Insert all users in one transaction
+  let _ = try conn.transaction(() => {
+    for user in users_to_insert {
+      try conn.execute("insert into users (email, name, age) values (?, ?, ?)", [user.email, user.name, user.age])
+    }
+    return ()
+  })
+
+  return http.json(201, ImportedResponse(imported: users_to_insert.length()))
+}
+
+fn handle_users(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let users = try conn.query<User>("select email, name, age from users order by email asc", [])
+  return http.json(200, UsersResponse(users: users))
+}
+
+fn handle_not_found() -> http.Response {
+  return http.json(404, BadCsvResponse(error: "not found"))
+}
+
+fn handle_method_not_allowed() -> http.Response {
+  return http.json(405, BadCsvResponse(error: "method not allowed"))
+}
+
+fn main() throws {
+  let port_str = env.get("PORT") ?? "8080"
+  let port = try port_str.to_int()
+  let db_path = env.get("DB_PATH") ?? "/data/users.db"
+
+  with conn = try db.open(db_path) {
+    // Create table if it doesn't exist
+    try conn.execute("create table if not exists users (email text primary key, name text, age integer)", [])
+
+    var router = http.Router()
+
+    router.post("/import", req => try handle_import(req, conn))
+    router.get("/users", req => try handle_users(req, conn))
+
+    // Handle 404 and 405
+    router.any("*", req => {
+      if req.path == "/import" or req.path == "/users" {
+        return handle_method_not_allowed()
+      } else {
+        return handle_not_found()
+      }
+    })
+
+    try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  }
+}

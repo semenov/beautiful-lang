@@ -1,0 +1,7 @@
+error: there is no `+` on text
+  --> main.plumb:151:13
+    |
+151 |             num_str += c
+    |             ^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+1 error(s)

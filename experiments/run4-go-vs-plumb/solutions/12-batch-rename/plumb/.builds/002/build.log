@@ -1,0 +1,7 @@
+error: there is no `+` on text
+  --> main.plumb:341:18
+    |
+341 |       new_name = cs.take(run_start).join("") + num.pad_start(width, fill: "0") + cs.drop(run_end).join("")
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+1 error(s)

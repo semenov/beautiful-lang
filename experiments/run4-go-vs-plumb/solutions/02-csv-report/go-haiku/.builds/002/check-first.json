@@ -1,0 +1,119 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stdin, columns in any order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "exact cents, no float error",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "negatives and zero",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "quoted fields: commas, quotes, newlines; output quoted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CRLF and no final newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty lines skipped, empty value is a group",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode values sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "header only",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad records skipped with line numbers, exit 1",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,3.00\\ne,5.00\\n' stderr='line 3: invalid amount\\nline 4: invalid amount\\nline 5: invalid amount\\nline 7: invalid amount\\nline 8: invalid amount\\nline 9: invalid amount\\nline 10: record on line 10: wrong number of fields\\nline 11: record on line 11: wrong number of fields\\n'"
+  },
+  {
+   "name": "line numbers count line breaks inside quotes",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,1.00\\ne,2.00\\n' stderr='line 3: invalid amount\\nline 4: invalid amount\\n'"
+  },
+  {
+   "name": "text after closing quote is a bad record",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unterminated quote ends input",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,1.00\\n' stderr='line 3: record on line 3; parse error on line 4, column 5: extraneous or missing \" in quoted-field\\n'"
+  },
+  {
+   "name": "quote inside unquoted field is ordinary",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\n' stderr='line 2: parse error on line 2, column 2: bare \" in non-quoted-field\\n'"
+  },
+  {
+   "name": "missing amount column",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing by column (case-sensitive)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\n' stderr=''"
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='flag needs an argument: -by\\nusage: app --by COLUMN [FILE]\\n'"
+  },
+  {
+   "name": "usage error --by k --bogus",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='flag provided but not defined: -bogus\\nusage: app --by COLUMN [FILE]\\n'"
+  },
+  {
+   "name": "usage error --by k a.csv b.csv",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

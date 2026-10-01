@@ -1,0 +1,8 @@
+import process
+
+fn main() {
+  let args = process.args()
+  for i in 0..<args.length {
+    print("args[${i}] = ${args[i]}")
+  }
+}

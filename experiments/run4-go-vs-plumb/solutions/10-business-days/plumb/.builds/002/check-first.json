@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "[(['between', '2025-12-22', '2025-12-29', '--holidays', 'hol.txt'], '3\\n', exit=0 timed_out=False stdout='7\\n' stderr=''), (['add', '2025-12-24', '1', '--holidays', 'hol.txt'], '2025-12-29\\n', exit=0 timed_out=False stdout='2025-12-25\\n' stderr='')]"
+  },
+  {
+   "name": "between, default weekend",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "between, END before START is negative",
+   "ok": false,
+   "detail": "[(['between', '2025-12-29', '2025-12-22', '--holidays', 'hol.txt'], '-3\\n', exit=0 timed_out=False stdout='-7\\n' stderr='')]"
+  },
+  {
+   "name": "between across leap day and year end",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "long range",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "add forwards and backwards",
+   "ok": false,
+   "detail": "[(['add', '2025-12-29', '-1', '--holidays', 'hol.txt'], '2025-12-24\\n', exit=0 timed_out=False stdout='2025-12-26\\n' stderr='')]"
+  },
+  {
+   "name": "add 0",
+   "ok": false,
+   "detail": "[(['add', '2025-12-25', '0', '--holidays', 'hol.txt'], '2025-12-29\\n', exit=0 timed_out=False stdout='2025-12-25\\n' stderr='')]"
+  },
+  {
+   "name": "leap days",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "add a large N",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "custom weekend fri,sat",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no weekend",
+   "ok": false,
+   "detail": "[(['between', '2025-12-22', '2025-12-29', '--weekend', '', '--holidays', 'hol.txt'], '5\\n', exit=0 timed_out=False stdout='9\\n' stderr='')]"
+  },
+  {
+   "name": "holidays file: comments, blanks, whitespace, weekend holiday",
+   "ok": false,
+   "detail": "[(['between', '2025-07-01', '2025-07-11', '--holidays', 'messy.txt'], '6\\n', exit=0 timed_out=False stdout='10\\n' stderr=''), (['add', '2025-07-03', '1', '--holidays', 'messy.txt'], '2025-07-07\\n', exit=0 timed_out=False stdout='2025-07-04\\n' stderr=''), (['add', '2025-07-07', '1', '--holidays', 'messy.txt'], '2025-07-09\\n', exit=0 timed_out=False stdout='2025-07-08\\n' stderr='')]"
+  },
+  {
+   "name": "a month of holidays",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='2025-08-01\\n' stderr=''"
+  },
+  {
+   "name": "invalid dates rejected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad holidays line",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing holidays file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

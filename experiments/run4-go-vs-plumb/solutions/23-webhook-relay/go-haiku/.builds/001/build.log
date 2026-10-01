@@ -1,0 +1,3 @@
+# app
+./main.go:9:2: "fmt" imported and not used
+./main.go:12:2: "net" imported and not used

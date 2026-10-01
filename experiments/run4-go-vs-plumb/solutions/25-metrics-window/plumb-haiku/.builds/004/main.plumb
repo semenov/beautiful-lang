@@ -1,0 +1,254 @@
+import json
+import http
+import env
+
+// A single metric sample
+type Sample {
+  name: String
+  value: Float
+  ts: Int
+}
+
+// Response for POST /metrics
+type MetricsResponse {
+  accepted: Int
+  dropped: Int
+}
+
+// Response for GET /aggregate
+type AggregateResponse {
+  name: String
+  count: Int
+  sum: Float
+  min: Float? = none
+  max: Float? = none
+  p50: Float? = none
+  p99: Float? = none
+}
+
+// Response for GET /stats
+type StatsResponse {
+  accepted: Int
+  dropped: Int
+  now: Int?
+}
+
+// Error response
+type ErrorResponse {
+  error: String
+}
+
+// Global state for the service
+type ServiceState {
+  // Map from metric name to list of samples in the window
+  samples: Map<String, List<Sample>> = {}
+  // Current time (max ts seen so far)
+  now: Int? = none
+  // Total accepted and dropped samples
+  total_accepted: Int = 0
+  total_dropped: Int = 0
+}
+
+fn main() throws {
+  let port_str = env.get("PORT") ?? "8080"
+  let port = try port_str.to_int()
+
+  let window_ms_str = env.get("WINDOW_MS") ?? "60000"
+  let window_ms = try window_ms_str.to_int()
+
+  let state = Shared<ServiceState>(ServiceState())
+
+  var router = http.Router()
+  router.post("/metrics", req => try handle_metrics(req, state: state, window_ms: window_ms))
+  router.get("/aggregate", req => try handle_aggregate(req, state: state, window_ms: window_ms))
+  router.get("/stats", req => try handle_stats(req, state: state))
+
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}
+
+fn handle_metrics(req: http.Request, state: Shared<ServiceState>, window_ms: Int) throws -> http.Response {
+  // Parse the request body
+  let body_text = req.text()
+
+  // Try to parse as a single sample or array of samples
+  let samples = try parse_samples(body_text) catch err {
+    let error = ErrorResponse(error: err.message())
+    return http.json(400, error)
+  }
+
+  var accepted = 0
+  var dropped = 0
+
+  // Process each sample
+  for sample in samples {
+    let result = try process_sample(sample, state: state, window_ms: window_ms)
+    if result {
+      accepted += 1
+    } else {
+      dropped += 1
+    }
+  }
+
+  let response = MetricsResponse(accepted: accepted, dropped: dropped)
+  return http.json(200, response)
+}
+
+fn parse_samples(body_text: String) throws -> List<Sample> {
+  let trimmed = body_text.trim()
+
+  // Try parsing as array first
+  if trimmed.starts_with("[") {
+    let array = try json.decode<List<Sample>>(body_text)
+    return array
+  } else if trimmed.starts_with("{") {
+    // Single object
+    let sample = try json.decode<Sample>(body_text)
+    return [sample]
+  } else {
+    return throw Failure(message: "Invalid JSON")
+  }
+}
+
+fn process_sample(sample: Sample, state: Shared<ServiceState>, window_ms: Int) throws -> Bool {
+  with s = state.lock() {
+    // Update "now" to max of current and sample.ts
+    let prev_now = s.now ?? 0
+    let new_now = if prev_now > sample.ts { prev_now } else { sample.ts }
+    s.now = new_now
+
+    // Check if sample is late (ts <= now - window_ms)
+    let cutoff = new_now - window_ms
+    if sample.ts <= cutoff {
+      s.total_dropped += 1
+      return false
+    }
+
+    // Sample is accepted, add to window
+    let existing = s.samples[sample.name]
+    if existing is some(lst) {
+      // List already exists, add to it
+      var new_samples = lst
+      new_samples.append(sample)
+      s.samples[sample.name] = new_samples
+    } else {
+      // Create new list
+      s.samples[sample.name] = [sample]
+    }
+
+    // Remove samples that are now outside the window
+    let samples_list = s.samples[sample.name]
+    if samples_list is some(lst) {
+      s.samples[sample.name] = lst.filter(x => x.ts > cutoff)
+    }
+
+    s.total_accepted += 1
+    return true
+  }
+}
+
+fn handle_aggregate(req: http.Request, state: Shared<ServiceState>, window_ms: Int) throws -> http.Response {
+  let name = req.query("name")
+  let name_str = if name is some(n) { n } else {
+    let error = ErrorResponse(error: "Missing required parameter: name")
+    return http.json(400, error)
+  }
+
+  with s = state.read() {
+    let cutoff = (s.now ?? 0) - window_ms
+
+    if s.samples[name_str] is none {
+      // No samples for this name
+      let response = AggregateResponse(
+        name: name_str,
+        count: 0,
+        sum: 0.0
+      )
+      return http.json(200, response)
+    }
+
+    let samples_list = s.samples[name_str]
+    let filtered = if samples_list is some(lst) {
+      lst.filter(x => x.ts > cutoff)
+    } else {
+      []
+    }
+
+    if filtered.length == 0 {
+      let response = AggregateResponse(
+        name: name_str,
+        count: 0,
+        sum: 0.0
+      )
+      return http.json(200, response)
+    }
+
+    // Calculate aggregates
+    let count = filtered.length
+    var sum = 0.0
+    var min_val = filtered[0].value
+    var max_val = filtered[0].value
+
+    for sample in filtered {
+      sum += sample.value
+      if sample.value < min_val {
+        min_val = sample.value
+      }
+      if sample.value > max_val {
+        max_val = sample.value
+      }
+    }
+
+    // Calculate percentiles
+    let sorted_values = filtered.map(x => x.value).sorted()
+    let p50 = calculate_percentile(sorted_values, percentile: 50)
+    let p99 = calculate_percentile(sorted_values, percentile: 99)
+
+    let response = AggregateResponse(
+      name: name_str,
+      count: count,
+      sum: sum,
+      min: min_val,
+      max: max_val,
+      p50: p50,
+      p99: p99
+    )
+    return http.json(200, response)
+  }
+}
+
+fn calculate_percentile(values: List<Float>, percentile: Int) -> Float? {
+  if values.length == 0 {
+    return none
+  }
+
+  // Nearest-rank method: position = ceil(p/100 * n)
+  // where n is the count and position is 1-based
+  let count = values.length
+  let numerator = percentile * count
+  var position = numerator.div(100)
+  if numerator % 100 != 0 {
+    position += 1
+  }
+
+  // Convert to 0-based index
+  let index = position - 1
+  if index < 0 {
+    return values[0]
+  }
+  if index >= count {
+    return values[count - 1]
+  }
+
+  return values[index]
+}
+
+fn handle_stats(req: http.Request, state: Shared<ServiceState>) throws -> http.Response {
+  with s = state.read() {
+    let response = StatsResponse(
+      accepted: s.total_accepted,
+      dropped: s.total_dropped,
+      now: s.now
+    )
+    return http.json(200, response)
+  }
+}

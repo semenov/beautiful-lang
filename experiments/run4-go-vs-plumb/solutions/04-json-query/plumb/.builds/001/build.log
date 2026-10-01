@@ -1,0 +1,262 @@
+error: there is no `+` on text
+  --> main.plumb:61:7
+   |
+61 |       out += self.cs[self.pos].character()
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:73:7
+   |
+73 |       out += "-"
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:77:7
+   |
+77 |       out += "0"
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:80:7
+   |
+80 |       out += try self.read_digits()
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:84:14
+   |
+84 |       out += "." + (try self.read_digits())
+   |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:87:7
+   |
+87 |       out += self.cs[self.pos].character()
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:90:9
+   |
+90 |         out += self.cs[self.pos].character()
+   |         ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:93:7
+   |
+93 |       out += try self.read_digits()
+   |       ^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:132:9
+    |
+132 |         out += c.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:138:9
+    |
+138 |         out += "\""
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:140:9
+    |
+140 |         out += "\\"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:142:9
+    |
+142 |         out += "/"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:144:9
+    |
+144 |         out += 8.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:146:9
+    |
+146 |         out += 12.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:148:9
+    |
+148 |         out += 10.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:150:9
+    |
+150 |         out += 13.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:152:9
+    |
+152 |         out += 9.character()
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:161:15
+    |
+161 |               out += (0x10000 + (u - 0xD800) * 1024 + (lo - 0xDC00)).character()
+    |               ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:165:15
+    |
+165 |               out += 0xFFFD.character()
+    |               ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:168:13
+    |
+168 |             out += 0xFFFD.character()
+    |             ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:171:11
+    |
+171 |           out += u.character()
+    |           ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:295:10
+    |
+295 |   return "00" + digits.slice(from: n.div(16), to: n.div(16) + 1) + digits.slice(from: n % 16, to: n % 16 + 1)
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:302:7
+    |
+302 |       out += "\\\""
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:304:7
+    |
+304 |       out += "\\\\"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:306:7
+    |
+306 |       out += "\\b"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:308:7
+    |
+308 |       out += "\\t"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:310:7
+    |
+310 |       out += "\\n"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:312:7
+    |
+312 |       out += "\\f"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:314:7
+    |
+314 |       out += "\\r"
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:316:14
+    |
+316 |       out += "\\u" + hex2(c)
+    |              ^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:318:7
+    |
+318 |       out += c.character()
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:321:10
+    |
+321 |   return out + "\""
+    |          ^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:328:19
+    |
+328 |     Arr(items) => "[" + items.map(x => render(x)).join(",") + "]"
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:336:18
+    |
+336 |     parts.append(quote(keys[i]) + ":" + render(vals[i]))
+    |                  ^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:338:10
+    |
+338 |   return "{" + parts.join(",") + "}"
+    |          ^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: `bad_usage` returns `Never`, so it must not finish
+  --> main.plumb:350:25
+    |
+350 | fn bad_usage() -> Never {
+    |                         ^
+    = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:352:3
+    |
+352 |   process.exit(64)
+    |   ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `io`
+  --> main.plumb:395:13
+    |
+395 |   while try io.read_line() is some(line) {
+    |             ^^
+error: unknown name `line`
+  --> main.plumb:397:8
+    |
+397 |     if line.trim().is_empty() {
+    |        ^^^^
+error: unknown name `line`
+  --> main.plumb:400:30
+    |
+400 |     let rec = try parse_line(line) catch _ {
+    |                              ^^^^
+error: there is no `+` on text
+  --> main.plumb:425:24
+    |
+425 |           parts.append(quote(p) + ":" + render(found))
+    |                        ^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:427:15
+    |
+427 |         print("{" + parts.join(",") + "}")
+    |               ^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: unknown name `process`
+  --> main.plumb:440:22
+    |
+440 |   let q = parse_args(process.args())
+    |                      ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:443:5
+    |
+443 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+44 error(s)

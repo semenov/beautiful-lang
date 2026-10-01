@@ -1,0 +1,248 @@
+import cli
+import files
+import http
+import io
+import process
+import time
+
+let usage = "usage: app [--concurrency N] [--timeout SECONDS] [FILE]"
+let max_redirects = 10
+
+type Options {
+  // --concurrency N: how many URLs are fetched at the same time
+  concurrency: Int = 4
+  // --timeout SECONDS: the limit for one URL, redirects included
+  timeout: Float = 10.0
+  // the FILE to read (standard input when there is none)
+  args: List<String> = []
+}
+
+enum Outcome {
+  Answer(status: Int, bytes: Int)
+  Failed(kind: String)
+}
+
+type TooManyRedirects implements Error {
+  fn message(self) -> String {
+    return "more than ${max_redirects} redirects"
+  }
+}
+
+fn usage_error(detail: String) -> Never {
+  eprint("${usage}")
+  if not detail.is_empty() {
+    eprint("  (${detail})")
+  }
+  process.exit(64)
+}
+
+fn read_input(file: String?) -> String {
+  if file is some(path) {
+    let bytes = try files.read_bytes(path) catch err {
+      eprint("error: cannot read ${path}")
+      process.exit(2)
+    }
+    return bytes.text_lossy()
+  }
+  let bytes = try io.read_all() catch err {
+    eprint("error: cannot read standard input")
+    process.exit(2)
+  }
+  return bytes.text_lossy()
+}
+
+fn parse_urls(text: String) -> List<String> {
+  var urls: List<String> = []
+  for raw in text.split("\n") {
+    let line = raw.trim()
+    if line.is_empty() or line.starts_with("#") {
+      continue
+    }
+    urls.append(line)
+  }
+  return urls
+}
+
+// "scheme://authority" of an http(s) URL with a non-empty host; none otherwise.
+fn origin_of(url: String) -> String? {
+  let lowered = url.lower()
+  var scheme_end = 0
+  if lowered.starts_with("http://") {
+    scheme_end = 7
+  } else if lowered.starts_with("https://") {
+    scheme_end = 8
+  } else {
+    return none
+  }
+  if url.words().length != 1 {
+    return none
+  }
+  let rest = url.slice(from: scheme_end, to: url.length)
+  var end = rest.length
+  for mark in ["/", "?", "#"] {
+    if rest.index_of(mark) is some(i) and i < end {
+      end = i
+    }
+  }
+  var authority = rest.slice(from: 0, to: end)
+  if authority.last_index_of("@") is some(at) {
+    authority = authority.slice(from: at + 1, to: authority.length)
+  }
+  var host = authority
+  if not authority.starts_with("[") and authority.index_of(":") is some(colon) {
+    host = authority.slice(from: 0, to: colon)
+  }
+  if host.is_empty() {
+    return none
+  }
+  return url.slice(from: 0, to: scheme_end + end)
+}
+
+// The text of a URL without its #fragment.
+fn drop_fragment(url: String) -> String {
+  if url.index_of("#") is some(i) {
+    return url.slice(from: 0, to: i)
+  }
+  return url
+}
+
+// Where a Location header leads from `base` (it may be relative).
+fn resolve(base: String, location: String) -> String {
+  let loc = location.trim()
+  let lowered = loc.lower()
+  if lowered.starts_with("http://") or lowered.starts_with("https://") {
+    return drop_fragment(loc)
+  }
+  let origin = origin_of(base) ?? base
+  if loc.starts_with("//") {
+    let scheme = origin.slice(from: 0, to: origin.index_of("://") ?? 0)
+    return drop_fragment("${scheme}:${loc}")
+  }
+  if loc.starts_with("/") {
+    return drop_fragment("${origin}${loc}")
+  }
+  // the base without its query and fragment
+  var path = drop_fragment(base)
+  if path.index_of("?") is some(q) {
+    path = path.slice(from: 0, to: q)
+  }
+  if loc.starts_with("?") {
+    return drop_fragment("${path}${loc}")
+  }
+  if loc.starts_with("#") or loc.is_empty() {
+    return path
+  }
+  // replace the last path segment
+  var dir = "${origin}/"
+  if path.length > origin.length {
+    if path.last_index_of("/") is some(slash) and slash >= origin.length {
+      dir = path.slice(from: 0, to: slash + 1)
+    }
+  }
+  return drop_fragment("${dir}${loc}")
+}
+
+fn is_redirect(status: Int) -> Bool {
+  return status == 301 or status == 302 or status == 303 or status == 307 or status == 308
+}
+
+// One GET, redirects followed by hand (at most 10), all within `limit`.
+fn follow(url: String, limit: time.Duration) throws -> Outcome {
+  var current = url
+  var followed = 0
+  while true {
+    let res = try http.send(http.ClientRequest(url: current, follow_redirects: false, timeout: limit))
+    if is_redirect(res.status) and res.headers["location"] is some(location) {
+      if followed >= max_redirects {
+        throw TooManyRedirects()
+      }
+      followed += 1
+      let next = resolve(current, location: location)
+      if origin_of(next) is none {
+        return Failed(kind: "other")
+      }
+      current = next
+    } else {
+      return Answer(status: res.status, bytes: res.body.length)
+    }
+  }
+  return Failed(kind: "other")
+}
+
+fn kind_of(err: Error) -> String {
+  if err is time.TimedOut {
+    return "timeout"
+  }
+  if err is TooManyRedirects {
+    return "redirects"
+  }
+  let text = err.message()
+  if text.contains("no answer in time") or text.contains("timed out") or text.contains("Timeout") {
+    return "timeout"
+  }
+  if text.contains("Failed to connect") or text.contains("Couldn't connect") or text.contains("Could not resolve") {
+    return "connect"
+  }
+  return "other"
+}
+
+fn fetch(url: String, limit: time.Duration) -> Outcome {
+  if origin_of(url) is none {
+    return Failed(kind: "invalid-url")
+  }
+  let outcome = try time.timeout(limit, () => try follow(url, limit: limit)) catch err {
+    return Failed(kind: kind_of(err))
+  }
+  return outcome
+}
+
+fn seconds_to_duration(seconds: Float) -> time.Duration {
+  // a day is enough of a "no limit"; it also keeps the nanoseconds in range
+  let capped = if seconds > 86400.0 { 86400.0 } else { seconds }
+  let nanos = (capped * 1000000000.0).round()
+  return time.nanos(if nanos < 1 { 1 } else { nanos })
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>() catch err {
+    usage_error(err.message())
+  }
+  if opts.concurrency < 1 {
+    usage_error("--concurrency must be a whole number of at least 1")
+  }
+  if opts.timeout <= 0.0 {
+    usage_error("--timeout must be greater than 0")
+  }
+  if opts.args.length > 1 {
+    usage_error("more than one FILE")
+  }
+  let urls = parse_urls(read_input(opts.args.first()))
+  let limit = seconds_to_duration(opts.timeout)
+  let outcomes = urls.parallel_map(limit: opts.concurrency, transform: u => fetch(u, limit: limit))
+
+  var ok = 0
+  var bad = 0
+  var failed = 0
+  var out: List<String> = []
+  for i in 0..<urls.length {
+    match outcomes[i] {
+      Answer(status, bytes) => {
+        if status >= 200 and status < 300 {
+          ok += 1
+        } else {
+          bad += 1
+        }
+        out.append("${urls[i]} ${status} ${bytes}")
+      }
+      Failed(kind) => {
+        failed += 1
+        out.append("${urls[i]} error ${kind}")
+      }
+    }
+  }
+  out.append("total ${urls.length} ok ${ok} bad-status ${bad} failed ${failed}")
+  print(out.join("\n"))
+  if bad > 0 or failed > 0 {
+    process.exit(1)
+  }
+}

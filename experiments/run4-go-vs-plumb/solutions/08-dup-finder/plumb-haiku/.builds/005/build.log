@@ -1,0 +1,7 @@
+error: `sorted_by` needs a key that can be ordered, but this is `SortKey`
+  --> main.plumb:141:12
+    |
+141 |   groups = groups.sorted_by(g => SortKey(size_neg: -g.size, hash: g.hash))
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a number, text, Decimal, or a list of them compared in turn: `sorted_by(p => [p.last_name, p.first_name])`
+1 error(s)

@@ -1,0 +1,135 @@
+import io
+import files
+import process
+
+type Options {
+  top: Int = 10
+  min_length: Int = 1
+  paths: List<String> = []
+}
+
+fn usage(msg: String) -> Never {
+  eprint("usage: app [--top N] [--min-length L] [FILE...] (${msg})")
+  process.exit(64)
+}
+
+// A whole number >= minimum. Digits only; a number too big for an Int is
+// still a valid number, so it becomes the largest Int.
+fn parse_count(text: String, minimum: Int, option: String) -> Int {
+  if not text.is_digit() {
+    usage("${option} needs a whole number >= ${minimum}")
+  }
+  let n = try text.to_int() catch err {
+    9223372036854775807
+  }
+  if n < minimum {
+    usage("${option} needs a whole number >= ${minimum}")
+  }
+  return n
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var opts = Options()
+  var i = 0
+  var options_done = false
+  while i < args.length {
+    let arg = args[i]
+    if options_done or arg == "-" or not arg.starts_with("-") {
+      opts.paths.append(arg)
+    } else if arg == "--" {
+      options_done = true
+    } else if arg == "--top" or arg == "--min-length" {
+      if i + 1 >= args.length {
+        usage("${arg} needs a value")
+      }
+      i += 1
+      if arg == "--top" {
+        opts.top = parse_count(args[i], minimum: 0, option: arg)
+      } else {
+        opts.min_length = parse_count(args[i], minimum: 1, option: arg)
+      }
+    } else {
+      usage("unknown option ${arg}")
+    }
+    i += 1
+  }
+  return opts
+}
+
+// Simple lowercase mapping, one character to one character.
+fn lower_char(c: String) -> String {
+  if c == "\u{130}" {
+    return "i"
+  }
+  let l = c.lower()
+  if l.length == 1 {
+    return l
+  }
+  return c
+}
+
+fn is_word_char(c: String) -> Bool {
+  return c == "'" or c.is_letter()
+}
+
+fn main() throws {
+  let opts = parse_args(process.args())
+
+  var data = Bytes()
+  if opts.paths.is_empty() {
+    data = try io.read_all()
+  } else {
+    for p in opts.paths {
+      let b = try files.read_bytes(p) catch err {
+        eprint("error: cannot read ${p}")
+        process.exit(2)
+      }
+      data.append_all(b)
+    }
+  }
+  let text = data.text_lossy()
+
+  var counts: Map<String, Int> = {}
+  var total = 0
+  var run: List<String> = []
+  let chars = text.chars()
+  var idx = 0
+  while idx <= chars.length {
+    let c = if idx < chars.length { chars[idx] } else { "" }
+    if c != "" and is_word_char(c) {
+      run.append(c)
+    } else {
+      var start = 0
+      var end = run.length
+      while start < end and run[start] == "'" {
+        start += 1
+      }
+      while end > start and run[end - 1] == "'" {
+        end -= 1
+      }
+      if end - start >= opts.min_length {
+        var parts: List<String> = []
+        for k in start..<end {
+          parts.append(lower_char(run[k]))
+        }
+        let word = parts.join("")
+        counts[word] = (counts[word] ?? 0) + 1
+        total += 1
+      }
+      run = []
+    }
+    idx += 1
+  }
+
+  let words = counts.keys().sorted()
+  let ranked = words.sorted_by(w => 0 - (counts[w] ?? 0))
+  var shown = 0
+  for w in ranked {
+    if shown >= opts.top {
+      break
+    }
+    print("${w} ${counts[w] ?? 0}")
+    shown += 1
+  }
+  print("total ${total} unique ${counts.length}")
+}

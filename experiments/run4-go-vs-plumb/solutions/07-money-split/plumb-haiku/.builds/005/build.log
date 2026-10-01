@@ -1,0 +1,13 @@
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:153:18
+    |
+153 |     let debtor = debtor_name ?? ""
+    |                  ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:154:20
+    |
+154 |     let creditor = creditor_name ?? ""
+    |                    ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+2 error(s)

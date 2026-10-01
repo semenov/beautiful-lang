@@ -1,0 +1,25 @@
+error: there is no `+` on text
+  --> main.plumb:136:13
+    |
+136 |   var dir = origin + "/"
+    |             ^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:235:9
+    |
+235 |         out += "${urls[i]} ${status} ${bytes}\n"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:239:9
+    |
+239 |         out += "${urls[i]} error ${kind}\n"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:243:3
+    |
+243 |   out += "total ${urls.length} ok ${ok} bad-status ${bad} failed ${failed}"
+    |   ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+4 error(s)

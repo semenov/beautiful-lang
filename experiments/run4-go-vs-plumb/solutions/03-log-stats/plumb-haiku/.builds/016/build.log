@@ -1,0 +1,7 @@
+error: expected `Int`, found `String`
+  --> main.plumb:68:56
+   |
+68 |   let sorted = entries.sorted_by(e => [-e.value.count, e.value.endpoint])
+   |                                                        ^^^^^^^^^^^^^^^^
+   = help: parse it: `try text.to_int()`
+1 error(s)

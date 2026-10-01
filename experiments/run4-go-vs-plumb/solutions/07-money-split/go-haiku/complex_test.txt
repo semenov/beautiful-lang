@@ -1,0 +1,4 @@
+# Complex test with multiple expenses
+alice 100 alice,bob,charlie
+bob 100 bob,charlie,dave
+charlie 100 charlie,dave,alice

@@ -1,0 +1,151 @@
+import env
+import http
+import process
+import time
+
+type Config {
+  port: Int
+  upstream: String
+  cache_ttl_ms: Int = 60000
+  cache_max_entries: Int = 1000
+  upstream_timeout_ms: Int = 5000
+}
+
+// What the proxy answers with: the upstream's answer or one of ours.
+type Answer {
+  status: Int
+  body: Bytes
+  content_type: String?
+  cacheable: Bool
+}
+
+type Entry {
+  answer: Answer
+  stored: time.Instant
+  last_used: Int
+}
+
+type State {
+  entries: Map<String, Entry> = {}
+  // keys with an upstream request in progress -> the requests waiting for it
+  inflight: Map<String, List<Channel<Answer>>> = {}
+  // a counter standing for "when": the entry with the lowest one is the
+  // least recently used
+  clock: Int = 0
+}
+
+fn error_answer(status: Int, json_body: String) -> Answer {
+  return Answer(status: status, body: json_body.bytes(), content_type: "application/json", cacheable: false)
+}
+
+// Asks the upstream. Never fails: every outcome is an Answer.
+fn fetch(cfg: Config, key: String) -> Answer {
+  let timeout = time.millis(cfg.upstream_timeout_ms)
+  let request = http.ClientRequest(
+    url: "${cfg.upstream}${key}",
+    follow_redirects: false,
+    timeout: timeout.plus(time.seconds(30)),
+  )
+  let res = try time.timeout(timeout, () => try http.send(request)) catch err {
+    if err is time.TimedOut {
+      return error_answer(504, "{\"error\": \"upstream timeout\"}")
+    }
+    return error_answer(502, "{\"error\": \"upstream unavailable\"}")
+  }
+  if res.status >= 500 {
+    return error_answer(502, "{\"error\": \"upstream error\", \"status\": ${res.status}}")
+  }
+  return Answer(
+    status: res.status,
+    body: res.body,
+    content_type: res.headers["content-type"],
+    cacheable: res.status == 200,
+  )
+}
+
+fn respond(answer: Answer, hit: Bool) -> http.Response {
+  var headers: Map<String, String> = {"x-cache": if hit { "HIT" } else { "MISS" }}
+  if answer.content_type is some(ct) {
+    headers["content-type"] = ct
+  }
+  return http.Response(status: answer.status, body: answer.body, headers: headers)
+}
+
+// The least recently used key; the map is not empty.
+fn oldest(entries: Map<String, Entry>) -> String? {
+  let e = entries.entries().min_by(e => e.value.last_used)
+  return e?.key
+}
+
+fn handle(req: http.Request, cfg: Config, state: Shared<State>) throws -> http.Response {
+  if req.method != "GET" {
+    return respond(error_answer(405, "{\"error\": \"method not allowed\"}"), hit: true)
+      .with_header("allow", "GET")
+  }
+  var key = req.raw_path
+  if req.raw_query != "" {
+    key = "${key}?${req.raw_query}"
+  }
+  let ttl = time.millis(cfg.cache_ttl_ms)
+  var waiting: Channel<Answer>? = none
+  with s = state.lock() {
+    if s.entries[key] is some(entry) {
+      if entry.stored.elapsed().is_shorter_than(ttl) {
+        s.clock += 1
+        s.entries[key].last_used = s.clock
+        return respond(entry.answer, hit: true)
+      }
+      s.entries.remove(key)
+    }
+    if s.inflight.contains_key(key) {
+      let ch = Channel<Answer>(capacity: 1)
+      s.inflight[key].append(ch)
+      waiting = ch
+    } else {
+      s.inflight[key] = []
+    }
+  }
+  if waiting is some(ch) {
+    let answer = try ch.receive() ?? throw Failure(message: "coalesced request lost")
+    return respond(answer, hit: true)
+  }
+
+  let answer = fetch(cfg, key: key)
+  var waiters: List<Channel<Answer>> = []
+  with s = state.lock() {
+    waiters = s.inflight.take(key) ?? []
+    if answer.cacheable {
+      if not s.entries.contains_key(key) and s.entries.entries().length >= cfg.cache_max_entries {
+        if oldest(s.entries) is some(victim) {
+          s.entries.remove(victim)
+        }
+      }
+      s.clock += 1
+      s.entries[key] = Entry(answer: answer, stored: time.now(), last_used: s.clock)
+    }
+  }
+  for ch in waiters {
+    let _ = ch.try_send(answer)
+  }
+  return respond(answer, hit: false)
+}
+
+fn make_router(cfg: Config, state: Shared<State>) -> http.Router {
+  var router = http.Router()
+  router.any("/", req => try handle(req, cfg: cfg, state: state))
+  router.any("/*rest", req => try handle(req, cfg: cfg, state: state))
+  return router
+}
+
+fn main() throws {
+  let cfg = try env.decode<Config>() catch err {
+    eprint("error: ${err.message()}")
+    process.exit(2)
+  }
+  if cfg.cache_ttl_ms < 1 or cfg.cache_max_entries < 1 or cfg.upstream_timeout_ms < 1 {
+    eprint("error: CACHE_TTL_MS, CACHE_MAX_ENTRIES and UPSTREAM_TIMEOUT_MS must be at least 1")
+    process.exit(2)
+  }
+  let router = make_router(cfg, Shared<State>(State()))
+  try http.serve_with(router, options: http.ServerOptions(port: cfg.port, host: "127.0.0.1"))
+}

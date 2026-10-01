@@ -1,0 +1,7 @@
+error: `sql` is imported but not used
+  --> main.plumb:5:8
+  |
+5 | import sql
+  |        ^^^
+  = help: remove the import
+1 error(s)

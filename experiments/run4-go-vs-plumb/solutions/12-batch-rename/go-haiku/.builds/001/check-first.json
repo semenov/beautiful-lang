@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'IMG_0003.JPG': 'content of IMG_0003.JPG', 'IMG_0012.JPG': 'content of IMG_0012.JPG', 'notes.txt': 'content of notes.txt'})"
+  },
+  {
+   "name": "dry run changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "pattern must match the whole name",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'ab': 'content of ab', 'a': 'content of a', '123b': 'content of 123b', 'a123': 'content of a123', '123': 'content of 123'})"
+  },
+  {
+   "name": "directories, their contents and links untouched",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'sub.txt': 'dir:inner.txt', 'x.txt': 'content of x.txt', 'link.txt': 'link'})"
+  },
+  {
+   "name": "optional group and literal braces",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'doc-v2.txt': 'content of doc-v2.txt', 'readme.txt': 'content of readme.txt'})"
+  },
+  {
+   "name": "unchanged names left out",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'b.log': 'content of b.log', 'a.log': 'content of a.log', 'c.txt': 'content of c.txt'})"
+  },
+  {
+   "name": "{0} prefix rename",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'b.log': 'content of b.log', 'a.log': 'content of a.log', 'c.txt': 'content of c.txt'})"
+  },
+  {
+   "name": "conflict refuses the whole batch",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'banana.txt': 'content of banana.txt', 'apple.txt': 'content of apple.txt', 'avocado.txt': 'content of avocado.txt'})"
+  },
+  {
+   "name": "existing target refuses the whole batch",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'two.txt': 'content of two.txt', 'one.md': 'content of one.md', 'one.txt': 'content of one.txt'})"
+  },
+  {
+   "name": "target renamed away in the same batch still counts as existing",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'f3': 'content of f3', 'f2': 'content of f2', 'f1': 'content of f1'})"
+  },
+  {
+   "name": "existing directory counts",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'report.csv': 'dir:inner.txt', 'data.csv': 'content of data.csv'})"
+  },
+  {
+   "name": "names leaving DIR are refused",
+   "ok": false,
+   "detail": "([(['d12', '--regex', '(.*)\\\\.txt', '--to', '../{1}.txt'], exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n'), (['d12', '--regex', '(.*)\\\\.txt', '--to', '{1}/x'], exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n'), (['d12', '--regex', '(.*)\\\\.tmp', '--to', '{1}'], exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n'), (['d12', '--regex', 'a\\\\.txt', '--to', '..'], exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n'), (['d12', '--counter', '../#'], exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n')], {'b.txt': 'content of b.txt', 'a.txt': 'content of a.txt', '.tmp': 'content of .tmp'}, [])"
+  },
+  {
+   "name": "counter: order, start, longer numbers",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'i': 'content of i', 'g': 'content of g', 'Z': 'content of Z', 'a': 'content of a', 'f': 'content of f', 'h': 'content of h', 'j': 'content of j', 'c': 'content of c', 'd': 'content of d', 'e': 'content of e', 'b': 'content of b', 'k': 'content of k'})"
+  },
+  {
+   "name": "counter with --match and start 0",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'z.jpg': 'content of z.jpg', 'y.png': 'content of y.png', 'x.jpg': 'content of x.jpg', 'w.gif': 'content of w.gif'})"
+  },
+  {
+   "name": "unicode names",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'\u00e9t\u00e9.txt': 'content of \u00e9t\u00e9.txt', 'zebra.txt': 'content of zebra.txt', '\u00c4rger.txt': 'content of \u00c4rger.txt', '\u65e5\u672c.txt': 'content of \u65e5\u672c.txt'})"
+  },
+  {
+   "name": "500 files",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n', {'raw31.dat': 'content of raw31.dat', 'raw25.dat': 'content of raw25.dat', 'raw19.dat': 'content of raw19.dat', 'raw219.dat': 'content of raw219.dat', 'raw231.dat': 'content of raw231.dat', 'raw225.dat': 'content of raw225.dat', 'raw379.dat': 'content of raw379.dat', 'raw345.dat': 'content of raw345.dat', 'raw423.dat': 'content of raw423.dat', 'raw437.dat': 'content of raw437.dat', 'raw351.dat': 'content of raw351.dat', 'raw386.dat': 'content of raw386.dat', 'raw392.dat': 'content of raw392.dat', 'raw147.dat': 'content of raw147.dat', 'raw153.dat': 'content of raw153.dat', 'raw184.dat': 'content of raw184.dat', 'raw190.dat': 'content of raw190.dat', 'raw191.dat': 'content of raw191.dat', 'raw185.dat': 'content of raw185.dat', 'raw152.dat': 'content of raw152.dat', 'raw146.dat': 'content of raw146.dat', 'raw393.dat': 'content of raw393.dat', 'raw387.dat': 'content of raw387.dat', 'raw436.dat': 'content of raw436.dat', 'raw350.dat': 'content of raw350.dat', 'raw344.dat': 'content of raw344.dat', 'raw422.dat': 'content of raw422.dat', 'raw378.dat': 'content of raw378.dat', 'raw224.dat': 'content of raw224.dat', 'raw230.dat': 'content of raw230.dat', 'raw218.dat': 'content of raw218.dat', 'raw18.dat': 'content of raw18.dat', 'raw24.dat': 'content of raw24.dat', 'raw30.dat': 'content of raw30.dat', 'raw26.dat': 'content of raw26.dat', 'raw32.dat': 'content of raw32.dat', 'raw226.dat': 'conte"
+  },
+  {
+   "name": "missing DIR",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='usage: must use either --regex or --counter\\n'"
+  },
+  {
+   "name": "usage errors, nothing renamed",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

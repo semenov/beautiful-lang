@@ -1,0 +1,274 @@
+import cli
+import io
+import files
+import process
+
+type Options {
+  min_count: Int = 1
+  args: List<String> = []
+}
+
+type LogEntry {
+  endpoint: String
+  status: Int
+  latency: Int
+}
+
+type EndpointStats {
+  endpoint: String
+  count: Int
+  error_count: Int
+  latencies: List<Int>
+}
+
+type ProcessResult {
+  valid: Int
+  malformed: Int
+  stats: Map<String, EndpointStats>
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>()
+
+  if opts.min_count < 1 {
+    eprint("usage: app [--min-count N] [FILE...]")
+    process.exit(64)
+  }
+
+  var total_valid = 0
+  var total_malformed = 0
+  var all_stats: Map<String, EndpointStats> = {}
+
+  if opts.args.is_empty() {
+    with stdin = io.stdin() {
+      let result = try read_and_process_stream(stdin, all_stats)
+      total_valid = result.valid
+      total_malformed = result.malformed
+      all_stats = result.stats
+    }
+  } else {
+    for file_path in opts.args {
+      if not files.exists(file_path) {
+        eprint("error: cannot read ${file_path}")
+        process.exit(2)
+      }
+
+      with f = try files.open(file_path) {
+        let result = try read_and_process_stream(f, all_stats)
+        total_valid += result.valid
+        total_malformed += result.malformed
+        all_stats = merge_stats(all_stats, result.stats)
+      }
+    }
+  }
+
+  let entries = all_stats.entries()
+  let sorted = entries.sorted_by(e => [e.value.count.to_string(), e.value.endpoint]).reversed()
+
+  for entry in sorted {
+    let stat = entry.value
+    if stat.count >= opts.min_count {
+      let error_rate = calculate_error_rate(stat.error_count, stat.count)
+      let p50 = calculate_percentile(stat.latencies, 50)
+      let p95 = calculate_percentile(stat.latencies, 95)
+      let max_latency = stat.latencies.max() ?? 0
+
+      print("${stat.endpoint} count=${stat.count} error_rate=${error_rate}% p50=${p50} p95=${p95} max=${max_latency}")
+    }
+  }
+
+  print("total=${total_valid} malformed=${total_malformed}")
+}
+
+fn merge_stats(existing: Map<String, EndpointStats>, new: Map<String, EndpointStats>) -> Map<String, EndpointStats> {
+  var result = existing
+
+  for entry in new.entries() {
+    let key = entry.key
+    let new_stat = entry.value
+
+    if result.take(key) is some(existing_stat) {
+      var s = existing_stat
+      s.count += new_stat.count
+      s.error_count += new_stat.error_count
+      s.latencies.append_all(new_stat.latencies)
+      result[key] = s
+    } else {
+      result[key] = new_stat
+    }
+  }
+
+  return result
+}
+
+fn read_and_process_stream(stream: io.Stream, initial_stats: Map<String, EndpointStats>) throws -> ProcessResult {
+  var valid = 0
+  var malformed = 0
+  var stats = initial_stats
+
+  while try stream.read_line() is some(line) {
+    if line.is_empty() {
+      continue
+    }
+
+    if parse_log_line(line) is some(entry) {
+      valid += 1
+
+      if stats.take(entry.endpoint) is some(existing_stat) {
+        var stat = existing_stat
+        stat.count += 1
+        if entry.status >= 500 and entry.status <= 599 {
+          stat.error_count += 1
+        }
+        stat.latencies.append(entry.latency)
+        stats[entry.endpoint] = stat
+      } else {
+        var error_count = 0
+        if entry.status >= 500 and entry.status <= 599 {
+          error_count = 1
+        }
+        stats[entry.endpoint] = EndpointStats(
+          endpoint: entry.endpoint,
+          count: 1,
+          error_count: error_count,
+          latencies: [entry.latency]
+        )
+      }
+    } else {
+      malformed += 1
+    }
+  }
+
+  return ProcessResult(valid: valid, malformed: malformed, stats: stats)
+}
+
+fn try_parse_int(s: String) -> Int? {
+  let i = try s.to_int() catch e {
+    return none
+  }
+  return i
+}
+
+fn parse_log_line(line: String) -> LogEntry? {
+  if line.index_of("]") is some(bracket_close) {
+    let after_time = line.slice(bracket_close + 1, line.length)
+
+    if after_time.index_of("\"") is some(quote_start_pos) {
+      let start_pos = bracket_close + 1 + quote_start_pos
+      let after_quote_open = line.slice(start_pos + 1, line.length)
+
+      if after_quote_open.index_of("\"") is some(quote_end_pos) {
+        let request_text = after_quote_open.slice(0, quote_end_pos)
+        let request_parts = request_text.split(" ")
+
+        if request_parts.length < 3 {
+          return none
+        }
+
+        let method = request_parts[0]
+        let full_target = request_parts[1]
+
+        if not is_valid_method(method) {
+          return none
+        }
+
+        let target = extract_target(full_target)
+        if target.is_empty() {
+          return none
+        }
+
+        let endpoint = "${method} ${target}"
+
+        let after_request_quote = line.slice((start_pos + 1 + quote_end_pos + 1), line.length)
+        let remaining_parts = after_request_quote.split(" ")
+
+        if remaining_parts.length < 3 {
+          return none
+        }
+
+        if try_parse_int(remaining_parts[0]) is some(status_val) {
+          if status_val < 100 or status_val > 599 {
+            return none
+          }
+
+          if try_parse_int(remaining_parts[2]) is some(latency_val) {
+            return LogEntry(endpoint: endpoint, status: status_val, latency: latency_val)
+          } else {
+            return none
+          }
+        } else {
+          return none
+        }
+      } else {
+        return none
+      }
+    } else {
+      return none
+    }
+  } else {
+    return none
+  }
+}
+
+fn is_valid_method(method: String) -> Bool {
+  if method.is_empty() {
+    return false
+  }
+
+  for c in method.chars() {
+    let code_points = c.code_points()
+    if code_points.is_empty() {
+      return false
+    }
+    let cp = code_points[0]
+    if cp < 65 or cp > 90 {
+      return false
+    }
+  }
+
+  return true
+}
+
+fn extract_target(target: String) -> String {
+  if target.is_empty() {
+    return ""
+  }
+
+  let qpos = target.index_of("?")
+  if qpos is some(pos) {
+    return target.slice(0, pos)
+  }
+
+  return target
+}
+
+fn calculate_error_rate(errors: Int, total: Int) -> String {
+  if total == 0 {
+    return "0.00"
+  }
+
+  let rate = errors.to_float() * 100.0 / total.to_float()
+  return rate.format(2)
+}
+
+fn calculate_percentile(latencies: List<Int>, percentile: Int) -> Int {
+  if latencies.is_empty() {
+    return 0
+  }
+
+  let sorted = latencies.sorted()
+  let n = sorted.length
+
+  let pos = (percentile * n + 99).div(100)
+  let idx = pos - 1
+
+  if idx >= n {
+    return sorted[n - 1]
+  }
+
+  if idx < 0 {
+    return sorted[0]
+  }
+
+  return sorted[idx]
+}

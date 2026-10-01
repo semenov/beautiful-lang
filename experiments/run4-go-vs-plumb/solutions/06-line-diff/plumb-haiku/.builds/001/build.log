@@ -1,0 +1,177 @@
+error: can't loop over `String` directly
+  --> main.plumb:22:15
+   |
+22 |   for char in text {
+   |               ^^^^
+   = help: use `text.chars()`, `text.words()` or `text.lines()`
+error: `List<String>` has no method `length`
+  --> main.plumb:36:21
+   |
+36 |   if i >= old_lines.length() or j >= new_lines.length() {
+   |                     ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:36:48
+   |
+36 |   if i >= old_lines.length() or j >= new_lines.length() {
+   |                                                ^^^^^^
+error: `lcs_length` has 3 or more parameters: name every argument after the first
+  --> main.plumb:46:40
+   |
+46 |     result = 1 + lcs_length(old_lines, new_lines, i + 1, j + 1, memo)
+   |                                        ^^^^^^^^^
+   = help: write (…, new_lines: …, i: …, j: …, memo: …)
+error: `lcs_length` has 3 or more parameters: name every argument after the first
+  --> main.plumb:48:38
+   |
+48 |     let left = lcs_length(old_lines, new_lines, i + 1, j, memo)
+   |                                      ^^^^^^^^^
+   = help: write (…, new_lines: …, i: …, j: …, memo: …)
+error: `lcs_length` has 3 or more parameters: name every argument after the first
+  --> main.plumb:49:39
+   |
+49 |     let right = lcs_length(old_lines, new_lines, i, j + 1, memo)
+   |                                       ^^^^^^^^^
+   = help: write (…, new_lines: …, i: …, j: …, memo: …)
+error: can't change `memo`: it's declared with `let`
+  --> main.plumb:52:3
+   |
+52 |   memo[key] = result
+   |   ^^^^
+   = help: declare it with `var memo = ...`
+error: `List<String>` has no method `length`
+  --> main.plumb:64:23
+   |
+64 |   while i < old_lines.length() or j < new_lines.length() {
+   |                       ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:64:49
+   |
+64 |   while i < old_lines.length() or j < new_lines.length() {
+   |                                                 ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:65:22
+   |
+65 |     if i < old_lines.length() and j < new_lines.length() and old_lines[i] == new_lines[j] {
+   |                      ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:65:49
+   |
+65 |     if i < old_lines.length() and j < new_lines.length() and old_lines[i] == new_lines[j] {
+   |                                                 ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:71:30
+   |
+71 |     } else if j >= new_lines.length() or (i < old_lines.length() and lcs_length(old_lines, new_lines, i + 1, j, memo) >= lcs_length(old_lines, new_lines, i, j + 1, memo)) {
+   |                              ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:71:57
+   |
+71 |     } else if j >= new_lines.length() or (i < old_lines.length() and lcs_length(old_lines, new_lines, i + 1, j, memo) >= lcs_length(old_lines, new_lines, i, j + 1, memo)) {
+   |                                                         ^^^^^^
+error: `lcs_length` has 3 or more parameters: name every argument after the first
+  --> main.plumb:71:92
+   |
+71 |     } else if j >= new_lines.length() or (i < old_lines.length() and lcs_length(old_lines, new_lines, i + 1, j, memo) >= lcs_length(old_lines, new_lines, i, j + 1, memo)) {
+   |                                                                                            ^^^^^^^^^
+   = help: write (…, new_lines: …, i: …, j: …, memo: …)
+error: `lcs_length` has 3 or more parameters: name every argument after the first
+  --> main.plumb:71:144
+   |
+71 |     } else if j >= new_lines.length() or (i < old_lines.length() and lcs_length(old_lines, new_lines, i + 1, j, memo) >= lcs_length(old_lines, new_lines, i, j + 1, memo)) {
+   |                                                                                                                                                ^^^^^^^^^
+   = help: write (…, new_lines: …, i: …, j: …, memo: …)
+error: `List<Change>` has no method `length`
+  --> main.plumb:90:24
+   |
+90 |   for i in 0..<changes.length() {
+   |                        ^^^^^^
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:96:9
+   |
+96 |         hunk.changes.append(change)
+   |         ^^^^
+   = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:98:11
+   |
+98 |           hunk.old_count += 1
+   |           ^^^^
+   = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:101:11
+    |
+101 |           hunk.new_count += 1
+    |           ^^^^
+    = help: declare it with `var hunk = ...`
+error: `List<Change>` has no method `length`
+  --> main.plumb:108:32
+    |
+108 |         var idx = hunk.changes.length() - kept_count
+    |                                ^^^^^^
+error: `List<Change>` has no method `length`
+  --> main.plumb:109:52
+    |
+109 |         while to_remove > 0 and idx < hunk.changes.length() {
+    |                                                    ^^^^^^
+error: `List<Change>` has no method `remove`
+  --> main.plumb:111:26
+    |
+111 |             hunk.changes.remove(idx)
+    |                          ^^^^^^
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:112:13
+    |
+112 |             hunk.old_count -= 1
+    |             ^^^^
+    = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:113:13
+    |
+113 |             hunk.new_count -= 1
+    |             ^^^^
+    = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:148:9
+    |
+148 |         hunk.changes.append(change)
+    |         ^^^^
+    = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:150:11
+    |
+150 |           hunk.old_count += 1
+    |           ^^^^
+    = help: declare it with `var hunk = ...`
+error: can't change `hunk`: it's declared with `let`
+  --> main.plumb:153:11
+    |
+153 |           hunk.new_count += 1
+    |           ^^^^
+    = help: declare it with `var hunk = ...`
+error: `List<String>` has no method `length`
+  --> main.plumb:181:11
+    |
+181 |   if args.length() > 1 and args[1] == "-U" {
+    |           ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:182:13
+    |
+182 |     if args.length() < 4 {
+    |             ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:201:11
+    |
+201 |   if args.length() < file_idx + 2 {
+    |           ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:209:11
+    |
+209 |   if args.length() > file_idx + 2 {
+    |           ^^^^^^
+error: `match` doesn't cover every value
+  --> main.plumb:256:7
+    |
+256 |       match change.kind {
+    |       ^^^^^^^^^^^^^^^^^^^
+    = help: add `_ => ...`
+32 error(s)

@@ -1,0 +1,7 @@
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:257:18
+    |
+257 |   let conn = try db.open(config.db_path)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+1 error(s)

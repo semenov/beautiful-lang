@@ -1,0 +1,12 @@
+error: `String` has no method `substring`
+  --> main.plumb:62:30
+   |
+62 |     let rest = var_entry.key.substring(4)  // Remove "APP_" prefix
+   |                              ^^^^^^^^^
+error: `String` has no method `code_point`
+  --> main.plumb:278:21
+    |
+278 |       let code = ch.code_point()
+    |                     ^^^^^^^^^^
+    = help: did you mean `code_points`?
+2 error(s)

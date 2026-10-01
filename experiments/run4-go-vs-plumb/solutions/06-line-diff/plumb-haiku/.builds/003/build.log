@@ -1,0 +1,91 @@
+error: there is no `+` on text
+  --> main.plumb:23:5
+   |
+23 |     current += char
+   |     ^^^^^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:39:11
+   |
+39 |   let n = old_lines.count()
+   |           ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:40:11
+   |
+40 |   let m = new_lines.count()
+   |           ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:81:13
+   |
+81 |   while i < old_lines.count() or j < new_lines.count() {
+   |             ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:81:38
+   |
+81 |   while i < old_lines.count() or j < new_lines.count() {
+   |                                      ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:82:25
+   |
+82 |     let old_done = i >= old_lines.count()
+   |                         ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:83:25
+   |
+83 |     let new_done = j >= new_lines.count()
+   |                         ^^^^^^^^^^^^^^^^^
+   = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:109:13
+    |
+109 |   while i < changes.count() {
+    |             ^^^^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:127:17
+    |
+127 |       while i < changes.count() {
+    |                 ^^^^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:149:20
+    |
+149 |         var idx2 = hunk_changes.count() - 1
+    |                    ^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:161:20
+    |
+161 |         var idx3 = trimmed.count() - 1
+    |                    ^^^^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:211:6
+    |
+211 |   if args.count() > 1 and args[1] == "-U" {
+    |      ^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:212:8
+    |
+212 |     if args.count() < 4 {
+    |        ^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:229:6
+    |
+229 |   if args.count() < file_idx + 2 {
+    |      ^^^^^^^^^^^^
+    = help: parameters: (test)
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:237:6
+    |
+237 |   if args.count() > file_idx + 2 {
+    |      ^^^^^^^^^^^^
+    = help: parameters: (test)
+15 error(s)

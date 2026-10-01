@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "create event",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "get event; unknown or malformed ids are 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "event validation",
+   "ok": false,
+   "detail": "([({'capacity': 5}, HTTP 400 '{\"error\":\"invalid JSON\"}'), ({'name': 7, 'capacity': 5}, HTTP 400 '{\"error\":\"invalid JSON\"}'), ({'name': 'x'}, HTTP 400 '{\"error\":\"invalid JSON\"}'), ({'name': 'x', 'capacity': '10'}, HTTP 400 '{\"error\":\"invalid JSON\"}'), ({'name': 'x', 'capacity': 1.5}, HTTP 400 '{\"error\":\"invalid JSON\"}'), ({'name': 'x', 'capacity': None}, HTTP 400 '{\"error\":\"invalid JSON\"}')], [HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}'])"
+  },
+  {
+   "name": "reserve: 201, remaining goes down, reservation readable",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all or nothing: exact fill, then 409",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid seats are 400, before the event lookup",
+   "ok": false,
+   "detail": "([HTTP 400 '{\"error\":\"invalid seats\"}', HTTP 400 '{\"error\":\"invalid seats\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid seats\"}'], HTTP 404 '{\"error\":\"not found\"}', HTTP 400 '{\"error\":\"invalid JSON\"}')"
+  },
+  {
+   "name": "cancel returns seats; second cancel is 409",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "idempotency key returns the same reservation once",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "idempotency key reused with other seats or event is 422",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "failed request does not record its key; cancelled state is returned on replay",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "80 concurrent 1-seat requests on 50 seats: exactly 50 succeed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent mixed sizes: seats taken equal capacity minus remaining",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent requests with one key create one reservation",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent cancels and reservations keep counts exact",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "data and idempotency keys survive a restart",
+   "ok": false,
+   "detail": "(HTTP 201 '{\"id\":123,\"event_id\":16,\"seats\":4,\"status\":\"active\"}', HTTP 201 '{\"id\":124,\"event_id\":16,\"seats\":4,\"status\":\"active\"}', HTTP 200 '{\"id\":123,\"event_id\":16,\"seats\":4,\"status\":\"active\"}')"
+  },
+  {
+   "name": "404 for unknown paths, 405 for other methods",
+   "ok": false,
+   "detail": "([HTTP 404 'not found', HTTP 404 'not found', HTTP 404 'not found', HTTP 404 'not found'], [HTTP 405 'method not allowed', HTTP 405 'method not allowed', HTTP 405 'method not allowed', HTTP 405 'method not allowed'])"
+  }
+ ]
+}

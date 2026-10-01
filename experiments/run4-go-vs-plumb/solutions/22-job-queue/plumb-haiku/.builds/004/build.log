@@ -1,0 +1,64 @@
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:62:51
+   |
+62 |       let status_is_cancelled = s.jobs[job_id] is some(j) and j.status is Cancelled
+   |                                                   ^^^^^^^
+   = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `j`
+  --> main.plumb:62:63
+   |
+62 |       let status_is_cancelled = s.jobs[job_id] is some(j) and j.status is Cancelled
+   |                                                               ^
+error: module `time` has no `milliseconds`
+  --> main.plumb:79:27
+   |
+79 |       try time.sleep(time.milliseconds(10))
+   |                           ^^^^^^^^^^^^
+error: module `time` has no `milliseconds`
+  --> main.plumb:85:25
+   |
+85 |     try time.sleep(time.milliseconds(ms_duration)) catch err {
+   |                         ^^^^^^^^^^^^
+error: `run_job` has 3 or more parameters: name every argument after the first
+  --> main.plumb:141:33
+    |
+141 |   let _ = spawn run_job(new_id, job_req.ms, job_req.input, state)
+    |                                 ^^^^^^^^^^
+    = help: write (…, ms_duration: …, input_text: …, state: …)
+error: `Cancelled` is a type, not a value
+  --> main.plumb:182:28
+    |
+182 |       updated_job.status = Cancelled
+    |                            ^^^^^^^^^
+    = help: build a value with `Cancelled(...)`
+error: nothing here can fail
+  --> main.plumb:221:14
+    |
+221 |   let port = try env.get("PORT") ?? "8080"
+    |              ^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: nothing here can fail
+  --> main.plumb:222:21
+    |
+222 |   let workers_str = try env.get("WORKERS") ?? "2"
+    |                     ^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: nothing here can fail
+  --> main.plumb:223:22
+    |
+223 |   let grace_ms_str = try env.get("SHUTDOWN_GRACE_MS") ?? "5000"
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: `workers_num` is never used
+  --> main.plumb:226:7
+    |
+226 |   let workers_num = try workers_str.to_int()
+    |       ^^^^^^^^^^^
+    = help: remove it, or write `let _ = ...` to drop a value on purpose
+error: `grace_ms_num` is never used
+  --> main.plumb:227:7
+    |
+227 |   let grace_ms_num = try grace_ms_str.to_int()
+    |       ^^^^^^^^^^^^
+    = help: remove it, or write `let _ = ...` to drop a value on purpose
+11 error(s)

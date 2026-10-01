@@ -1,0 +1,5 @@
+error: expected an expression, found `type`
+  --> main.plumb:136:3
+    |
+136 |   type ErrorResp {
+    |   ^^^^

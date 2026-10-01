@@ -1,0 +1,28 @@
+error: nothing here can fail
+  --> main.plumb:214:16
+    |
+214 |   let config = try state.read() catch err {
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: a lock is taken with `with`
+  --> main.plumb:214:16
+    |
+214 |   let config = try state.read() catch err {
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `with config = ... { ... }`: the lock is released at the end of the block
+error: `Locked<CacheState>` has no field `upstream_url`
+  --> main.plumb:232:28
+    |
+232 |   let full_url = "${config.upstream_url}${upstream_path}"
+    |                            ^^^^^^^^^^^^
+error: `Locked<CacheState>` has no field `upstream_timeout_ms`
+  --> main.plumb:237:33
+    |
+237 |     timeout: time.millis(config.upstream_timeout_ms)
+    |                                 ^^^^^^^^^^^^^^^^^^^
+error: `Response` has no method `header`
+  --> main.plumb:261:26
+    |
+261 |   let content_type = res.header("content-type") ?? "application/octet-stream"
+    |                          ^^^^^^
+5 error(s)

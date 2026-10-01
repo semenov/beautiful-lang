@@ -1,0 +1,5 @@
+error: expected `=`, found `data`
+  --> main.plumb:166:13
+    |
+166 |     let mut data: Bytes = Bytes()
+    |             ^^^^

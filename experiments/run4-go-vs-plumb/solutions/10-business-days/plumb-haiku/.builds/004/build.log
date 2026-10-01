@@ -1,0 +1,6 @@
+error: expected `:` between a key and a value, found end of line
+  --> main.plumb:247:76
+    |
+247 |     throw Error(message: "usage: app between|add [options]", exit_code: 64)
+    |                                                                            ^
+    = help: a `{` where a value goes starts a map (`{"a": 1}`), not a block of statements; for statements before a fallback: `if x is some(v) { v } else { ...; fallback }`

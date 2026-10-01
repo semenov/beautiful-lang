@@ -1,0 +1,3 @@
+#!/bin/sh
+# Live view in a terminal: re-renders the status every 5 seconds.
+cd "$(dirname "$0")/.." && while true; do clear; python3 bin/harness.py status | head -80; sleep 5; done

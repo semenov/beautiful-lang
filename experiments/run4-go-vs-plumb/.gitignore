@@ -1,0 +1,6 @@
+# compiled programs and data the agents and checks left behind
+solutions/**/app
+solutions/**/*.db
+solutions/**/*.db-*
+solutions/**/node_modules/
+__pycache__/

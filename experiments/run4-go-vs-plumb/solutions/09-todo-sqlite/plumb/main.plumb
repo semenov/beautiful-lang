@@ -1,0 +1,346 @@
+import db
+import env
+import process
+
+// Parsed command line: positional arguments and options in order of appearance.
+type Opt {
+  name: String
+  value: String
+}
+
+type Parsed {
+  positional: List<String> = []
+  options: List<Opt> = []
+}
+
+type TodoRow {
+  id: Int
+  title: String
+  due: String?
+  done: Int
+}
+
+type TagRow {
+  todo_id: Int
+  tag: String
+}
+
+type IdRow {
+  id: Int
+}
+
+let usage_text = "usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]... | list [--tag TAG] [--overdue --today YYYY-MM-DD] | done ID | rm ID | search TEXT"
+
+fn usage_error(detail: String) -> Never {
+  eprint("${usage_text} (${detail})")
+  process.exit(64)
+}
+
+// Splits arguments into positionals and options. `value_options` names the
+// options that take a value; `flag_options` the ones that do not.
+fn parse_args(args: List<String>, value_options: List<String>, flag_options: List<String>) -> Parsed {
+  var out = Parsed()
+  var i = 0
+  var only_positional = false
+  while i < args.length {
+    let a = args[i]
+    if only_positional or not a.starts_with("--") {
+      out.positional.append(a)
+    } else if a == "--" {
+      only_positional = true
+    } else if value_options.contains(a) {
+      if i + 1 >= args.length {
+        usage_error("option ${a} needs a value")
+      }
+      out.options.append(Opt(name: a, value: args[i + 1]))
+      i += 1
+    } else if flag_options.contains(a) {
+      out.options.append(Opt(name: a, value: ""))
+    } else {
+      usage_error("unknown option ${a}")
+    }
+    i += 1
+  }
+  return out
+}
+
+fn opt_values(p: Parsed, name: String) -> List<String> {
+  var vals: List<String> = []
+  for o in p.options {
+    if o.name == name {
+      vals.append(o.value)
+    }
+  }
+  return vals
+}
+
+// The value of an option given at most once.
+fn opt_single(p: Parsed, name: String) -> String? {
+  let vals = opt_values(p, name: name)
+  if vals.length > 1 {
+    usage_error("${name} given more than once")
+  }
+  return vals.first()
+}
+
+fn has_flag(p: Parsed, name: String) -> Bool {
+  return not opt_values(p, name: name).is_empty()
+}
+
+fn all_digits(s: String) -> Bool {
+  if s.is_empty() {
+    return false
+  }
+  for c in s.chars() {
+    if c < "0" or c > "9" {
+      return false
+    }
+  }
+  return true
+}
+
+fn parse_id(s: String) -> Int {
+  if not all_digits(s) {
+    usage_error("invalid ID")
+  }
+  let n = try s.to_int() catch err {
+    usage_error("invalid ID")
+  }
+  if n < 1 {
+    usage_error("invalid ID")
+  }
+  return n
+}
+
+fn is_leap(y: Int) -> Bool {
+  return (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+}
+
+fn valid_date(s: String) -> Bool {
+  let cs = s.chars()
+  if cs.length != 10 or cs[4] != "-" or cs[7] != "-" {
+    return false
+  }
+  let ys = cs.take(4).join("")
+  let ms = cs.drop(5).take(2).join("")
+  let ds = cs.drop(8).join("")
+  if not (all_digits(ys) and all_digits(ms) and all_digits(ds)) {
+    return false
+  }
+  let y = try ys.to_int() catch err { return false }
+  let m = try ms.to_int() catch err { return false }
+  let d = try ds.to_int() catch err { return false }
+  if m < 1 or m > 12 or d < 1 {
+    return false
+  }
+  let days = match m {
+    2 => if is_leap(y) { 29 } else { 28 }
+    4 | 6 | 9 | 11 => 30
+    _ => 31
+  }
+  return d <= days
+}
+
+fn valid_tag(t: String) -> Bool {
+  if t.is_empty() {
+    return false
+  }
+  for c in t.chars() {
+    let ok = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "_" or c == "-"
+    if not ok {
+      return false
+    }
+  }
+  return true
+}
+
+fn open_db() throws -> db.Connection {
+  let path = env.get("TODO_DB") ?? ""
+  if path.is_empty() {
+    eprint("error: TODO_DB is not set")
+    process.exit(2)
+  }
+  with conn = try db.open(path) {
+    try conn.execute("create table if not exists todos (id integer primary key autoincrement, title text not null, due text, done integer not null default 0)", [])
+    try conn.execute("create table if not exists tags (todo_id integer not null, tag text not null, primary key (todo_id, tag))", [])
+    return conn
+  }
+}
+
+fn exists(conn: db.Connection, id: Int) throws -> Bool {
+  let rows = try conn.query<IdRow>("select id from todos where id = ?", [id])
+  return not rows.is_empty()
+}
+
+fn no_such(id: Int) -> Never {
+  eprint("error: no such todo: ${id}")
+  process.exit(3)
+}
+
+fn print_rows(conn: db.Connection, rows: List<TodoRow>) throws {
+  let tag_rows = try conn.query<TagRow>("select todo_id, tag from tags order by tag", [])
+  var tags: Map<Int, List<String>> = {}
+  for t in tag_rows {
+    if tags[t.todo_id] is none {
+      tags[t.todo_id] = []
+    }
+    tags[t.todo_id].append(t.tag)
+  }
+  for r in rows {
+    let mark = if r.done != 0 { "x" } else { " " }
+    var line = "${r.id} [${mark}] ${r.title}"
+    if r.due is some(d) {
+      line = "${line} (due ${d})"
+    }
+    for tag in tags[r.id] ?? [] {
+      line = "${line} #${tag}"
+    }
+    print(line)
+  }
+}
+
+fn cmd_add(args: List<String>) throws {
+  let p = parse_args(args, value_options: ["--due", "--tag"], flag_options: [])
+  if p.positional.length != 1 {
+    usage_error("add takes exactly one TITLE")
+  }
+  let title = p.positional[0]
+  if title.is_empty() or title.contains("\n") or title.contains("\r") {
+    usage_error("invalid TITLE")
+  }
+  let due = opt_single(p, name: "--due")
+  if due is some(d) {
+    if not valid_date(d) {
+      usage_error("invalid date")
+    }
+  }
+  var tags: Set<String> = {}
+  for t in opt_values(p, name: "--tag") {
+    if not valid_tag(t) {
+      usage_error("invalid TAG")
+    }
+    tags.add(t)
+  }
+  with conn = try open_db() {
+    let id = try conn.transaction(() => {
+      let new_id = try conn.insert("insert into todos (title, due) values (?, ?)", [title, due])
+      for t in tags {
+        try conn.execute("insert into tags (todo_id, tag) values (?, ?)", [new_id, t])
+      }
+      new_id
+    })
+    print("added ${id}")
+  }
+}
+
+fn cmd_list(args: List<String>) throws {
+  let p = parse_args(args, value_options: ["--tag", "--today"], flag_options: ["--overdue"])
+  if not p.positional.is_empty() {
+    usage_error("list takes no arguments")
+  }
+  let tag = opt_single(p, name: "--tag")
+  let today = opt_single(p, name: "--today")
+  let overdue = has_flag(p, name: "--overdue")
+  if opt_values(p, name: "--overdue").length > 1 {
+    usage_error("--overdue given more than once")
+  }
+  if tag is some(t) {
+    if not valid_tag(t) {
+      usage_error("invalid TAG")
+    }
+  }
+  if overdue != (today is some(_)) {
+    usage_error("--overdue and --today go together")
+  }
+  if today is some(d) {
+    if not valid_date(d) {
+      usage_error("invalid date")
+    }
+  }
+  with conn = try open_db() {
+    var rows: List<TodoRow> = []
+    if today is some(d) {
+      if tag is some(t) {
+        rows = try conn.query<TodoRow>("select id, title, due, done from todos where done = 0 and due is not null and due < ? and exists (select 1 from tags where tags.todo_id = todos.id and tags.tag = ?) order by id", [d, t])
+      } else {
+        rows = try conn.query<TodoRow>("select id, title, due, done from todos where done = 0 and due is not null and due < ? order by id", [d])
+      }
+    } else if tag is some(t) {
+      rows = try conn.query<TodoRow>("select id, title, due, done from todos where exists (select 1 from tags where tags.todo_id = todos.id and tags.tag = ?) order by id", [t])
+    } else {
+      rows = try conn.query<TodoRow>("select id, title, due, done from todos order by id", [])
+    }
+    try print_rows(conn, rows: rows)
+  }
+}
+
+fn cmd_done(args: List<String>) throws {
+  let p = parse_args(args, value_options: [], flag_options: [])
+  if p.positional.length != 1 {
+    usage_error("done takes exactly one ID")
+  }
+  let id = parse_id(p.positional[0])
+  with conn = try open_db() {
+    if not (try exists(conn, id: id)) {
+      no_such(id)
+    }
+    try conn.execute("update todos set done = 1 where id = ?", [id])
+    print("done ${id}")
+  }
+}
+
+fn cmd_rm(args: List<String>) throws {
+  let p = parse_args(args, value_options: [], flag_options: [])
+  if p.positional.length != 1 {
+    usage_error("rm takes exactly one ID")
+  }
+  let id = parse_id(p.positional[0])
+  with conn = try open_db() {
+    if not (try exists(conn, id: id)) {
+      no_such(id)
+    }
+    try conn.transaction(() => {
+      try conn.execute("delete from tags where todo_id = ?", [id])
+      try conn.execute("delete from todos where id = ?", [id])
+    })
+    print("removed ${id}")
+  }
+}
+
+fn cmd_search(args: List<String>) throws {
+  let p = parse_args(args, value_options: [], flag_options: [])
+  if p.positional.length != 1 {
+    usage_error("search takes exactly one TEXT")
+  }
+  let text = p.positional[0]
+  if text.is_empty() {
+    usage_error("empty search TEXT")
+  }
+  with conn = try open_db() {
+    let rows = try conn.query<TodoRow>("select id, title, due, done from todos where instr(title, ?) > 0 order by id", [text])
+    try print_rows(conn, rows: rows)
+  }
+}
+
+fn main() throws {
+  let args = process.args()
+  if args.is_empty() {
+    usage_error("missing command")
+  }
+  let rest = args.drop(1)
+  match args[0] {
+    "add" => try cmd_add(rest)
+    "list" => try cmd_list(rest)
+    "done" => try cmd_done(rest)
+    "rm" => try cmd_rm(rest)
+    "search" => try cmd_search(rest)
+    _ => usage_error("unknown command ${args[0]}")
+  }
+}
+
+test "dates" {
+  expect valid_date("2024-02-29")
+  expect not valid_date("2025-02-30")
+  expect not valid_date("2025-13-01")
+  expect not valid_date("2025-1-01")
+}

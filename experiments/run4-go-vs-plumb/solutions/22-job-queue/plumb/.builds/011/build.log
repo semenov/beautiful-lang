@@ -1,0 +1,6 @@
+error: this line is never reached
+  --> main.plumb:306:3
+    |
+306 |   for t in tasks {
+    |   ^^^
+1 error(s)

@@ -1,0 +1,31 @@
+error: `add_line` has 3 or more parameters: name every argument after the first
+  --> main.plumb:218:29
+    |
+218 |         out = add_line(out, " ", old_lines[op.line])
+    |                             ^^^
+    = help: write (…, prefix: …, line: …)
+error: `add_line` has 3 or more parameters: name every argument after the first
+  --> main.plumb:220:29
+    |
+220 |         out = add_line(out, "-", old_lines[op.line])
+    |                             ^^^
+    = help: write (…, prefix: …, line: …)
+error: `add_line` has 3 or more parameters: name every argument after the first
+  --> main.plumb:222:29
+    |
+222 |         out = add_line(out, "+", new_lines[op.line])
+    |                             ^^^
+    = help: write (…, prefix: …, line: …)
+error: `render` has 3 or more parameters: name every argument after the first
+  --> main.plumb:238:26
+    |
+238 |   let out = render(opts, old_lines, new_lines, ops)
+    |                          ^^^^^^^^^
+    = help: write (…, old_lines: …, new_lines: …, ops: …)
+error: a `Stream` must be closed: get it with `with`
+  --> main.plumb:242:7
+    |
+242 |   try io.stdout().write(out) catch err {
+    |       ^^^^^^^^^^^
+    = help: write `with f = ... { ... }`: it's closed at the end of the block, even on an error
+5 error(s)

@@ -1,0 +1,246 @@
+import crypto
+import env
+import http
+import json
+import time
+
+type Config {
+  target_url: String
+  secret: String
+  max_attempts: Int
+  backoff_ms: Int
+  attempt_timeout_ms: Int
+}
+
+type Event {
+  id: Int
+  source: String
+  body: Bytes
+  status: String = "pending"
+  attempts: Int = 0
+}
+
+type Store {
+  events: Map<Int, Event> = {}
+  next_id: Int = 1
+}
+
+type Job {
+  id: Int
+  source: String
+}
+
+type Accepted {
+  id: Int
+}
+
+type View {
+  id: Int
+  source: String
+  status: String
+  attempts: Int
+}
+
+type ErrorBody {
+  error: String
+}
+
+fn fail(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+fn setting(name: String, default: Int) -> Int {
+  let raw = env.get(name) ?? return default
+  let n = try raw.trim().to_int() catch err {
+    eprint("error: ${name} must be a whole number >= 1")
+    process.exit(2)
+  }
+  if n < 1 {
+    eprint("error: ${name} must be a whole number >= 1")
+    process.exit(2)
+  }
+  return n
+}
+
+fn required(name: String) -> String {
+  let v = env.get(name) ?? ""
+  if v.is_empty() {
+    eprint("error: ${name} is required")
+    process.exit(2)
+  }
+  return v
+}
+
+fn source_of(text: String) -> String? {
+  let v = try json.parse(text) catch err {
+    return none
+  }
+  if v is json.Value.Object(fields) {
+    if not fields.contains_key("payload") {
+      return none
+    }
+    if fields["source"] is some(s) {
+      if s is json.Value.String(name) {
+        if not name.is_empty() {
+          return name
+        }
+      }
+    }
+  }
+  return none
+}
+
+fn accept(req: http.Request, store: Shared<Store>, jobs: Channel<Job>) -> http.Response {
+  let source = source_of(req.text()) ?? return fail(400, "body must be a JSON object with a non-empty string source and a payload")
+  with s = store.lock() {
+    let id = s.next_id
+    s.next_id += 1
+    s.events[id] = Event(id: id, source: source, body: req.body)
+    let _ = jobs.try_send(Job(id: id, source: source))
+    return http.json(202, Accepted(id: id))
+  }
+}
+
+fn status_of(req: http.Request, store: Shared<Store>) -> http.Response {
+  let id = try (req.param("id") ?? "").to_int() catch err {
+    return fail(404, "not found")
+  }
+  with s = store.read() {
+    if s.events[id] is some(e) {
+      return http.json(200, View(id: e.id, source: e.source, status: e.status, attempts: e.attempts))
+    }
+  }
+  return fail(404, "not found")
+}
+
+fn make_router(store: Shared<Store>, jobs: Channel<Job>) -> http.Router {
+  var router = http.Router()
+  router.post("/events", req => accept(req, store, jobs))
+  router.get("/events/:id", req => status_of(req, store))
+  router.any("/*rest", req => fail(404, "not found"))
+  router.any("/events", req => fail(404, "not found"))
+  router.any("/events/:id", req => fail(404, "not found"))
+  return router
+}
+
+fn sign(secret: String, body: Bytes) -> String {
+  return "sha256=${crypto.hmac_sha256(secret.bytes(), body).hex()}"
+}
+
+// One attempt: true when the target answered 2xx in time.
+fn attempt(cfg: Config, id: Int, body: Bytes) -> Bool {
+  let res = try http.send(http.ClientRequest(
+    url: cfg.target_url,
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-event-id": "${id}",
+      "x-signature": sign(cfg.secret, body: body)
+    },
+    body: body,
+    timeout: time.millis(cfg.attempt_timeout_ms),
+    follow_redirects: false
+  )) catch err {
+    return false
+  }
+  return res.status >= 200 and res.status < 300
+}
+
+fn backoff_ms(cfg: Config, k: Int) -> Int {
+  var ms = cfg.backoff_ms
+  var i = 1
+  while i < k and ms < 1_000_000_000_000 {
+    ms = ms * 2
+    i += 1
+  }
+  return ms
+}
+
+fn deliver(cfg: Config, store: Shared<Store>, id: Int) {
+  var body = Bytes()
+  with s = store.read() {
+    if s.events[id] is some(e) {
+      body = e.body
+    }
+  }
+  var k = 1
+  while k <= cfg.max_attempts {
+    with s = store.lock() {
+      s.events[id].attempts = k
+    }
+    if attempt(cfg, id: id, body: body) {
+      with s = store.lock() {
+        s.events[id].status = "delivered"
+      }
+      return
+    }
+    if k == cfg.max_attempts {
+      break
+    }
+    try time.sleep(time.millis(backoff_ms(cfg, k: k))) catch err {
+      return
+    }
+    k += 1
+  }
+  with s = store.lock() {
+    s.events[id].status = "failed"
+  }
+}
+
+fn source_worker(cfg: Config, store: Shared<Store>, ids: Channel<Int>) {
+  while true {
+    let id = try ids.receive() catch err {
+      return
+    }
+    if id is some(n) {
+      deliver(cfg, store: store, id: n)
+    } else {
+      return
+    }
+  }
+}
+
+fn dispatch(cfg: Config, store: Shared<Store>, jobs: Channel<Job>) {
+  var queues: Map<String, Channel<Int>> = {}
+  var workers: List<Task<Unit>> = []
+  while true {
+    let job = try jobs.receive() catch err {
+      break
+    }
+    let j = job ?? break
+    if queues[j.source] is none {
+      let q = Channel<Int>(capacity: 100000)
+      queues[j.source] = q
+      workers.append(spawn source_worker(cfg, store: store, ids: q))
+    }
+    if queues[j.source] is some(q) {
+      let _ = q.try_send(j.id)
+    }
+  }
+  for entry in queues {
+    entry.value.close()
+  }
+  for w in workers {
+    let _ = try w.wait() catch err {
+      continue
+    }
+  }
+}
+
+fn main() throws {
+  let port = setting("PORT", default: 8080)
+  let cfg = Config(
+    target_url: required("TARGET_URL"),
+    secret: required("SECRET"),
+    max_attempts: setting("MAX_ATTEMPTS", default: 5),
+    backoff_ms: setting("BACKOFF_MS", default: 1000),
+    attempt_timeout_ms: setting("ATTEMPT_TIMEOUT_MS", default: 5000)
+  )
+  let store = Shared<Store>(Store())
+  let jobs = Channel<Job>(capacity: 100000)
+  let dispatcher = spawn dispatch(cfg, store: store, jobs: jobs)
+  let router = make_router(store, jobs: jobs)
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  jobs.close()
+  try dispatcher.wait()
+}

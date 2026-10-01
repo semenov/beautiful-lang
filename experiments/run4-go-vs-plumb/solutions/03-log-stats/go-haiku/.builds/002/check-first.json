@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "nearest-rank percentiles (n=20, n=100, n=1)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "percentiles with repeated values (n=7)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "error rate exact, halves up, only 5xx",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='GET /x count=800 error_rate=0.12% p50=1 p95=1 max=1\\nGET /w count=16 error_rate=6.25% p50=1 p95=1 max=1\\nGET /y count=3 error_rate=33.33% p50=1 p95=1 max=1\\nGET /z count=3 error_rate=66.67% p50=1 p95=1 max=1\\ntotal=822 malformed=0\\n' stderr=''"
+  },
+  {
+   "name": "ties ordered by endpoint, query stripped, method distinct",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "malformed lines counted, empty lines and CRLF fine",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='GET /ok count=4 error_rate=0.00% p50=5 p95=5 max=5\\nGET /o\"k count=1 error_rate=0.00% p50=5 p95=5 max=5\\ntotal=5 malformed=12\\n' stderr=''"
+  },
+  {
+   "name": "latency leading zeros, bytes dash, odd time text",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "min-count hides endpoints but totals count them",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode paths sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no final newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "several files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-count",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='flag needs an argument: -min-count\\nUsage of /Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/solutions/03-log-stats/go-haiku/.builds/002/app:\\n  -min-count int\\n    \\tminimum request count (default 1)\\n'"
+  },
+  {
+   "name": "usage error --min-count 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-count x",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='invalid value \"x\" for flag -min-count: parse error\\nUsage of /Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/solutions/03-log-stats/go-haiku/.builds/002/app:\\n  -min-count int\\n    \\tminimum request count (default 1)\\n'"
+  },
+  {
+   "name": "usage error --bogus",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='flag provided but not defined: -bogus\\nUsage of /Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/solutions/03-log-stats/go-haiku/.builds/002/app:\\n  -min-count int\\n    \\tminimum request count (default 1)\\n'"
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

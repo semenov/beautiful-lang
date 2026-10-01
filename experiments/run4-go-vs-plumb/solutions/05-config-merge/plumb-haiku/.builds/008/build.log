@@ -1,0 +1,251 @@
+error: `String` has no method `drop`
+  --> main.plumb:66:30
+   |
+66 |     let rest = var_entry.key.drop(4)  // Remove "APP_" prefix
+   |                              ^^^^
+error: can't change `lowered_parts`: it's declared with `let`
+  --> main.plumb:79:7
+   |
+79 |       lowered_parts.append(part.lowercase())
+   |       ^^^^^^^^^^^^^
+   = help: declare it with `var lowered_parts = ...`
+error: `set_nested` has 3 or more parameters: name every argument after the first
+  --> main.plumb:90:33
+   |
+90 |     config = set_nested(config, lowered_parts, value)
+   |                                 ^^^^^^^^^^^^^
+   = help: write (…, path: …, value: …)
+error: this call can fail
+  --> main.plumb:94:3
+   |
+94 |   validate_config(config)
+   |   ^^^^^^^^^^^^^^^^^^^^^^^
+   = help: write `try` before it: `try f(x)`, or handle it: `try f(x) catch err { ... }`
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:101:45
+    |
+101 |   if a is json.Value.Object(a_obj) and b is json.Value.Object(b_obj) {
+    |                                             ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `b_obj`
+  --> main.plumb:103:18
+    |
+103 |     for entry in b_obj {
+    |                  ^^^^^
+    = help: did you mean `a_obj`?
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:106:30
+    |
+106 |       if a_obj[entry.key] is some(av) and av is json.Value.Object(_) and entry.value is json.Value.Object(_) {
+    |                              ^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `av`
+  --> main.plumb:106:43
+    |
+106 |       if a_obj[entry.key] is some(av) and av is json.Value.Object(_) and entry.value is json.Value.Object(_) {
+    |                                           ^^
+    = help: did you mean `a`?
+error: unknown name `av`
+  --> main.plumb:107:42
+    |
+107 |         result[entry.key] = merge_values(av, entry.value)
+    |                                          ^^
+    = help: did you mean `a`?
+error: `set_nested` has 3 or more parameters: name every argument after the first
+  --> main.plumb:149:37
+    |
+149 |     obj[key] = set_nested(next_val, rest, value)
+    |                                     ^^^^
+    = help: write (…, path: …, value: …)
+error: `String` can't match a `Value?`
+  --> main.plumb:177:13
+    |
+177 |   if val is json.Value.String(s) {
+    |             ^^^^^^^^^^^^^^^^^^^^
+error: unknown name `s`
+  --> main.plumb:178:16
+    |
+178 |     return not s.is_empty()
+    |                ^
+error: `Number` can't match a `Value?`
+  --> main.plumb:201:13
+    |
+201 |   if val is json.Value.Number(num) {
+    |             ^^^^^^^^^^^^^^^^^^^^^^
+error: unknown name `num`
+  --> main.plumb:202:24
+    |
+202 |     let port_int = try num.to_int() catch _ { none }
+    |                        ^^^
+error: can't figure out the type here
+  --> main.plumb:202:47
+    |
+202 |     let port_int = try num.to_int() catch _ { none }
+    |                                               ^^^^
+    = help: add a type: `let xs: List<Int> = []`
+error: unknown name `p`
+  --> main.plumb:204:14
+    |
+204 |       return p >= 1 and p <= 65535
+    |              ^
+error: unknown name `p`
+  --> main.plumb:204:25
+    |
+204 |       return p >= 1 and p <= 65535
+    |                         ^
+error: there is no `+` on text
+  --> main.plumb:228:7
+    |
+228 |       result += next_indent_str
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:229:7
+    |
+229 |       result += format_json(item.value, indent + 2)
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:231:9
+    |
+231 |         result += ","
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:233:7
+    |
+233 |       result += "\n"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:235:5
+    |
+235 |     result += indent_str
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:236:5
+    |
+236 |     result += "]"
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:246:7
+    |
+246 |       result += next_indent_str
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:247:7
+    |
+247 |       result += escape_json_string(k)
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:248:7
+    |
+248 |       result += ": "
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:249:7
+    |
+249 |       result += format_json(fields[k] ?? json.Value.Null, indent + 2)
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:251:9
+    |
+251 |         result += ","
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:253:7
+    |
+253 |       result += "\n"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:255:5
+    |
+255 |     result += indent_str
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:256:5
+    |
+256 |     result += "}"
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:267:7
+    |
+267 |       result += "\\\""
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:269:7
+    |
+269 |       result += "\\\\"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:271:7
+    |
+271 |       result += "\\b"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:273:7
+    |
+273 |       result += "\\t"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:275:7
+    |
+275 |       result += "\\n"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:277:7
+    |
+277 |       result += "\\f"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:279:7
+    |
+279 |       result += "\\r"
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: `String` has no method `char_code`
+  --> main.plumb:281:21
+    |
+281 |       let code = ch.char_code()
+    |                     ^^^^^^^^^
+error: there is no `+` on text
+  --> main.plumb:283:9
+    |
+283 |         result += "\\u00"
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:286:11
+    |
+286 |           result += "0"
+    |           ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:290:9
+    |
+290 |         result += ch
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:294:3
+    |
+294 |   result += "\""
+    |   ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+43 error(s)

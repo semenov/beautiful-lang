@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "put then get a string verbatim",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode key and value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "integers stay integers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "overwrite and delete",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing key is 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr creates, adds and subtracts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr on a non-integer is 409 and changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad by is 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr overflow is 409 and changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid values are 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cas succeeds only on an equal value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cas with expected null",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large value round trip",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty key, unknown path, wrong method",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel increments are exact",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel cas: exactly one winner",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel cas loops lose no update",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "snapshot has every key",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,2 @@
+# app
+./main.go:5:2: "flag" imported and not used

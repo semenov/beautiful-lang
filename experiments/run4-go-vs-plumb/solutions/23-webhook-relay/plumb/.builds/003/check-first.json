@@ -1,0 +1,64 @@
+{
+ "cases": [
+  {
+   "name": "delivers the exact body, signed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "retries with backoff until success",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "gives up after MAX_ATTEMPTS",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "a slow answer counts as a failed attempt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "same source is delivered in order, one at a time",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "a stuck source does not block other sources",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "many sources in parallel, flaky target",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "payload can be any JSON value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large event body",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid events are 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown event and path are 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "connection refused counts as failed attempts",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unexpected argument access.log (see --help)\\n'"
+  },
+  {
+   "name": "nearest-rank percentiles (n=20, n=100, n=1)",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=121\\n' stderr=''"
+  },
+  {
+   "name": "percentiles with repeated values (n=7)",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=7\\n' stderr=''"
+  },
+  {
+   "name": "error rate exact, halves up, only 5xx",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=822\\n' stderr=''"
+  },
+  {
+   "name": "ties ordered by endpoint, query stripped, method distinct",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=4\\n' stderr=''"
+  },
+  {
+   "name": "malformed lines counted, empty lines and CRLF fine",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=17\\n' stderr=''"
+  },
+  {
+   "name": "latency leading zeros, bytes dash, odd time text",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=2\\n' stderr=''"
+  },
+  {
+   "name": "min-count hides endpoints but totals count them",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=4\\n' stderr=''"
+  },
+  {
+   "name": "unicode paths sorted by code point",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=4\\n' stderr=''"
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no final newline",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=1\\n' stderr=''"
+  },
+  {
+   "name": "several files",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unexpected argument a.log (see --help)\\n'"
+  },
+  {
+   "name": "missing file",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unexpected argument a.log (see --help)\\n'"
+  },
+  {
+   "name": "usage error --min-count",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: a value is missing after --min-count (see --help)\\n'"
+  },
+  {
+   "name": "usage error --min-count 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-count x",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: the option --min-count: expected a whole number, found \"x\"\\n'"
+  },
+  {
+   "name": "usage error --bogus",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unknown option --bogus (see --help)\\n'"
+  },
+  {
+   "name": "large input",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total=0 malformed=200000\\n' stderr=''"
+  }
+ ]
+}

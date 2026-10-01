@@ -1,0 +1,40 @@
+error: `bad_usage` returns `Never`, so it must not finish
+  --> main.plumb:352:25
+    |
+352 | fn bad_usage() -> Never {
+    |                         ^
+    = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:354:3
+    |
+354 |   process.exit(64)
+    |   ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `io`
+  --> main.plumb:397:13
+    |
+397 |   while try io.read_line() is some(line) {
+    |             ^^
+error: unknown name `line`
+  --> main.plumb:399:8
+    |
+399 |     if line.trim().is_empty() {
+    |        ^^^^
+error: unknown name `line`
+  --> main.plumb:402:30
+    |
+402 |     let rec = try parse_line(line) catch _ {
+    |                              ^^^^
+error: unknown name `process`
+  --> main.plumb:442:22
+    |
+442 |   let q = parse_args(process.args())
+    |                      ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:445:5
+    |
+445 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+7 error(s)

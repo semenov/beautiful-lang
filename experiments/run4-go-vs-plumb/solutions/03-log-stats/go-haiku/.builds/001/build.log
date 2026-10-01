@@ -1,0 +1,2 @@
+# app
+./main.go:76:4: declared and not used: bytesStr

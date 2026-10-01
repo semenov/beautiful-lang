@@ -1,0 +1,370 @@
+// markdown-toc: prints a table of contents for a Markdown document.
+
+import files
+import io
+import process
+
+let usage_text = "usage: app [--min-level N] [--max-level M] [FILE]"
+
+// Start of each run of ten decimal digits (Unicode Nd).
+let digit_starts: List<Int> = [
+  0x30, 0x660, 0x6F0, 0x7C0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xBE6, 0xC66, 0xCE6,
+  0xD66, 0xDE6, 0xE50, 0xED0, 0xF20, 0x1040, 0x1090, 0x17E0, 0x1810, 0x1946, 0x19D0,
+  0x1A80, 0x1A90, 0x1B50, 0x1BB0, 0x1C40, 0x1C50, 0xA620, 0xA8D0, 0xA900, 0xA9D0,
+  0xA9F0, 0xAA50, 0xABF0, 0xFF10, 0x104A0, 0x11066, 0x110F0, 0x11136, 0x111D0,
+  0x112F0, 0x11450, 0x114D0, 0x11650, 0x116C0, 0x11730, 0x118E0, 0x11950, 0x11C50,
+  0x11D50, 0x11DA0, 0x16A60, 0x16AC0, 0x16B50, 0x1D7CE, 0x1D7D8, 0x1D7E2, 0x1D7EC,
+  0x1D7F6, 0x1E140, 0x1E2F0, 0x1E950, 0x1FBF0,
+]
+
+// Common combining mark ranges (Unicode M*), as from, to pairs.
+let mark_ranges: List<List<Int>> = [
+  [0x300, 0x36F], [0x483, 0x489], [0x591, 0x5BD], [0x5BF, 0x5BF], [0x5C1, 0x5C2],
+  [0x5C4, 0x5C5], [0x5C7, 0x5C7], [0x610, 0x61A], [0x64B, 0x65F], [0x670, 0x670],
+  [0x6D6, 0x6DC], [0x6DF, 0x6E4], [0x6E7, 0x6E8], [0x6EA, 0x6ED], [0x711, 0x711],
+  [0x730, 0x74A], [0x7A6, 0x7B0], [0x7EB, 0x7F3], [0x816, 0x819], [0x81B, 0x823],
+  [0x825, 0x827], [0x829, 0x82D], [0x859, 0x85B], [0x8D3, 0x8E1], [0x8E3, 0x903],
+  [0x93A, 0x93C], [0x93E, 0x94F], [0x951, 0x957], [0x962, 0x963], [0x981, 0x983],
+  [0x9BC, 0x9BC], [0x9BE, 0x9CD], [0x9D7, 0x9D7], [0x9E2, 0x9E3], [0xA01, 0xA03],
+  [0xA3C, 0xA51], [0xA70, 0xA71], [0xA75, 0xA75], [0xA81, 0xA83], [0xABC, 0xABC],
+  [0xABE, 0xACD], [0xAE2, 0xAE3], [0xB01, 0xB03], [0xB3C, 0xB3C], [0xB3E, 0xB57],
+  [0xB62, 0xB63], [0xB82, 0xB82], [0xBBE, 0xBCD], [0xBD7, 0xBD7], [0xC00, 0xC04],
+  [0xC3E, 0xC56], [0xC62, 0xC63], [0xC81, 0xC83], [0xCBC, 0xCBC], [0xCBE, 0xCD6],
+  [0xCE2, 0xCE3], [0xD00, 0xD03], [0xD3B, 0xD3C], [0xD3E, 0xD4D], [0xD57, 0xD57],
+  [0xD62, 0xD63], [0xD82, 0xD83], [0xDCA, 0xDDF], [0xDF2, 0xDF3], [0xE31, 0xE31],
+  [0xE34, 0xE3A], [0xE47, 0xE4E], [0xEB1, 0xEB1], [0xEB4, 0xEBC], [0xEC8, 0xECE],
+  [0xF18, 0xF19], [0xF35, 0xF35], [0xF37, 0xF37], [0xF39, 0xF39], [0xF3E, 0xF3F],
+  [0xF71, 0xF84], [0xF86, 0xF87], [0xF8D, 0xFBC], [0xFC6, 0xFC6], [0x102B, 0x103E],
+  [0x1056, 0x1059], [0x105E, 0x1060], [0x1062, 0x1064], [0x1067, 0x106D],
+  [0x1071, 0x1074], [0x1082, 0x108D], [0x108F, 0x108F], [0x109A, 0x109D],
+  [0x135D, 0x135F], [0x1712, 0x1715], [0x1732, 0x1734], [0x1752, 0x1753],
+  [0x1772, 0x1773], [0x17B4, 0x17D3], [0x17DD, 0x17DD], [0x180B, 0x180D],
+  [0x1885, 0x1886], [0x18A9, 0x18A9], [0x1920, 0x193B], [0x1A17, 0x1A1B],
+  [0x1A55, 0x1A7F], [0x1AB0, 0x1AFF], [0x1B00, 0x1B04], [0x1B34, 0x1B44],
+  [0x1B6B, 0x1B73], [0x1B80, 0x1B82], [0x1BA1, 0x1BAD], [0x1BE6, 0x1BF3],
+  [0x1C24, 0x1C37], [0x1CD0, 0x1CD2], [0x1CD4, 0x1CE8], [0x1CED, 0x1CED],
+  [0x1CF4, 0x1CF4], [0x1CF7, 0x1CF9], [0x1DC0, 0x1DFF], [0x20D0, 0x20F0],
+  [0x2CEF, 0x2CF1], [0x2D7F, 0x2D7F], [0x2DE0, 0x2DFF], [0x302A, 0x302F],
+  [0x3099, 0x309A], [0xA66F, 0xA672], [0xA674, 0xA67D], [0xA69E, 0xA69F],
+  [0xA6F0, 0xA6F1], [0xA802, 0xA802], [0xA806, 0xA806], [0xA80B, 0xA80B],
+  [0xA823, 0xA827], [0xA880, 0xA881], [0xA8B4, 0xA8C5], [0xA8E0, 0xA8F1],
+  [0xA926, 0xA92D], [0xA947, 0xA953], [0xA980, 0xA983], [0xA9B3, 0xA9C0],
+  [0xAA29, 0xAA36], [0xAA43, 0xAA43], [0xAA4C, 0xAA4D], [0xAAEB, 0xAAEF],
+  [0xABE3, 0xABEA], [0xABEC, 0xABED], [0xFB1E, 0xFB1E], [0xFE00, 0xFE0F],
+  [0xFE20, 0xFE2F], [0x101FD, 0x101FD], [0x1D165, 0x1D169], [0x1D16D, 0x1D172],
+  [0x1D17B, 0x1D182], [0x1D185, 0x1D18B], [0x1D1AA, 0x1D1AD], [0xE0100, 0xE01EF],
+]
+
+type Heading {
+  level: Int
+  text: String
+  slug: String
+}
+
+type Options {
+  min_level: Int
+  max_level: Int
+  file: String?
+}
+
+fn fail_usage() -> Never {
+  eprint(usage_text)
+  process.exit(64)
+}
+
+fn is_digit_or_mark(cp: Int) -> Bool {
+  for start in digit_starts {
+    let last = if start == 0x1D7CE { start + 49 } else { start + 9 }
+    if cp >= start and cp <= last {
+      return true
+    }
+  }
+  for r in mark_ranges {
+    if cp >= r[0] and cp <= r[1] {
+      return true
+    }
+  }
+  return false
+}
+
+// Simple lowercase mapping of one character.
+fn lower_char(c: String) -> String {
+  if c == "\u{130}" {
+    return "i"
+  }
+  return c.lower()
+}
+
+fn keep_in_slug(c: String) -> Bool {
+  if c == " " or c == "-" or c == "_" {
+    return true
+  }
+  if c.is_letter() {
+    return true
+  }
+  let cps = c.code_points()
+  return is_digit_or_mark(cps[0])
+}
+
+fn base_slug(text: String) -> String {
+  var out: List<String> = []
+  for c in text.chars() {
+    let l = lower_char(c)
+    // lowering one character may give several; check each
+    for k in l.chars() {
+      if keep_in_slug(k) {
+        out.append(if k == " " { "-" } else { k })
+      }
+    }
+  }
+  return out.join("")
+}
+
+fn is_blank(c: String) -> Bool {
+  return c == " " or c == "\t"
+}
+
+fn trim_blanks_end(chars: List<String>) -> List<String> {
+  var n = chars.length
+  while n > 0 and is_blank(chars[n - 1]) {
+    n -= 1
+  }
+  return chars.take(n)
+}
+
+// The heading text of a line, or none if the line is not a heading.
+fn parse_heading(line: String) -> Heading? {
+  let chars = line.chars()
+  var i = 0
+  while i < chars.length and chars[i] == " " {
+    i += 1
+  }
+  if i > 3 {
+    return none
+  }
+  var level = 0
+  while i < chars.length and chars[i] == "#" {
+    i += 1
+    level += 1
+  }
+  if level < 1 or level > 6 {
+    return none
+  }
+  if i < chars.length and not is_blank(chars[i]) {
+    return none
+  }
+  var rest = chars.drop(i)
+  var start = 0
+  while start < rest.length and is_blank(rest[start]) {
+    start += 1
+  }
+  rest = trim_blanks_end(rest.drop(start))
+  var n = rest.length
+  while n > 0 and rest[n - 1] == "#" {
+    n -= 1
+  }
+  if n < rest.length and (n == 0 or is_blank(rest[n - 1])) {
+    rest = trim_blanks_end(rest.take(n))
+  }
+  if rest.is_empty() {
+    return none
+  }
+  let text = rest.join("")
+  return Heading(level: level, text: text, slug: base_slug(text))
+}
+
+// If the line opens a fence: its character and length.
+type Fence {
+  char: String
+  length: Int
+}
+
+fn fence_of(line: String) -> Fence? {
+  let chars = line.chars()
+  var i = 0
+  while i < chars.length and chars[i] == " " {
+    i += 1
+  }
+  if i > 3 or i >= chars.length {
+    return none
+  }
+  let c = chars[i]
+  if c != "`" and c != "~" {
+    return none
+  }
+  var n = 0
+  while i < chars.length and chars[i] == c {
+    i += 1
+    n += 1
+  }
+  if n < 3 {
+    return none
+  }
+  return Fence(char: c, length: n)
+}
+
+fn closes_fence(line: String, fence: Fence) -> Bool {
+  let chars = line.chars()
+  var i = 0
+  while i < chars.length and chars[i] == " " {
+    i += 1
+  }
+  if i > 3 {
+    return false
+  }
+  var n = 0
+  while i < chars.length and chars[i] == fence.char {
+    i += 1
+    n += 1
+  }
+  if n < fence.length {
+    return false
+  }
+  while i < chars.length {
+    if not is_blank(chars[i]) {
+      return false
+    }
+    i += 1
+  }
+  return true
+}
+
+// All headings with text, in order, with their final (numbered) slugs.
+fn headings_of(input: String) -> List<Heading> {
+  var result: List<Heading> = []
+  var seen: Map<String, Int> = {}
+  var open: Fence? = none
+  for raw in input.split("\n") {
+    let line = if raw.ends_with("\r") { raw.slice(from: 0, to: raw.length - 1) } else { raw }
+    if open is some(f) {
+      if closes_fence(line, f) {
+        open = none
+      }
+      continue
+    }
+    if fence_of(line) is some(f) {
+      open = f
+      continue
+    }
+    if parse_heading(line) is some(h) {
+      let count = seen[h.slug] ?? 0
+      seen[h.slug] = count + 1
+      let slug = if count == 0 { h.slug } else { "${h.slug}-${count}" }
+      result.append(Heading(level: h.level, text: h.text, slug: slug))
+    }
+  }
+  return result
+}
+
+fn render(input: String, min_level: Int, max_level: Int) -> List<String> {
+  var lines: List<String> = []
+  for h in headings_of(input) {
+    if h.level >= min_level and h.level <= max_level {
+      lines.append("${" ".repeat(2 * (h.level - min_level))}- [${h.text}](#${h.slug})")
+    }
+  }
+  return lines
+}
+
+fn level_value(text: String) -> Int {
+  let n = try text.to_int() catch _ {
+    fail_usage()
+  }
+  if n < 1 or n > 6 {
+    fail_usage()
+  }
+  return n
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var min_level = 1
+  var max_level = 6
+  var file: String? = none
+  var files_only = false
+  var i = 0
+  while i < args.length {
+    let a = args[i]
+    i += 1
+    if files_only or not a.starts_with("-") or a == "-" {
+      if file is some(_) {
+        fail_usage()
+      }
+      file = a
+    } else if a == "--" {
+      files_only = true
+    } else if a == "--min-level" or a == "--max-level" {
+      if i >= args.length {
+        fail_usage()
+      }
+      let v = level_value(args[i])
+      i += 1
+      if a == "--min-level" {
+        min_level = v
+      } else {
+        max_level = v
+      }
+    } else if a.starts_with("--min-level=") {
+      min_level = level_value(a.slice(from: 12, to: a.length))
+    } else if a.starts_with("--max-level=") {
+      max_level = level_value(a.slice(from: 12, to: a.length))
+    } else {
+      fail_usage()
+    }
+  }
+  if min_level > max_level {
+    fail_usage()
+  }
+  return Options(min_level: min_level, max_level: max_level, file: file)
+}
+
+fn main() throws {
+  let opts = parse_args(process.args())
+  var input = ""
+  if opts.file is some(path) {
+    input = try files.read(path) catch _ {
+      eprint("error: cannot read ${path}")
+      process.exit(2)
+    }
+  } else {
+    with stdin = io.stdin() {
+      input = try stdin.read_all().text_lossy()
+    }
+  }
+  for line in render(input, min_level: opts.min_level, max_level: opts.max_level) {
+    print(line)
+  }
+}
+
+test "example" {
+  let doc = "# Größe & Maße\n## Setup\n#### Deep\n## Setup ##\n```\n# not a heading\n```\n### Step 1.2: run `make`\n"
+  expect render(doc, min_level: 1, max_level: 3) == [
+    "- [Größe & Maße](#größe--maße)",
+    "  - [Setup](#setup)",
+    "  - [Setup](#setup-1)",
+    "    - [Step 1.2: run `make`](#step-12-run-make)",
+  ]
+}
+
+test "heading text" {
+  expect parse_heading("# C#")?.text == "C#"
+  expect parse_heading("### ###") is none
+  expect parse_heading("#hashtag") is none
+  expect parse_heading("####### x") is none
+  expect parse_heading("    # x") is none
+  expect parse_heading("#") is none
+  expect parse_heading("## Title ##  ")?.text == "Title"
+  expect parse_heading("#\tTab\t#\t")?.text == "Tab"
+}
+
+test "slugs" {
+  expect base_slug("A  B") == "a--b"
+  expect base_slug("Caf\u{65}\u{301}!") == "cafe\u{301}"
+  expect base_slug("\u{130}x") == "ix"
+  expect base_slug("a_b-c\td") == "a_b-cd"
+  expect base_slug("\u{663}") == "\u{663}"
+}
+
+test "fences" {
+  let doc = "~~~~\n# a\n~~~\n# b\n~~~~~\n# c\n````\n# d"
+  expect render(doc, min_level: 1, max_level: 6) == ["- [c](#c)"]
+}

@@ -1,0 +1,55 @@
+error: `log` is imported but not used
+  --> main.plumb:5:8
+  |
+5 | import log
+  |        ^^^
+  = help: remove the import
+error: `??` needs a value that may be missing, but this is a `Map<String, Value>`
+  --> main.plumb:98:16
+   |
+98 |   let fields = parsed ?? {}
+   |                ^^^^^^
+   = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Map<String, Value>`
+  --> main.plumb:130:16
+    |
+130 |   let fields = parsed ?? {}
+    |                ^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `EventRow`
+  --> main.plumb:153:17
+    |
+153 |     let event = found ?? EventRow(id: 0, name: "", capacity: 0, remaining: 0)
+    |                 ^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `ReservationRow`
+  --> main.plumb:181:13
+    |
+181 |     var r = found ?? ReservationRow(id: 0, event_id: 0, seats: 0, status: "")
+    |             ^^^^^
+    = help: remove `?? ...`
+error: `create_event` has 3 or more parameters: name every argument after the first
+  --> main.plumb:200:36
+    |
+200 |       return try create_event(req, conn, lock)
+    |                                    ^^^^
+    = help: write (…, conn: …, lock: …)
+error: `create_reservation` has 3 or more parameters: name every argument after the first
+  --> main.plumb:218:42
+    |
+218 |       return try create_reservation(req, id, conn, lock)
+    |                                          ^^
+    = help: write (…, event_id: …, conn: …, lock: …)
+error: `cancel_reservation` has 3 or more parameters: name every argument after the first
+  --> main.plumb:230:41
+    |
+230 |       return try cancel_reservation(id, conn, lock)
+    |                                         ^^^^
+    = help: write (…, conn: …, lock: …)
+error: `route` has 3 or more parameters: name every argument after the first
+  --> main.plumb:246:48
+    |
+246 |     router.any("/*rest", req => try route(req, conn, lock))
+    |                                                ^^^^
+    = help: write (…, conn: …, lock: …)
+9 error(s)

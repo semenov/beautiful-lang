@@ -1,0 +1,7 @@
+error: `Cancelled` is a type, not a value
+  --> main.plumb:183:28
+    |
+183 |       updated_job.status = Cancelled
+    |                            ^^^^^^^^^
+    = help: build a value with `Cancelled(...)`
+1 error(s)

@@ -1,0 +1,28 @@
+error: `String` has no method `substring`
+  --> main.plumb:42:17
+   |
+42 |     return path.substring(prefix.length(), path.length())
+   |                 ^^^^^^^^^
+error: `String` has no method `length`
+  --> main.plumb:42:34
+   |
+42 |     return path.substring(prefix.length(), path.length())
+   |                                  ^^^^^^
+error: `String` has no method `length`
+  --> main.plumb:42:49
+   |
+42 |     return path.substring(prefix.length(), path.length())
+   |                                                 ^^^^^^
+error: `values_equal` must return a `Bool` at the end
+  --> main.plumb:234:55
+    |
+234 | fn values_equal(a: json.Value, b: json.Value) -> Bool {
+    |                                                       ^
+    = help: add `return ...` as the last line
+error: `count` takes 1 argument(s), but 0 were given
+  --> main.plumb:271:14
+    |
+271 |       count: s.data.entries().count(),
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: (test)
+5 error(s)

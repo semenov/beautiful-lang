@@ -1,0 +1,248 @@
+import files
+import io
+import process
+
+let usage_text = "usage: app [-U N] OLD NEW"
+
+type Options {
+  context: Int
+  old_path: String
+  new_path: String
+}
+
+// One step of the walk: kind 0 kept, 1 removed, 2 added; `line` is the
+// index into the OLD lines (kept, removed) or the NEW lines (added).
+type Op {
+  kind: Int
+  line: Int
+}
+
+fn usage_fail() -> Never {
+  eprint(usage_text)
+  process.exit(2)
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var context = 3
+  var names: List<String> = []
+  var k = 0
+  while k < args.length {
+    let a = args[k]
+    if a == "-U" {
+      if k + 1 >= args.length {
+        usage_fail()
+      }
+      let v = args[k + 1]
+      if not v.is_digit() {
+        usage_fail()
+      }
+      // too many digits for an Int: larger than any file
+      context = try v.to_int() catch err { 1_000_000_000_000 }
+      k += 2
+    } else if a.length > 1 and a.starts_with("-") {
+      usage_fail()
+    } else {
+      names.append(a)
+      k += 1
+    }
+  }
+  if names.length != 2 {
+    usage_fail()
+  }
+  return Options(context: context, old_path: names[0], new_path: names[1])
+}
+
+fn read_or_die(path: String) -> Bytes {
+  let data = try files.read_bytes(path) catch err {
+    eprint("error: cannot read ${path}")
+    process.exit(2)
+  }
+  return data
+}
+
+// The lines of a file, each with its LF (the last one may lack it).
+fn split_lines(data: Bytes) -> List<Bytes> {
+  var lines: List<Bytes> = []
+  var start = 0
+  for i in 0..<data.length {
+    if data[i] == 10 {
+      lines.append(data.slice(from: start, to: i + 1))
+      start = i + 1
+    }
+  }
+  if start < data.length {
+    lines.append(data.slice(from: start, to: data.length))
+  }
+  return lines
+}
+
+// Equal lines get equal numbers.
+fn number_lines(a: List<Bytes>, b: List<Bytes>) -> List<List<Int>> {
+  var ids: Map<String, Int> = {}
+  var result: List<List<Int>> = []
+  for lines in [a, b] {
+    var nums: List<Int> = []
+    for line in lines {
+      let key = line.hex()
+      if ids[key] is some(id) {
+        nums.append(id)
+      } else {
+        let id = ids.length
+        ids[key] = id
+        nums.append(id)
+      }
+    }
+    result.append(nums)
+  }
+  return result
+}
+
+// The steps of the walk in the spec.
+fn walk(a: List<Int>, b: List<Int>) -> List<Op> {
+  let n = a.length
+  let m = b.length
+  var ops: List<Op> = []
+  var p = 0
+  while p < n and p < m and a[p] == b[p] {
+    ops.append(Op(kind: 0, line: p))
+    p += 1
+  }
+  let rn = n - p
+  let rm = m - p
+  let w = rm + 1
+  // t[x * w + y] = L(p + x, p + y)
+  var t: List<Int> = []
+  for _ in 0..<((rn + 1) * w) {
+    t.append(0)
+  }
+  var x = rn - 1
+  while x >= 0 {
+    var y = rm - 1
+    while y >= 0 {
+      if a[p + x] == b[p + y] {
+        t[x * w + y] = t[(x + 1) * w + y + 1] + 1
+      } else {
+        let down = t[(x + 1) * w + y]
+        let right = t[x * w + y + 1]
+        t[x * w + y] = if down >= right { down } else { right }
+      }
+      y -= 1
+    }
+    x -= 1
+  }
+  var i = 0
+  var j = 0
+  while i < rn or j < rm {
+    if i < rn and j < rm and a[p + i] == b[p + j] {
+      ops.append(Op(kind: 0, line: p + i))
+      i += 1
+      j += 1
+    } else if j == rm or (i < rn and t[(i + 1) * w + j] >= t[i * w + j + 1]) {
+      ops.append(Op(kind: 1, line: p + i))
+      i += 1
+    } else {
+      ops.append(Op(kind: 2, line: p + j))
+      j += 1
+    }
+  }
+  return ops
+}
+
+fn range_text(start: Int, count: Int) -> String {
+  let first = if count == 0 { start } else { start + 1 }
+  if count == 1 {
+    return "${first}"
+  }
+  return "${first},${count}"
+}
+
+fn add_line(out: Bytes, prefix: String, line: Bytes) -> Bytes {
+  var o = out
+  o.append_text(prefix)
+  o.append_all(line)
+  if line.length == 0 or line[line.length - 1] != 10 {
+    o.append_text("\n\\ No newline at end of file\n")
+  }
+  return o
+}
+
+fn render(opts: Options, old_lines: List<Bytes>, new_lines: List<Bytes>, ops: List<Op>) -> Bytes {
+  var out = Bytes()
+  // old and new lines consumed before each step
+  var old_before: List<Int> = []
+  var new_before: List<Int> = []
+  var changes: List<Int> = []
+  var o = 0
+  var nn = 0
+  for k in 0..<ops.length {
+    old_before.append(o)
+    new_before.append(nn)
+    let kind = ops[k].kind
+    if kind != 2 {
+      o += 1
+    }
+    if kind != 1 {
+      nn += 1
+    }
+    if kind != 0 {
+      changes.append(k)
+    }
+  }
+  if changes.is_empty() {
+    return out
+  }
+  out.append_text("--- ${opts.old_path}\n+++ ${opts.new_path}\n")
+  let ctx = opts.context
+  var g = 0
+  while g < changes.length {
+    var h = g
+    while h + 1 < changes.length and changes[h + 1] - changes[h] - 1 <= 2 * ctx {
+      h += 1
+    }
+    let first = if changes[g] - ctx < 0 { 0 } else { changes[g] - ctx }
+    let last = if changes[h] + ctx > ops.length - 1 { ops.length - 1 } else { changes[h] + ctx }
+    var c1 = 0
+    var c2 = 0
+    for k in first..=last {
+      if ops[k].kind != 2 {
+        c1 += 1
+      }
+      if ops[k].kind != 1 {
+        c2 += 1
+      }
+    }
+    out.append_text("@@ -${range_text(old_before[first], c1)} +${range_text(new_before[first], c2)} @@\n")
+    for k in first..=last {
+      let op = ops[k]
+      if op.kind == 0 {
+        out = add_line(out, prefix: " ", line: old_lines[op.line])
+      } else if op.kind == 1 {
+        out = add_line(out, prefix: "-", line: old_lines[op.line])
+      } else {
+        out = add_line(out, prefix: "+", line: new_lines[op.line])
+      }
+    }
+    g = h + 1
+  }
+  return out
+}
+
+fn main() {
+  let opts = parse_args(process.args())
+  let old_data = read_or_die(opts.old_path)
+  let new_data = read_or_die(opts.new_path)
+  let old_lines = split_lines(old_data)
+  let new_lines = split_lines(new_data)
+  let nums = number_lines(old_lines, new_lines)
+  let ops = walk(nums[0], nums[1])
+  let out = render(opts, old_lines: old_lines, new_lines: new_lines, ops: ops)
+  if out.is_empty() {
+    return
+  }
+  with stdout = io.stdout() {
+    try stdout.write(out) catch err {
+      process.exit(2)
+    }
+  }
+  process.exit(1)
+}

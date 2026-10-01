@@ -1,0 +1,31 @@
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:224:18
+    |
+224 |   let conn = try open_db()
+    |                  ^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:259:18
+    |
+259 |   let conn = try open_db()
+    |                  ^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:281:18
+    |
+281 |   let conn = try open_db()
+    |                  ^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:295:18
+    |
+295 |   let conn = try open_db()
+    |                  ^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+error: a `Connection` must be closed: get it with `with`
+  --> main.plumb:315:18
+    |
+315 |   let conn = try open_db()
+    |                  ^^^^^^^^^
+    = help: write `with f = try ... { ... }`: it's closed at the end of the block, even on an error
+5 error(s)

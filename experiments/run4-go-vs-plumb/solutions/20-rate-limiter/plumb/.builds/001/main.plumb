@@ -1,0 +1,207 @@
+import env
+import http
+import json
+import process
+import time
+
+type Config {
+  capacity: Int
+  refill_per_sec: Float
+}
+
+type Bucket {
+  tokens: Float
+  // time of the last refill, in nanoseconds of the monotonic clock
+  last: Int
+}
+
+type State {
+  buckets: Map<String, Bucket> = {}
+  allowed: Int = 0
+  denied: Int = 0
+}
+
+type Verdict {
+  allowed: Bool
+  remaining: Int
+  retry_after: Int
+}
+
+type Allowed {
+  allowed: Bool
+  remaining: Int
+}
+
+type Denied {
+  allowed: Bool
+  remaining: Int
+  retry_after: Int
+}
+
+type Stats {
+  allowed: Int
+  denied: Int
+  keys: Int
+}
+
+type ErrorBody {
+  error: String
+}
+
+// Slack for floating point error when a whole token has just been reached.
+let epsilon = 0.000000001
+
+fn fail_config(message: String) -> Never {
+  eprint("error: ${message}")
+  process.exit(2)
+}
+
+fn read_config() -> Config {
+  var capacity = 10
+  var refill = 1.0
+  if env.get("CAPACITY") is some(text) {
+    capacity = try text.to_int() catch err {
+      fail_config("CAPACITY must be a whole number >= 1, got \"${text}\"")
+    }
+    if capacity < 1 {
+      fail_config("CAPACITY must be a whole number >= 1, got \"${text}\"")
+    }
+  }
+  if env.get("REFILL_PER_SEC") is some(text) {
+    refill = try text.to_float() catch err {
+      fail_config("REFILL_PER_SEC must be a number > 0, got \"${text}\"")
+    }
+    if not (refill > 0.0) {
+      fail_config("REFILL_PER_SEC must be a number > 0, got \"${text}\"")
+    }
+  }
+  return Config(capacity: capacity, refill_per_sec: refill)
+}
+
+fn error_response(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+// Takes a token from the key's bucket if there is a whole one.
+fn take(state: Shared<State>, cfg: Config, key: String) -> Verdict {
+  let now = time.now().nanos
+  let cap = cfg.capacity.to_float()
+  with s = state.lock() {
+    var b = s.buckets[key] ?? Bucket(tokens: cap, last: now)
+    let elapsed = (now - b.last).to_float() / 1000000000.0
+    if elapsed > 0.0 {
+      b.tokens = b.tokens + elapsed * cfg.refill_per_sec
+      b.last = now
+    }
+    if b.tokens > cap {
+      b.tokens = cap
+    }
+    if b.tokens >= 1.0 - epsilon {
+      b.tokens = b.tokens - 1.0
+      if b.tokens < 0.0 {
+        b.tokens = 0.0
+      }
+      let remaining = (b.tokens + epsilon).floor()
+      s.buckets[key] = b
+      s.allowed += 1
+      return Verdict(allowed: true, remaining: remaining, retry_after: 0)
+    }
+    let wait = ((1.0 - b.tokens) / cfg.refill_per_sec - epsilon).ceil()
+    let retry = if wait < 1 { 1 } else { wait }
+    s.buckets[key] = b
+    s.denied += 1
+    return Verdict(allowed: false, remaining: 0, retry_after: retry)
+  }
+}
+
+fn check(req: http.Request, state: Shared<State>, cfg: Config) -> http.Response {
+  let parsed = try json.parse(req.text()) catch err {
+    return error_response(400, "body is not valid JSON")
+  }
+  if parsed is json.Value.Object(fields) {
+    if fields["key"] is some(v) {
+      if v is json.Value.String(key) {
+        if key.is_empty() {
+          return error_response(400, "key must not be empty")
+        }
+        let r = take(state, cfg: cfg, key: key)
+        if r.allowed {
+          return http.json(200, Allowed(allowed: true, remaining: r.remaining))
+        }
+        let res = http.json(429, Denied(allowed: false, remaining: 0, retry_after: r.retry_after))
+        return res.with_header("retry-after", "${r.retry_after}")
+      }
+      return error_response(400, "key must be a string")
+    }
+    return error_response(400, "key is missing")
+  }
+  return error_response(400, "body must be a JSON object")
+}
+
+fn stats(state: Shared<State>) -> http.Response {
+  with s = state.read() {
+    return http.json(200, Stats(allowed: s.allowed, denied: s.denied, keys: s.buckets.length))
+  }
+}
+
+fn route(req: http.Request, state: Shared<State>, cfg: Config) -> http.Response {
+  if req.path == "/check" {
+    if req.method != "POST" {
+      return error_response(405, "method not allowed")
+    }
+    return check(req, state: state, cfg: cfg)
+  }
+  if req.path == "/stats" {
+    if req.method != "GET" {
+      return error_response(405, "method not allowed")
+    }
+    return stats(state)
+  }
+  return error_response(404, "not found")
+}
+
+fn make_router(state: Shared<State>, cfg: Config) -> http.Router {
+  var router = http.Router()
+  router.use((req, next) => route(req, state: state, cfg: cfg))
+  return router
+}
+
+fn main() throws {
+  let cfg = read_config()
+  let port = try (env.get("PORT") ?? "8080").to_int() catch err {
+    fail_config("PORT must be a whole number")
+  }
+  let state = Shared<State>(State())
+  try http.serve_with(make_router(state, cfg: cfg), options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}
+
+test "bucket drains and denies" {
+  let cfg = Config(capacity: 2, refill_per_sec: 0.5)
+  let router = make_router(Shared<State>(State()), cfg: cfg)
+  var req = http.request("POST", "/check")
+  req.body = "{\"key\":\"k1\"}".bytes()
+  let a = try router.handle(req)
+  expect a.status == 200
+  expect a.text() == "{\"allowed\":true,\"remaining\":1}"
+  let b = try router.handle(req)
+  expect b.status == 200
+  let c = try router.handle(req)
+  expect c.status == 429
+  expect c.headers["retry-after"] == "2"
+  let s = try router.handle(http.request("GET", "/stats"))
+  expect s.text() == "{\"allowed\":2,\"denied\":1,\"keys\":1}"
+}
+
+test "errors" {
+  let router = make_router(Shared<State>(State()), cfg: Config(capacity: 1, refill_per_sec: 1.0))
+  expect (try router.handle(http.request("GET", "/nope"))).status == 404
+  expect (try router.handle(http.request("GET", "/check"))).status == 405
+  expect (try router.handle(http.request("POST", "/stats"))).status == 405
+  var req = http.request("POST", "/check")
+  req.body = "{\"key\":\"\"}".bytes()
+  expect (try router.handle(req)).status == 400
+  req.body = "[1]".bytes()
+  expect (try router.handle(req)).status == 400
+  req.body = "{\"key\":5}".bytes()
+  expect (try router.handle(req)).status == 400
+}

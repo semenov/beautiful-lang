@@ -1,0 +1,89 @@
+error: unknown name `process`
+  --> main.plumb:27:14
+   |
+27 |   let args = process.args()
+   |              ^^^^^^^
+   = help: add `import process` at the top of the file
+error: missing field(s) of `Options`: dir, mode
+  --> main.plumb:28:14
+   |
+28 |   var opts = Options()
+   |              ^^^^^^^^^
+error: there is no `+` on text
+  --> main.plumb:142:9
+    |
+142 |         result += "{"
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:150:13
+    |
+150 |             num_str += c
+    |             ^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:163:11
+    |
+163 |           result += m.groups[group_num] ?? ""
+    |           ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:171:9
+    |
+171 |         result += "}"
+    |         ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:177:7
+    |
+177 |       result += char
+    |       ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: `List<String>` has no method `slice`
+  --> main.plumb:206:28
+    |
+206 |     let rest_chars = chars.slice(hash_start + count, chars.length)
+    |                            ^^^^^
+error: `apply_regex_mode` has 3 or more parameters: name every argument after the first
+  --> main.plumb:235:58
+    |
+235 |         let transformed = try apply_regex_mode(filename, pattern, template)
+    |                                                          ^^^^^^^
+    = help: write (…, pattern: …, template: …)
+error: `apply_counter_mode` has 3 or more parameters: name every argument after the first
+  --> main.plumb:248:52
+    |
+248 |             try apply_counter_mode(renames.length, template, start)
+    |                                                    ^^^^^^^^
+    = help: write (…, template: …, start: …)
+error: `apply_counter_mode` has 3 or more parameters: name every argument after the first
+  --> main.plumb:251:50
+    |
+251 |           try apply_counter_mode(renames.length, template, start)
+    |                                                  ^^^^^^^^
+    = help: write (…, template: …, start: …)
+error: unknown name `process`
+  --> main.plumb:285:5
+    |
+285 |     process.exit(64)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:292:5
+    |
+292 |     process.exit(64)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:300:5
+    |
+300 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: `process_batch` has 3 or more parameters: name every argument after the first
+  --> main.plumb:313:40
+    |
+313 |   let renames = try process_batch(dir, candidates, mode)
+    |                                        ^^^^^^^^^^
+    = help: write (…, candidates: …, mode: …)
+15 error(s)

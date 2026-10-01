@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "step ['add', 'Buy milk', '--tag', 'home', '--due', '2026-03-01']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "database file created at TODO_DB",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ids never reused",
+   "ok": false,
+   "detail": "step ['add', 'a']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "tags sorted, deduplicated, filtered exactly",
+   "ok": false,
+   "detail": "step ['add', 't1', '--tag', 'work', '--tag', 'Urgent', '--tag', 'a-b_c', '--tag', 'work']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "overdue: open, due strictly before today",
+   "ok": false,
+   "detail": "step ['add', 'past', '--due', '2026-01-31']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "SQL-like title stored verbatim",
+   "ok": false,
+   "detail": "step ['add', 'first']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "search: % and _ are literal",
+   "ok": false,
+   "detail": "step ['add', '100% done']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "search is case-sensitive substring",
+   "ok": false,
+   "detail": "step ['add', 'Buy Milk']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "quotes, backslashes and unicode",
+   "ok": false,
+   "detail": "step ['add', 'say \"hi\" \\\\n it\\'s']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "done is idempotent",
+   "ok": false,
+   "detail": "step ['add', 'a']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "unknown ids exit 3",
+   "ok": false,
+   "detail": "(exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n')"
+  },
+  {
+   "name": "leap day accepted",
+   "ok": false,
+   "detail": "step ['add', 'leap', '--due', '2024-02-29']: expected exit=0 stdout='added 1\\n'; got exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  },
+  {
+   "name": "invalid dates rejected, nothing stored",
+   "ok": false,
+   "detail": "([exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'], exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n')"
+  },
+  {
+   "name": "TODO_DB empty",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": false,
+   "detail": "([('unknown command', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('add without title', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('add empty title', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('title with newline', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('invalid tag', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('id not a number', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('id zero', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('overdue without today', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('today without overdue', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('empty search', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('extra argument', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'), ('unknown option', exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n')], exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n')"
+  },
+  {
+   "name": "150 todos",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: near \"SEQUENCE\": syntax error\\n'"
+  }
+ ]
+}

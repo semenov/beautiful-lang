@@ -1,0 +1,271 @@
+import files
+
+// Business-day arithmetic. A day is a number: days since 0001-01-01, which
+// was a Monday, so day % 7 is the weekday (0 = mon ... 6 = sun).
+
+let day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+let month_lengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
+let usage_text = "usage: app between START END [--holidays FILE] [--weekend DAYS] | app add DATE N [--holidays FILE] [--weekend DAYS]"
+
+fn usage_fail() -> Never {
+  eprint(usage_text)
+  process.exit(64)
+}
+
+fn fail(message: String) -> Never {
+  eprint("error: ${message}")
+  process.exit(2)
+}
+
+fn is_leap(year: Int) -> Bool {
+  return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+}
+
+fn month_length(year: Int, month: Int) -> Int {
+  if month == 2 and is_leap(year) {
+    return 29
+  }
+  return month_lengths[month - 1]
+}
+
+fn days_before_year(year: Int) -> Int {
+  let y = year - 1
+  return 365 * y + y.div(4) - y.div(100) + y.div(400)
+}
+
+fn days_before_month(year: Int, month: Int) -> Int {
+  var total = 0
+  for m in 1..<month {
+    total += month_length(year, m)
+  }
+  return total
+}
+
+// The last day we can show: 9999-12-31.
+fn last_day() -> Int {
+  return days_before_year(10000) - 1
+}
+
+// The day number of a YYYY-MM-DD text, or none if it isn't one.
+fn parse_date(text: String) -> Int? {
+  let cs = text.chars()
+  if cs.length != 10 or cs[4] != "-" or cs[7] != "-" {
+    return none
+  }
+  let ys = text.slice(from: 0, to: 4)
+  let ms = text.slice(from: 5, to: 7)
+  let ds = text.slice(from: 8, to: 10)
+  if not (ys.is_digit() and ms.is_digit() and ds.is_digit()) {
+    return none
+  }
+  let year = try ys.to_int() catch _ { return none }
+  let month = try ms.to_int() catch _ { return none }
+  let day = try ds.to_int() catch _ { return none }
+  if year < 1 or month < 1 or month > 12 or day < 1 {
+    return none
+  }
+  if day > month_length(year, month) {
+    return none
+  }
+  return days_before_year(year) + days_before_month(year, month) + day - 1
+}
+
+fn format_date(n: Int) -> String {
+  var year = n.div(365) + 1
+  while days_before_year(year) > n {
+    year -= 1
+  }
+  var rest = n - days_before_year(year)
+  var month = 1
+  while rest >= month_length(year, month) {
+    rest -= month_length(year, month)
+    month += 1
+  }
+  let y = "${year}".pad_start(4, fill: "0")
+  let m = "${month}".pad_start(2, fill: "0")
+  let d = "${rest + 1}".pad_start(2, fill: "0")
+  return "${y}-${m}-${d}"
+}
+
+// What the program knows about which days don't count.
+type Calendar {
+  // is_weekend[w] for weekday w (0 = mon)
+  is_weekend: List<Bool>
+  weekdays_per_week: Int
+  // distinct holidays that fall on business-eligible weekdays, as days
+  holidays: List<Int>
+}
+
+// The number of business days d with 0 <= d < n.
+fn count_before(cal: Calendar, n: Int) -> Int {
+  let weeks = n.div(7)
+  let r = n % 7
+  var total = weeks * cal.weekdays_per_week
+  for w in 0..<r {
+    if not cal.is_weekend[w] {
+      total += 1
+    }
+  }
+  for h in cal.holidays {
+    if h < n {
+      total += 1
+    }
+  }
+  return total
+}
+
+// The smallest day t whose business-day count through t reaches k (the k-th
+// business day, counting from 1); none if there is no such day in range.
+fn kth_business_day(cal: Calendar, k: Int) -> Int? {
+  if k < 1 or count_before(cal, last_day() + 1) < k {
+    return none
+  }
+  var lo = 0
+  var hi = last_day()
+  while lo < hi {
+    let mid = lo + (hi - lo).div(2)
+    if count_before(cal, mid + 1) >= k {
+      hi = mid
+    } else {
+      lo = mid + 1
+    }
+  }
+  return lo
+}
+
+fn parse_weekend(text: String) -> List<Bool>? {
+  var flags = [false, false, false, false, false, false, false]
+  if text == "" {
+    return flags
+  }
+  for name in text.split(",") {
+    var found = false
+    for i in 0..<7 {
+      if day_names[i] == name {
+        flags[i] = true
+        found = true
+      }
+    }
+    if not found {
+      return none
+    }
+  }
+  return flags
+}
+
+fn is_whole_number(text: String) -> Bool {
+  let digits = if text.starts_with("-") { text.slice(from: 1, to: text.length) } else { text }
+  return digits.is_digit()
+}
+
+fn load_holidays(path: String, is_weekend: List<Bool>) -> List<Int> {
+  let text = try files.read(path) catch _ {
+    fail("cannot read ${path}")
+  }
+  var found: Set<Int> = {}
+  var number = 0
+  for raw in text.split("\n") {
+    number += 1
+    var line = raw
+    if line.index_of("#") is some(at) {
+      line = line.slice(from: 0, to: at)
+    }
+    line = line.trim()
+    if line.is_empty() {
+      continue
+    }
+    if parse_date(line) is some(day) {
+      if not is_weekend[day % 7] {
+        found.add(day)
+      }
+    } else {
+      fail("${path}:${number}: invalid date")
+    }
+  }
+  return found.to_list().sorted()
+}
+
+fn main() {
+  let args = process.args()
+  var positional: List<String> = []
+  var holidays_path: String? = none
+  var weekend_text: String? = none
+  var i = 0
+  while i < args.length {
+    let a = args[i]
+    if a == "--holidays" or a == "--weekend" {
+      if i + 1 >= args.length or args[i + 1].starts_with("--") {
+        usage_fail()
+      }
+      if a == "--holidays" {
+        holidays_path = args[i + 1]
+      } else {
+        weekend_text = args[i + 1]
+      }
+      i += 2
+    } else if a.starts_with("--") {
+      usage_fail()
+    } else if a.starts_with("-") and a.length > 1 and not a.slice(from: 1, to: 2).is_digit() {
+      usage_fail()
+    } else {
+      positional.append(a)
+      i += 1
+    }
+  }
+
+  if positional.length != 3 {
+    usage_fail()
+  }
+  let command = positional[0]
+  if command != "between" and command != "add" {
+    usage_fail()
+  }
+  if command == "add" and not is_whole_number(positional[2]) {
+    usage_fail()
+  }
+  let flags = parse_weekend(weekend_text ?? "sat,sun") ?? usage_fail()
+  var weekend_days = 0
+  for f in flags {
+    if f {
+      weekend_days += 1
+    }
+  }
+  if weekend_days == 7 {
+    usage_fail()
+  }
+
+  let first = parse_date(positional[1]) ?? fail("invalid date: ${positional[1]}")
+  var second = 0
+  var n = 0
+  if command == "between" {
+    second = parse_date(positional[2]) ?? fail("invalid date: ${positional[2]}")
+  } else {
+    n = try positional[2].to_int() catch _ { usage_fail() }
+  }
+
+  var holidays: List<Int> = []
+  if holidays_path is some(path) {
+    holidays = load_holidays(path, is_weekend: flags)
+  }
+  let cal = Calendar(is_weekend: flags, weekdays_per_week: 7 - weekend_days, holidays: holidays)
+
+  if command == "between" {
+    print("${count_before(cal, second) - count_before(cal, first)}")
+    return
+  }
+
+  // add: the k-th business day, counting from the first one on or after day 0.
+  if n > 4_000_000 or n < -4_000_000 {
+    fail("date out of range")
+  }
+  let k = if n > 0 {
+    count_before(cal, first + 1) + n
+  } else if n == 0 {
+    count_before(cal, first) + 1
+  } else {
+    count_before(cal, first) + n + 1
+  }
+  let result = kth_business_day(cal, k: k) ?? fail("date out of range")
+  print(format_date(result))
+}

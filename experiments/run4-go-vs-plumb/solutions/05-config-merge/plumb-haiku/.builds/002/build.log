@@ -1,0 +1,5 @@
+error: expected a pattern, found `not`
+  --> main.plumb:34:18
+   |
+34 |     if parsed is not json.Value.Object(_) {
+   |                  ^^^

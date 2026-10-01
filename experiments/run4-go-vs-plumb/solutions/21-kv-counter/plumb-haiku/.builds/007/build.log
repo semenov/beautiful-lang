@@ -1,0 +1,19 @@
+error: `error_response_with_value` has 3 or more parameters: name every argument after the first
+  --> main.plumb:171:49
+    |
+171 |           return error_response_with_value(409, "value is not an integer", current_value)
+    |                                                 ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write (…, message: …, value: …)
+error: `error_response_with_value` has 3 or more parameters: name every argument after the first
+  --> main.plumb:174:50
+    |
+174 |       _ => return error_response_with_value(409, "value is not an integer", current_value)
+    |                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write (…, message: …, value: …)
+error: `error_response_with_value` has 3 or more parameters: name every argument after the first
+  --> main.plumb:239:45
+    |
+239 |       return error_response_with_value(409, "cas failed", current_for_error)
+    |                                             ^^^^^^^^^^^^
+    = help: write (…, message: …, value: …)
+3 error(s)

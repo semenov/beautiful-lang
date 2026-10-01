@@ -1,0 +1,109 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all 2xx exit 0, whitespace trimmed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no URLs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "any status is a response",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "redirects followed, at most 10",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "connect and invalid-url errors",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "connection closed without response",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large and unsized bodies",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "timeout on a slow response",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "timeout covers a trickling body",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "fetch within the timeout",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrency 3 is reached and not exceeded",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "default concurrency 4",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrency 1 is sequential",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrency above the number of URLs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "200 URLs from a file, in input order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "200 URLs: limit 16 respected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "duplicate lines fetched separately",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "each line fetched exactly once",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unreadable file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": false,
+   "detail": "[(['--concurrency', 'x'], exit=1 timed_out=False stdout='' stderr='error: the option --concurrency: expected a whole number, found \"x\"\\n'), (['--concurrency'], exit=1 timed_out=False stdout='' stderr='error: a value is missing after --concurrency (see --help)\\n'), (['--timeout', 'soon'], exit=1 timed_out=False stdout='' stderr='error: the option --timeout: expected a number, found \"soon\"\\n'), (['--bogus'], exit=1 timed_out=False stdout='' stderr='error: unknown option --bogus (see --help)\\n')]"
+  }
+ ]
+}

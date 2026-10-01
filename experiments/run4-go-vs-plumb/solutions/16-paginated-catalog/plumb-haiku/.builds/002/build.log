@@ -1,0 +1,395 @@
+error: `Set<String>` has no method `has`
+  --> main.plumb:46:13
+   |
+46 |     if seen.has(p.id) {
+   |             ^^^
+   = help: did you mean `contains`?
+error: `Set<String>` has no method `insert`
+  --> main.plumb:49:10
+   |
+49 |     seen.insert(p.id)
+   |          ^^^^^^
+error: `compare_products` must return a `Int` at the end
+  --> main.plumb:101:66
+    |
+101 | fn compare_products(a: Product, b: Product, sort: String) -> Int {
+    |                                                                  ^
+    = help: add `return ...` as the last line
+error: the result (`Int`) is not used
+  --> main.plumb:129:20
+    |
+129 |   if a.id < b.id { -1 }
+    |                    ^^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+error: the result (`Int`) is not used
+  --> main.plumb:130:25
+    |
+130 |   else if a.id > b.id { 1 }
+    |                         ^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+error: fields of `String` are passed by name
+  --> main.plumb:136:79
+    |
+136 |   cursor_obj["c"] = if filter_state.category is some(cat) { json.Value.String(cat) } else { json.Value.Null }
+    |                                                                               ^^^
+    = help: write `value: …`
+error: fields of `Number` are passed by name
+  --> main.plumb:137:41
+    |
+137 |   cursor_obj["min"] = json.Value.Number(filter_state.min_price.to_string())
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: expected `Number`, found `String`
+  --> main.plumb:137:41
+    |
+137 |   cursor_obj["min"] = json.Value.Number(filter_state.min_price.to_string())
+    |                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: fields of `Number` are passed by name
+  --> main.plumb:138:82
+    |
+138 |   cursor_obj["max"] = if filter_state.max_price is some(max) { json.Value.Number(max.to_string()) } else { json.Value.Null }
+    |                                                                                  ^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: expected `Number`, found `String`
+  --> main.plumb:138:82
+    |
+138 |   cursor_obj["max"] = if filter_state.max_price is some(max) { json.Value.Number(max.to_string()) } else { json.Value.Null }
+    |                                                                                  ^^^^^^^^^^^^^^^
+error: fields of `Bool` are passed by name
+  --> main.plumb:139:79
+    |
+139 |   cursor_obj["s"] = if filter_state.in_stock is some(stock) { json.Value.Bool(stock) } else { json.Value.Null }
+    |                                                                               ^^^^^
+    = help: write `value: …`
+error: fields of `String` are passed by name
+  --> main.plumb:140:42
+    |
+140 |   cursor_obj["sort"] = json.Value.String(filter_state.sort)
+    |                                          ^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Number` are passed by name
+  --> main.plumb:141:41
+    |
+141 |   cursor_obj["off"] = json.Value.Number(offset.to_string())
+    |                                         ^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: expected `Number`, found `String`
+  --> main.plumb:141:41
+    |
+141 |   cursor_obj["off"] = json.Value.Number(offset.to_string())
+    |                                         ^^^^^^^^^^^^^^^^^^
+error: fields of `Object` are passed by name
+  --> main.plumb:143:47
+    |
+143 |   let encoded = json.encode(json.Value.Object(cursor_obj))
+    |                                               ^^^^^^^^^^
+    = help: write `fields: …`
+error: `some(x)` is only a pattern
+  --> main.plumb:155:31
+    |
+155 |       json.Value.String(s) => some(s)
+    |                               ^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: can't figure out the type here
+  --> main.plumb:156:26
+    |
+156 |       json.Value.Null => none
+    |                          ^^^^
+    = help: add a type: `let xs: List<Int> = []`
+error: nothing here can fail
+  --> main.plumb:162:31
+    |
+162 |       json.Value.Number(n) => try (try n.to_int())
+    |                               ^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: `some(x)` is only a pattern
+  --> main.plumb:168:31
+    |
+168 |       json.Value.Number(n) => some(try (try n.to_int()))
+    |                               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: nothing here can fail
+  --> main.plumb:168:36
+    |
+168 |       json.Value.Number(n) => some(try (try n.to_int()))
+    |                                    ^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: `some(x)` is only a pattern
+  --> main.plumb:175:29
+    |
+175 |       json.Value.Bool(b) => some(b)
+    |                             ^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: nothing here can fail
+  --> main.plumb:188:31
+    |
+188 |       json.Value.Number(n) => try (try n.to_int())
+    |                               ^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: fields of `String` are passed by name
+  --> main.plumb:206:33
+    |
+206 |   obj["id"] = json.Value.String(p.id)
+    |                                 ^^^^
+    = help: write `value: …`
+error: fields of `String` are passed by name
+  --> main.plumb:207:35
+    |
+207 |   obj["name"] = json.Value.String(p.name)
+    |                                   ^^^^^^
+    = help: write `value: …`
+error: fields of `String` are passed by name
+  --> main.plumb:208:39
+    |
+208 |   obj["category"] = json.Value.String(p.category)
+    |                                       ^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Number` are passed by name
+  --> main.plumb:209:42
+    |
+209 |   obj["price_cents"] = json.Value.Number(p.price_cents.to_string())
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: expected `Number`, found `String`
+  --> main.plumb:209:42
+    |
+209 |   obj["price_cents"] = json.Value.Number(p.price_cents.to_string())
+    |                                          ^^^^^^^^^^^^^^^^^^^^^^^^^
+error: fields of `Bool` are passed by name
+  --> main.plumb:210:37
+    |
+210 |   obj["in_stock"] = json.Value.Bool(p.in_stock)
+    |                                     ^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:211:28
+    |
+211 |   return json.Value.Object(obj)
+    |                            ^^^
+    = help: write `fields: …`
+error: `some(x)` is only a pattern
+  --> main.plumb:220:24
+    |
+220 |     filters.category = some(cat)
+    |                        ^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: fields of `String` are passed by name
+  --> main.plumb:226:46
+    |
+226 |       error_obj["error"] = json.Value.String("invalid parameter: min_price")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:227:47
+    |
+227 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: `some(x)` is only a pattern
+  --> main.plumb:232:25
+    |
+232 |     filters.max_price = some(try parse_price(max_str) catch err {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: fields of `String` are passed by name
+  --> main.plumb:234:46
+    |
+234 |       error_obj["error"] = json.Value.String("invalid parameter: max_price")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:235:47
+    |
+235 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:241:44
+    |
+241 |     error_obj["error"] = json.Value.String("invalid parameter: max_price")
+    |                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:242:45
+    |
+242 |     return http.json(400, json.Value.Object(error_obj))
+    |                                             ^^^^^^^^^
+    = help: write `fields: …`
+error: `some(x)` is only a pattern
+  --> main.plumb:246:24
+    |
+246 |     filters.in_stock = some(try parse_bool(stock_str) catch err {
+    |                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: fields of `String` are passed by name
+  --> main.plumb:248:46
+    |
+248 |       error_obj["error"] = json.Value.String("invalid parameter: in_stock")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:249:47
+    |
+249 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:256:46
+    |
+256 |       error_obj["error"] = json.Value.String("invalid parameter: sort")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:257:47
+    |
+257 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:265:46
+    |
+265 |       error_obj["error"] = json.Value.String("invalid parameter: limit")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:266:47
+    |
+266 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:273:46
+    |
+273 |       error_obj["error"] = json.Value.String("invalid parameter: cursor")
+    |                                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:274:47
+    |
+274 |       return http.json(400, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: `sort` takes 0 argument(s), but 1 were given
+  --> main.plumb:286:5
+    |
+286 |     filtered.sort((a, b) => compare_products(a, b, filters.sort))
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: ()
+error: `sort` needs values that can be ordered (numbers, String, time); for other types use `sort_by(x => x.key)`, but this is `Product`
+  --> main.plumb:286:5
+    |
+286 |     filtered.sort((a, b) => compare_products(a, b, filters.sort))
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: `compare_products` has 3 or more parameters: name every argument after the first
+  --> main.plumb:286:49
+    |
+286 |     filtered.sort((a, b) => compare_products(a, b, filters.sort))
+    |                                                 ^
+    = help: write (…, b: …, sort: …)
+error: `some(x)` is only a pattern
+  --> main.plumb:298:21
+    |
+298 |       next_cursor = some(encode_cursor(filters, offset + limit))
+    |                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: fields of `Array` are passed by name
+  --> main.plumb:307:42
+    |
+307 |     response["items"] = json.Value.Array(items_array)
+    |                                          ^^^^^^^^^^^
+    = help: write `items: …`
+error: fields of `String` are passed by name
+  --> main.plumb:308:77
+    |
+308 |     response["next_cursor"] = if next_cursor is some(c) { json.Value.String(c) } else { json.Value.Null }
+    |                                                                             ^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:310:45
+    |
+310 |     return http.json(200, json.Value.Object(response))
+    |                                             ^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:326:42
+    |
+326 |   error_obj["error"] = json.Value.String("not found")
+    |                                          ^^^^^^^^^^^
+    = help: write `value: …`
+error: fields of `Object` are passed by name
+  --> main.plumb:327:43
+    |
+327 |   return http.json(404, json.Value.Object(error_obj))
+    |                                           ^^^^^^^^^
+    = help: write `fields: …`
+error: nothing here can fail
+  --> main.plumb:331:18
+    |
+331 |   let port_str = try env.get("PORT") ?? "8080"
+    |                  ^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: unknown name `process`
+  --> main.plumb:334:5
+    |
+334 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: nothing here can fail
+  --> main.plumb:337:22
+    |
+337 |   let catalog_path = try env.get("CATALOG_PATH") ?? throw Failure(message: "CATALOG_PATH not set")
+    |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: unknown name `process`
+  --> main.plumb:341:5
+    |
+341 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: fields of `String` are passed by name
+  --> main.plumb:353:46
+    |
+353 |       error_obj["error"] = json.Value.String("method not allowed")
+    |                                              ^^^^^^^^^^^^^^^^^^^^
+    = help: write `value: …`
+error: no `return` inside a lambda
+  --> main.plumb:354:7
+    |
+354 |       return http.json(405, json.Value.Object(error_obj))
+    |       ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:354:14
+    |
+354 |       return http.json(405, json.Value.Object(error_obj))
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: fields of `Object` are passed by name
+  --> main.plumb:354:47
+    |
+354 |       return http.json(405, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+error: fields of `String` are passed by name
+  --> main.plumb:356:46
+    |
+356 |       error_obj["error"] = json.Value.String("not found")
+    |                                              ^^^^^^^^^^^
+    = help: write `value: …`
+error: no `return` inside a lambda
+  --> main.plumb:357:7
+    |
+357 |       return http.json(404, json.Value.Object(error_obj))
+    |       ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:357:14
+    |
+357 |       return http.json(404, json.Value.Object(error_obj))
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: fields of `Object` are passed by name
+  --> main.plumb:357:47
+    |
+357 |       return http.json(404, json.Value.Object(error_obj))
+    |                                               ^^^^^^^^^
+    = help: write `fields: …`
+67 error(s)

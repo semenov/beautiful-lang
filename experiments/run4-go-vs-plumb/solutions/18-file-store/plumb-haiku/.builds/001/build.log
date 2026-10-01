@@ -1,0 +1,109 @@
+error: `json` is imported but not used
+  --> main.plumb:3:8
+  |
+3 | import json
+  |        ^^^^
+  = help: remove the import
+error: can't loop over `String` directly
+  --> main.plumb:53:15
+   |
+53 |   for char in name {
+   |               ^^^^
+   = help: use `text.chars()`, `text.words()` or `text.lines()`
+error: `some(...)` can't match a `String`: it's never missing
+  --> main.plumb:95:19
+   |
+95 |       if entry is some(info) {
+   |                   ^^^^^^^^^^
+error: `sort` takes 0 argument(s), but 1 were given
+  --> main.plumb:104:3
+    |
+104 |   result.sort(by: (a, b) => a.name < b.name)
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: ()
+error: `sort` needs values that can be ordered (numbers, String, time); for other types use `sort_by(x => x.key)`, but this is `FileInfo`
+  --> main.plumb:104:3
+    |
+104 |   result.sort(by: (a, b) => a.name < b.name)
+    |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: can't figure out the type here
+  --> main.plumb:104:19
+    |
+104 |   result.sort(by: (a, b) => a.name < b.name)
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: add a type: `let xs: List<Int> = []`
+error: the type isn't known here yet
+  --> main.plumb:104:31
+    |
+104 |   result.sort(by: (a, b) => a.name < b.name)
+    |                               ^^^^
+    = help: add a type annotation
+error: the type isn't known here yet
+  --> main.plumb:104:40
+    |
+104 |   result.sort(by: (a, b) => a.name < b.name)
+    |                                        ^^^^
+    = help: add a type annotation
+error: no `return` inside a lambda
+  --> main.plumb:184:5
+    |
+184 |     return try put_file_handler(req, config, name)
+    |     ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:184:12
+    |
+184 |     return try put_file_handler(req, config, name)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: `put_file_handler` has 3 or more parameters: name every argument after the first
+  --> main.plumb:184:38
+    |
+184 |     return try put_file_handler(req, config, name)
+    |                                      ^^^^^^
+    = help: write (…, config: …, name: …)
+error: no `return` inside a lambda
+  --> main.plumb:189:5
+    |
+189 |     return try get_file_handler(req, config, name)
+    |     ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:189:12
+    |
+189 |     return try get_file_handler(req, config, name)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: `get_file_handler` has 3 or more parameters: name every argument after the first
+  --> main.plumb:189:38
+    |
+189 |     return try get_file_handler(req, config, name)
+    |                                      ^^^^^^
+    = help: write (…, config: …, name: …)
+error: no `return` inside a lambda
+  --> main.plumb:194:5
+    |
+194 |     return try delete_file_handler(req, config, name)
+    |     ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:194:12
+    |
+194 |     return try delete_file_handler(req, config, name)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: `delete_file_handler` has 3 or more parameters: name every argument after the first
+  --> main.plumb:194:41
+    |
+194 |     return try delete_file_handler(req, config, name)
+    |                                         ^^^^^^
+    = help: write (…, config: …, name: …)
+error: no `return` inside a lambda
+  --> main.plumb:198:5
+    |
+198 |     return http.json(404, ErrorResponse(error: "not found"))
+    |     ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:198:12
+    |
+198 |     return http.json(404, ErrorResponse(error: "not found"))
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+19 error(s)

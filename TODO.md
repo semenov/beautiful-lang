@@ -412,3 +412,17 @@ items stay (ticked) so nothing is lost. New requests are added as they come.
       Range, HEAD), `Router.files`
 - [x] HTTP streaming both ways (`http.stream`, `http.open`), client
       requests with headers (`http.ClientRequest`, `http.send`)
+
+## From run 4, Go vs Plumb with agents (experiments/run4-go-vs-plumb/REPORT.md)
+
+- Bug: `time.parse_date("2023-02-29")` succeeds and rolls into March.
+- Check SQL literals at compile time (`plumb check` accepts `selec * form t`;
+  README says the compiler can check it).
+- Missing vs null in `json.decode<T>` (RealWorld #4): a PATCH couldn't clear a field.
+- Per-field errors from `decode<T>` instead of one "invalid JSON".
+- `cli.decode`: settable exit code and `usage:` prefix, options after
+  positionals, the FILE positional filled. Agents wrote their own parsers.
+- Symlink test; `files.walk` that survives an unreadable directory;
+  `csv.encode` + `print` doubles the newline; `process.interrupted()` from a
+  spawned task; regex over 9 groups; Unicode digit/mark tests; document
+  whether `req.query` is decoded.

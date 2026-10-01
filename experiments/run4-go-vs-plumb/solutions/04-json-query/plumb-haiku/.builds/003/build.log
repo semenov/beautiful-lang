@@ -1,0 +1,5 @@
+error: expected the end of the line, found `+=`
+  --> main.plumb:158:20
+    |
+158 |       34 => result += "\\\""
+    |                    ^^

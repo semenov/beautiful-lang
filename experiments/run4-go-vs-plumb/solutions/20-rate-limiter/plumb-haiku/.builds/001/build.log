@@ -1,0 +1,58 @@
+error: `key` is never used
+  --> main.plumb:26:9
+   |
+26 |     let key = entry.key
+   |         ^^^
+   = help: remove it, or write `let _ = ...` to drop a value on purpose
+error: can't change `state`: it's declared with `let`
+  --> main.plumb:31:5
+   |
+31 |     state.buckets[key] = Bucket(tokens: clamped, last_refilled: now)
+   |     ^^^^^
+   = help: declare it with `var state = ...`
+error: `Int` has no method `to_int`
+  --> main.plumb:70:42
+   |
+70 |       let remaining = new_tokens.floor().to_int()
+   |                                          ^^^^^^
+error: `Int` has no method `to_int`
+  --> main.plumb:79:47
+   |
+79 |       let retry_after = seconds_needed.ceil().to_int()
+   |                                               ^^^^^^
+error: unknown name `process`
+  --> main.plumb:126:5
+    |
+126 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:132:5
+    |
+132 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:137:5
+    |
+137 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:143:5
+    |
+143 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:148:5
+    |
+148 |     process.exit(2)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+error: missing field(s) of `State`: buckets, stats
+  --> main.plumb:152:29
+    |
+152 |   let state = Shared<State>(State(capacity: capacity.to_float(), refill_per_sec: refill_per_sec))
+    |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+10 error(s)

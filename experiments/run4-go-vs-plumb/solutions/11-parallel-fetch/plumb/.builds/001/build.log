@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:41:40
+   |
+41 |     let bytes = files.read_bytes(path) catch err {
+   |                                        ^^^^^
+   = help: write `try f(x) catch err { ... }`

@@ -1,0 +1,13 @@
+error: `compare_products` must return a `Int` at the end
+  --> main.plumb:102:66
+    |
+102 | fn compare_products(a: Product, b: Product, sort: String) -> Int {
+    |                                                                  ^
+    = help: add `return ...` as the last line
+error: the result (`Int`) is not used
+  --> main.plumb:127:5
+    |
+127 |     cmp_result
+    |     ^^^^^^^^^^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+2 error(s)

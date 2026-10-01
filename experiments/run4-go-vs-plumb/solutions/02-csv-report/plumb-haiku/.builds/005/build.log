@@ -1,0 +1,5 @@
+error: expected an expression, found `with`
+  --> main.plumb:281:38
+    |
+281 |     let quoted = field.replace("\"", with: "\"\"")
+    |                                      ^^^^

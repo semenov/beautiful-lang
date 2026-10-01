@@ -1,0 +1,7 @@
+error: this function can't fail: it isn't declared `throws`
+  --> main.plumb:242:3
+    |
+242 |   with stdout = io.stdout() {
+    |   ^^^^
+    = help: add `throws` before `->`: `fn f() throws -> T`, or handle the error with `catch`
+1 error(s)

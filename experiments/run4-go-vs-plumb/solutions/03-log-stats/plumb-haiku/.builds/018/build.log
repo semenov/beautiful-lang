@@ -1,0 +1,7 @@
+error: expected `String`, found `Int`
+  --> main.plumb:70:58
+   |
+70 |   let sorted = entries.sorted_by(e => [e.value.endpoint, max_count + 1 - e.value.count]).reversed()
+   |                                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: put it into text: `"${x}"`
+1 error(s)

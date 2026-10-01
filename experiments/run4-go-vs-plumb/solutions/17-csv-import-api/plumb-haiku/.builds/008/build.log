@@ -1,0 +1,46 @@
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:172:5
+    |
+172 |     some(v) => v
+    |     ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:172:16
+    |
+172 |     some(v) => v
+    |                ^
+error: `none` can't match a `Int`: it's never missing
+  --> main.plumb:173:5
+    |
+173 |     none => 0
+    |     ^^^^
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:176:5
+    |
+176 |     some(v) => v
+    |     ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:176:16
+    |
+176 |     some(v) => v
+    |                ^
+error: `none` can't match a `Int`: it's never missing
+  --> main.plumb:177:5
+    |
+177 |     none => 0
+    |     ^^^^
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:180:5
+    |
+180 |     some(v) => v
+    |     ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:180:16
+    |
+180 |     some(v) => v
+    |                ^
+error: `none` can't match a `Int`: it's never missing
+  --> main.plumb:181:5
+    |
+181 |     none => 0
+    |     ^^^^
+9 error(s)

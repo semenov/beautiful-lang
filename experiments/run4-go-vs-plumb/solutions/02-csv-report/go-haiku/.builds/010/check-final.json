@@ -1,0 +1,119 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stdin, columns in any order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "exact cents, no float error",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "negatives and zero",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "quoted fields: commas, quotes, newlines; output quoted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CRLF and no final newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty lines skipped, empty value is a group",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode values sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "header only",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad records skipped with line numbers, exit 1",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "line numbers count line breaks inside quotes",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,1.00\\ne,2.00\\n' stderr='line 3: invalid amount\\nline 4: invalid amount\\n'"
+  },
+  {
+   "name": "text after closing quote is a bad record",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unterminated quote ends input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "quote inside unquoted field is ordinary",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\n' stderr='line 2: unterminated quote\\n'"
+  },
+  {
+   "name": "missing amount column",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing by column (case-sensitive)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by k --bogus",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by k a.csv b.csv",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

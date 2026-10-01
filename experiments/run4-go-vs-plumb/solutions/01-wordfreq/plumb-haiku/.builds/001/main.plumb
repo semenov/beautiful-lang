@@ -1,0 +1,140 @@
+import cli
+import files
+import process
+
+type Options {
+  top: Int = 10
+  min_length: Int = 1
+  args: List<String> = []
+}
+
+type SortableWord {
+  word: String
+  neg_count: Int
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>() catch err {
+    eprint("usage: app [--top N] [--min-length L] [FILE...]")
+    process.exit(64)
+  }
+
+  // Validate options
+  if opts.top < 0 {
+    eprint("usage: app [--top N] [--min-length L] [FILE...]")
+    process.exit(64)
+  }
+  if opts.min_length < 1 {
+    eprint("usage: app [--top N] [--min-length L] [FILE...]")
+    process.exit(64)
+  }
+
+  // Read input
+  let text = if opts.args.is_empty() {
+    // Read from stdin
+    let bytes = try files.read("/dev/stdin")
+    bytes.text_lossy()
+  } else {
+    // Read from files
+    var all_text = ""
+    for file_path in opts.args {
+      let content = try files.read(file_path) catch err {
+        eprint("error: cannot read ${file_path}")
+        process.exit(2)
+      }
+      all_text = "${all_text}${content.text_lossy()}"
+    }
+    all_text
+  }
+
+  // Extract and count words
+  let words = extract_words(text, min_length: opts.min_length)
+  let counts = count_words(words)
+
+  // Create sortable entries
+  var sortable: List<SortableWord> = []
+  for entry in counts.entries() {
+    sortable.append(SortableWord(word: entry.key, neg_count: 0 - entry.value))
+  }
+
+  // Sort by negative count (ascending = descending by count), then by word (ascending)
+  let sorted = sortable.sorted_by(w => [w.neg_count, w.word]).take(opts.top)
+
+  // Output
+  for item in sorted {
+    let count = 0 - item.neg_count
+    print("${item.word} ${count}")
+  }
+
+  print("total ${words.length} unique ${counts.length}")
+}
+
+fn extract_words(text: String, min_length: Int) -> List<String> {
+  var words: List<String> = []
+  var current_word = ""
+
+  for char in text.chars() {
+    if char == "'" or char.is_letter() {
+      current_word = "${current_word}${char}"
+    } else {
+      if not current_word.is_empty() {
+        let word = strip_apostrophes(current_word)
+        if word.length >= min_length {
+          words.append(word.lower())
+        }
+      }
+      current_word = ""
+    }
+  }
+
+  // Don't forget the last word
+  if not current_word.is_empty() {
+    let word = strip_apostrophes(current_word)
+    if word.length >= min_length {
+      words.append(word.lower())
+    }
+  }
+
+  return words
+}
+
+fn strip_apostrophes(word: String) -> String {
+  let chars = word.chars()
+
+  // Find start position (skip leading apostrophes)
+  var start = 0
+  for i in 0..<chars.length {
+    if chars[i] != "'" {
+      start = i
+      break
+    }
+  }
+
+  // If all apostrophes, return empty
+  if start >= chars.length {
+    return ""
+  }
+
+  // Find end position (skip trailing apostrophes)
+  var end = chars.length
+  for i in (start..<chars.length).reversed() {
+    if chars[i] != "'" {
+      end = i + 1
+      break
+    }
+  }
+
+  if start >= end {
+    return ""
+  }
+
+  return word.slice(from: start, to: end)
+}
+
+fn count_words(words: List<String>) -> Map<String, Int> {
+  var counts: Map<String, Int> = {}
+  for word in words {
+    counts[word] = (counts[word] ?? 0) + 1
+  }
+  return counts
+}

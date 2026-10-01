@@ -1,0 +1,14 @@
+#!/bin/sh
+# finish <task> <lang> [k=v...]: mark the writer done, run the hidden checks, show failures.
+E=$(cd "$(dirname "$0")/.." && pwd)
+python3 "$E/bin/harness.py" done "$@" >/dev/null
+python3 "$E/bin/harness.py" check "$1" "$2"
+for f in "$E/solutions/$1/$2"/.builds/*/check-*.json; do
+  python3 - "$f" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+if d.get("error"): print("  ERROR", sys.argv[1].split("/")[-2:], d["error"][:300])
+for c in d.get("cases", []):
+    if not c["ok"]: print("  FAIL", sys.argv[1].split("/")[-2:], c["name"], "|", c["detail"][:250])
+PY
+done

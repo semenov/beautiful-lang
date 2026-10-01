@@ -1,0 +1,114 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"db\": {\\n    \"host\": \"db.prod\",\\n    \"port\": 5433\\n  },\\n  \"debug\": false,\\n  \"service\": {\\n    \"name\": \"api\",\\n    \"tags\": [\\n      \"prod\"\\n    ]\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "deep merge over three files",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"a\": {\\n    \"w\": 2,\\n    \"x\": null,\\n    \"y\": {\\n      \"keep\": true,\\n      \"z\": [\\n        3\\n      ]\\n    }\\n  },\\n  \"b\": 7,\\n  \"c\": {\\n    \"n\": 1\\n  },\\n  \"d\": [],\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 5432\\n  },\\n  \"e\": {},\\n  \"service\": {\\n    \"name\": \"svc\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "env values: JSON when valid, else string",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"a\": 12,\\n  \"b\": \"localhost\",\\n  \"c\": \"quoted\",\\n  \"d\": [\\n    1,\\n    {\\n      \"k\": null\\n    }\\n  ],\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 5432\\n  },\\n  \"e\": \"\",\\n  \"f\": \"{\",\\n  \"g\": true,\\n  \"h\": {\\n    \"in\": 1\\n  },\\n  \"i\": \"nul\",\\n  \"service\": {\\n    \"name\": \"svc\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "env paths: nesting, lowercase, single underscore, replacing non-objects",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"cache\": {\\n    \"ttl\": {\\n      \"seconds\": 30\\n    }\\n  },\\n  \"db\": {\\n    \"host\": \"db.local\",\\n    \"port\": 5432\\n  },\\n  \"log\": {\\n    \"file_path\": \"/var/log/x\",\\n    \"x\": 1\\n  },\\n  \"new\": {\\n    \"deep\": {\\n      \"key\": \"v\"\\n    }\\n  },\\n  \"service\": {\\n    \"name\": \"svc\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "env applied in name order; empty keys ignored",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"db\": {\\n    \"host\": \"low\",\\n    \"port\": 7\\n  },\\n  \"service\": {\\n    \"name\": \"svc\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "keys sorted by code point, unicode and escapes",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"B\": 2,\\n  \"b\": 1,\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 1\\n  },\\n  \"service\": {\\n    \"name\": \"s\u00e9rvice \\\\\"x\\\\\"\\\\t\\\\\\\\ \\\\u0001 /\"\\n  },\\n  \"z\": 4,\\n  \"\u00e9\": 3,\\n  \"\u65e5\u672c\": [\\n    {\\n      \"a\": [],\\n      \"b\": 1\\n    },\\n    [],\\n    \"x\"\\n  ]\\n}' stderr=''"
+  },
+  {
+   "name": "numbers keep their text",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"big\": 12345678901234567890,\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 5432\\n  },\\n  \"e\": 1E+5,\\n  \"huge\": 1e400,\\n  \"neg\": -0.0,\\n  \"r\": 1.50,\\n  \"ratio\": 0.10,\\n  \"service\": {\\n    \"name\": \"svc\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "port bounds 1 and 65535 accepted",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 65535\\n  },\\n  \"service\": {\\n    \"name\": \"a\"\\n  }\\n}' stderr=''"
+  },
+  {
+   "name": "all required keys missing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: empty name, numeric host",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port 65536",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port with fraction",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port as string",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: null replaces required value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid JSON",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "NaN is not JSON",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "top level not an object",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: invalid JSON in arr.json\\n'"
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --verbose good.json",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "many large files",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='{\\n  \"db\": {\\n    \"host\": \"h\",\\n    \"port\": 5432\\n  },\\n  \"k0\": {\\n    \"only0\": 0,\\n    \"v\": 0\\n  },\\n  \"k1\": {\\n    \"only0\": 1,\\n    \"v\": 0\\n  },\\n  \"k10\": {\\n    \"only0\": 10,\\n    \"v\": 0\\n  },\\n  \"k100\": {\\n    \"only0\": 100,\\n    \"v\": 0\\n  },\\n  \"k1000\": {\\n    \"only0\": 1000,\\n    \"only1\": 1000,\\n    \"only2\": 1000,\\n    \"v\": 2\\n  },\\n  \"k10000\": {\\n    \"only17\": 10000,\\n    \"only18\": 10000,\\n    \"only19\": 10000,\\n    \"v\": 19\\n' stderr=''"
+  }
+ ]
+}

@@ -1,0 +1,79 @@
+{
+ "cases": [
+  {
+   "name": "bad catalog files: exit 1 with error:",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "default page: first 20 by id",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "get one product; unknown id is 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "walk all by id, page size 100: no repeats, no gaps, no empty last page",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "walk price_asc with ties, page size 37",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "walk price_desc with ties broken by id ascending",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "walk name sort by code point with unicode names",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "filters combined, changing limit between pages",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "category is case-sensitive; in_stock=false; min=max inclusive",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no matches: empty items and null cursor",
+   "ok": false,
+   "detail": "(HTTP 200 '{\"items\":null,\"next_cursor\":null}\\n', HTTP 200 '{\"items\":null,\"next_cursor\":null}\\n')"
+  },
+  {
+   "name": "invalid parameters are 400 with the parameter name",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "garbage cursors are rejected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cursor with different sort or filters is rejected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "a cursor can be reused and gives the same page",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "404 for unknown paths, 405 for other methods",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

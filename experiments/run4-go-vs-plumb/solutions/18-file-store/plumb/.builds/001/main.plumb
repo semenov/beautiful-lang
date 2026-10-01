@@ -1,0 +1,178 @@
+import crypto
+import env
+import files
+import http
+import path
+import random
+import url
+
+type Config {
+  port: Int
+  store_dir: String
+  max_bytes: Int
+}
+
+type FileInfo {
+  name: String
+  size: Int
+  sha256: String
+}
+
+type FileList {
+  files: List<FileInfo>
+}
+
+type ErrorBody {
+  error: String
+}
+
+fn fail(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+// ASCII letters, digits, `.`, `_`, `-`; 1 to 100 long; not starting with `.`.
+fn valid_name(name: String) -> Bool {
+  if name.is_empty() or name.starts_with(".") {
+    return false
+  }
+  let codes = name.code_points()
+  if codes.length > 100 {
+    return false
+  }
+  for c in codes {
+    let ok = (c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 46 or c == 95 or c == 45
+    if not ok {
+      return false
+    }
+  }
+  return true
+}
+
+// The decoded name from the path as sent; none if it can't be decoded.
+fn decode_name(raw: String) -> String? {
+  let decoded = try url.decode(raw) catch err {
+    return none
+  }
+  return decoded
+}
+
+fn describe(dir: String, name: String) throws -> FileInfo {
+  let data = try files.read_bytes(path.join(dir, name))
+  return FileInfo(name: name, size: data.length, sha256: crypto.sha256(data).hex())
+}
+
+fn put_file(req: http.Request, name: String, cfg: Config, lock: Shared<Int>) throws -> http.Response {
+  if req.body.length > cfg.max_bytes {
+    return fail(413, "too large")
+  }
+  let target = path.join(cfg.store_dir, name)
+  let temp = path.join(cfg.store_dir, ".tmp-${random.token(24)}")
+  try files.write_bytes(temp, req.body)
+  var created = false
+  with l = lock.lock() {
+    created = not files.exists(target)
+    try files.rename(temp, target) catch err {
+      let _ = try files.delete_all(temp)
+      throw err
+    }
+    l += 1
+  }
+  let info = FileInfo(name: name, size: req.body.length, sha256: crypto.sha256(req.body).hex())
+  return http.json(if created { 201 } else { 200 }, info)
+}
+
+fn get_file(name: String, cfg: Config) throws -> http.Response {
+  let data = try files.read_bytes(path.join(cfg.store_dir, name)) catch err {
+    if err is files.NotFound or err is files.IsADirectory {
+      return fail(404, "not found")
+    }
+    throw err
+  }
+  return http.bytes(200, data: data, content_type: "application/octet-stream")
+}
+
+fn delete_file(name: String, cfg: Config, lock: Shared<Int>) throws -> http.Response {
+  let target = path.join(cfg.store_dir, name)
+  with l = lock.lock() {
+    if not files.exists(target) or files.is_dir(target) {
+      return fail(404, "not found")
+    }
+    try files.delete(target)
+    l += 1
+  }
+  return http.Response(status: 204, body: Bytes())
+}
+
+fn list_files(cfg: Config) throws -> http.Response {
+  var out: List<FileInfo> = []
+  for name in try files.list(cfg.store_dir) {
+    if not valid_name(name) {
+      continue
+    }
+    let full = path.join(cfg.store_dir, name)
+    if files.is_dir(full) {
+      continue
+    }
+    // a file deleted while we list is simply gone
+    let info = try describe(cfg.store_dir, name) catch err {
+      if err is files.NotFound {
+        continue
+      }
+      throw err
+    }
+    out.append(info)
+  }
+  let sorted = out.sorted_by(f => f.name.bytes().to_list())
+  return http.json(200, FileList(files: sorted))
+}
+
+fn method_not_allowed() -> http.Response {
+  return fail(405, "method not allowed")
+}
+
+fn handle(req: http.Request, cfg: Config, lock: Shared<Int>) throws -> http.Response {
+  let raw = if req.raw_path.is_empty() { req.path } else { req.raw_path }
+  if raw == "/files" {
+    if req.method == "GET" {
+      return try list_files(cfg)
+    }
+    return method_not_allowed()
+  }
+  if not raw.starts_with("/files/") {
+    return fail(404, "not found")
+  }
+  let method = req.method
+  if method != "GET" and method != "PUT" and method != "DELETE" {
+    return method_not_allowed()
+  }
+  let name = decode_name(raw.slice(7, raw.byte_length())) ?? ""
+  if not valid_name(name) {
+    return fail(400, "invalid name")
+  }
+  if method == "PUT" {
+    return try put_file(req, name: name, cfg: cfg, lock: lock)
+  }
+  if method == "GET" {
+    return try get_file(name, cfg: cfg)
+  }
+  return try delete_file(name, cfg: cfg, lock: lock)
+}
+
+fn clean_temp_files(dir: String) throws {
+  for name in try files.list(dir) {
+    if name.starts_with(".tmp-") {
+      try files.delete_all(path.join(dir, name))
+    }
+  }
+}
+
+fn main() throws {
+  let cfg = try env.decode<Config>()
+  try files.make_dir(cfg.store_dir)
+  try clean_temp_files(cfg.store_dir)
+  let lock = Shared<Int>(0)
+  var router = http.Router()
+  router.any("/*rest", req => try handle(req, cfg: cfg, lock: lock))
+  router.any("/", req => try handle(req, cfg: cfg, lock: lock))
+  try http.serve_with(router, options: http.ServerOptions(port: cfg.port, host: "127.0.0.1", max_body: 4_000_000_000))
+}

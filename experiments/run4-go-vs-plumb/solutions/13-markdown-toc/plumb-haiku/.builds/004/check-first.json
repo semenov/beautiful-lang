@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='usage: app [--min-level N] [--max-level M] [FILE]\\n'"
+  },
+  {
+   "name": "all levels by default",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "level range; slugs count headings outside it",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: cannot read 2\\n'"
+  },
+  {
+   "name": "lines that are not headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "closing hashes and empty headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "fenced code blocks",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [Before](#before)\\n  - [Middle](#middle)\\n  - [After tilde](#after-tilde)\\n    - [After indented](#after-indented)\\n- [still code](#still-code)\\n' stderr=''"
+  },
+  {
+   "name": "unclosed fence runs to the end",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "four-space indented fence is not a fence",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "slug punctuation and spacing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode slugs",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [\u00c9T\u00c9 \u00e0 Paris](#\u00e9t\u00e9-\u00e0-paris)\\n- [\u041f\u0440\u0438\u0432\u0435\u0442 \u041c\u0438\u0440](#\u043f\u0440\u0438\u0432\u0435\u0442-\u043c\u0438\u0440)\\n- [\u65e5\u672c\u8a9e\u306e\u898b\u51fa\u3057](#\u65e5\u672c\u8a9e\u306e\u898b\u51fa\u3057)\\n- [Emoji \ud83c\udf89 party](#emoji-\ud83c\udf89-party)\\n- [Cafe\u0301 NFD](#cafe\u0301-nfd)\\n- [\u03a9\u03bc\u03ad\u03b3\u03b1 2](#\u03c9\u03bc\u03ad\u03b3\u03b1-2)\\n' stderr=''"
+  },
+  {
+   "name": "duplicate slugs numbered",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [A](#a)\\n- [a](#a-1)\\n  - [A!](#a-2)\\n- [B](#b)\\n- [A](#a-3)\\n- [!!!](#)\\n- [???](#)\\n' stderr=''"
+  },
+  {
+   "name": "CRLF line endings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "last line without newline",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: cannot read 2\\n'"
+  },
+  {
+   "name": "20000 duplicate headings",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: cannot read 2\\n'"
+  },
+  {
+   "name": "missing file",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='' stderr=''"
+  },
+  {
+   "name": "usage errors",
+   "ok": false,
+   "detail": "[(['--min-level', '0'], exit=2 timed_out=False stdout='' stderr='error: cannot read 0\\n'), (['--max-level', '7'], exit=2 timed_out=False stdout='' stderr='error: cannot read 7\\n'), (['--min-level', '4', '--max-level', '2'], exit=2 timed_out=False stdout='' stderr='error: cannot read 4\\n'), (['--min-level', 'x'], exit=2 timed_out=False stdout='' stderr='error: cannot read x\\n'), (['--max-level'], exit=0 timed_out=False stdout='- [a](#a)\\n' stderr=''), (['--bogus'], exit=0 timed_out=False stdout='- [a](#a)\\n' stderr=''), (['doc.md', 'doc.md'], exit=0 timed_out=False stdout='- [Gr\u00f6\u00dfe & Ma\u00dfe](#gr\u00f6\u00dfe--ma\u00dfe)\\n  - [Setup](#setup)\\n      - [Deep](#deep)\\n  - [Setup](#setup-1)\\n    - [Step 1.2: run `make`](#step-12-run-make)\\n' stderr='')]"
+  }
+ ]
+}

@@ -1,0 +1,248 @@
+import env
+import http
+import json
+import url
+
+// A stored value: a string or a 64-bit integer. They never compare equal.
+enum Val {
+  Str(text: String)
+  Num(n: Int)
+}
+
+let int_max = 9223372036854775807
+let int_min = -9223372036854775807 - 1
+
+fn encode_val(v: Val) -> String {
+  return match v {
+    Str(text) => json.encode(text)
+    Num(n) => "${n}"
+  }
+}
+
+fn encode_opt(v: Val?) -> String {
+  if v is some(x) {
+    return encode_val(x)
+  }
+  return "null"
+}
+
+fn reply(status: Int, body: String) -> http.Response {
+  return http.bytes(status, data: body.bytes(), content_type: "application/json")
+}
+
+fn fail(status: Int, message: String) -> http.Response {
+  return reply(status, "{\"error\": ${json.encode(message)}}")
+}
+
+fn conflict(message: String, current: Val?) -> http.Response {
+  return reply(409, "{\"error\": ${json.encode(message)}, \"value\": ${encode_opt(current)}}")
+}
+
+fn ok_item(key: String, v: Val) -> http.Response {
+  return reply(200, "{\"key\": ${json.encode(key)}, \"value\": ${encode_val(v)}}")
+}
+
+fn not_found() -> http.Response {
+  return fail(404, "not found")
+}
+
+fn not_allowed() -> http.Response {
+  return fail(405, "method not allowed")
+}
+
+// A JSON value that may be stored: a string or an integer in the 64-bit range.
+fn to_val(v: json.Value) -> Val? {
+  if v is json.Value.String(s) {
+    return Str(text: s)
+  }
+  if v is json.Value.Number(num) {
+    let n = try num.to_int() catch _ {
+      return none
+    }
+    return Num(n: n)
+  }
+  return none
+}
+
+// The body as a JSON object; none when it is anything else.
+fn body_object(req: http.Request) -> Map<String, json.Value>? {
+  let v = try json.parse(req.text()) catch _ {
+    return none
+  }
+  if v is json.Value.Object(fields) {
+    return fields
+  }
+  return none
+}
+
+fn decode_key(raw: String) -> String? {
+  let key = try url.decode(raw) catch _ {
+    return none
+  }
+  return key
+}
+
+fn handle_get(key: String, store: Shared<Map<String, Val>>) -> http.Response {
+  with s = store.read() {
+    if s[key] is some(v) {
+      return ok_item(key, v)
+    }
+  }
+  return not_found()
+}
+
+fn handle_put(key: String, req: http.Request, store: Shared<Map<String, Val>>) -> http.Response {
+  let maybe_fields = body_object(req)
+  if maybe_fields is none {
+    return fail(400, "body must be a JSON object")
+  }
+  let maybe_v = to_val(maybe_fields["value"] ?? json.Value.Null)
+  if maybe_v is none {
+    return fail(400, "value must be a string or a 64-bit integer")
+  }
+  let v = maybe_v
+  with s = store.lock() {
+    s[key] = v
+  }
+  return ok_item(key, v)
+}
+
+fn handle_delete(key: String, store: Shared<Map<String, Val>>) -> http.Response {
+  with s = store.lock() {
+    if s.take(key) is some(_) {
+      return http.bytes(204, data: Bytes(), content_type: "application/json")
+    }
+  }
+  return not_found()
+}
+
+fn handle_incr(key: String, req: http.Request, store: Shared<Map<String, Val>>) -> http.Response {
+  var by = 1
+  if req.query("by") is some(text) {
+    by = try text.to_int() catch _ {
+      return fail(400, "by must be a 64-bit integer")
+    }
+  }
+  with s = store.lock() {
+    let current = s[key]
+    var base = 0
+    if current is some(c) {
+      if c is Num(n) {
+        base = n
+      } else {
+        return conflict("value is not an integer", current)
+      }
+    }
+    if (by > 0 and base > int_max - by) or (by < 0 and base < int_min - by) {
+      return conflict("result is out of range", current)
+    }
+    let next = Num(n: base + by)
+    s[key] = next
+    return ok_item(key, next)
+  }
+}
+
+fn handle_cas(key: String, req: http.Request, store: Shared<Map<String, Val>>) -> http.Response {
+  let maybe_fields = body_object(req)
+  if maybe_fields is none {
+    return fail(400, "body must be a JSON object")
+  }
+  let raw_expected = maybe_fields["expected"]
+  if raw_expected is none {
+    return fail(400, "expected is missing")
+  }
+  let raw_value = maybe_fields["value"]
+  if raw_value is none {
+    return fail(400, "value is missing")
+  }
+  var expected: Val? = none
+  if raw_expected is json.Value.Null {
+    expected = none
+  } else {
+    expected = to_val(raw_expected)
+    if expected is none {
+      return fail(400, "expected must be null, a string or a 64-bit integer")
+    }
+  }
+  let maybe_v = to_val(raw_value)
+  if maybe_v is none {
+    return fail(400, "value must be a string or a 64-bit integer")
+  }
+  let v = maybe_v
+  with s = store.lock() {
+    let current = s[key]
+    if current != expected {
+      return conflict("current value does not match expected", current)
+    }
+    s[key] = v
+  }
+  return ok_item(key, v)
+}
+
+fn handle_snapshot(store: Shared<Map<String, Val>>) -> http.Response {
+  with s = store.read() {
+    var parts: List<String> = []
+    for entry in s {
+      parts.append("${json.encode(entry.key)}: ${encode_val(entry.value)}")
+    }
+    return reply(200, "{\"count\": ${parts.length}, \"items\": {${parts.join(", ")}}}")
+  }
+}
+
+fn dispatch(req: http.Request, store: Shared<Map<String, Val>>) throws -> http.Response {
+  let path = req.raw_path
+  let method = req.method
+  if path == "/snapshot" {
+    if method != "GET" {
+      return not_allowed()
+    }
+    return handle_snapshot(store)
+  }
+  var kind = ""
+  for prefix in ["/kv/", "/incr/", "/cas/"] {
+    if path.starts_with(prefix) {
+      kind = prefix
+    }
+  }
+  if kind == "" {
+    return not_found()
+  }
+  let allowed = match kind {
+    "/kv/" => method == "GET" or method == "PUT" or method == "DELETE"
+    _ => method == "POST"
+  }
+  if not allowed {
+    return not_allowed()
+  }
+  let raw_key = path.slice(from: kind.length, to: path.length)
+  if raw_key.is_empty() {
+    return fail(400, "key must not be empty")
+  }
+  let maybe_key = decode_key(raw_key)
+  if maybe_key is none {
+    return fail(400, "key is not valid")
+  }
+  let key = maybe_key
+  return match kind {
+    "/kv/" => match method {
+      "GET" => handle_get(key, store)
+      "PUT" => handle_put(key, req: req, store: store)
+      _ => handle_delete(key, store)
+    }
+    "/incr/" => handle_incr(key, req: req, store: store)
+    _ => handle_cas(key, req: req, store: store)
+  }
+}
+
+fn make_router(store: Shared<Map<String, Val>>) -> http.Router {
+  var router = http.Router()
+  router.any("/", req => try dispatch(req, store))
+  router.any("/*rest", req => try dispatch(req, store))
+  return router
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int()
+  let store = Shared<Map<String, Val>>({})
+  try http.serve_with(make_router(store), options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}

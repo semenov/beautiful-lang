@@ -1,0 +1,395 @@
+import files
+import path
+import process
+import regex
+
+// Parsed command line.
+type Options {
+  dir: String = ""
+  has_dir: Bool = false
+  regex_pattern: String? = none
+  to: String? = none
+  counter: String? = none
+  start: String? = none
+  match_pattern: String? = none
+  dry_run: Bool = false
+}
+
+// One piece of a --to template: literal text, or a group reference.
+type Piece {
+  text: String = ""
+  group: Int? = none
+}
+
+fn usage(message: String) -> Never {
+  eprint("usage: ${message}")
+  process.exit(64)
+}
+
+fn fail(message: String, status: Int) -> Never {
+  eprint("error: ${message}")
+  process.exit(status)
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var o = Options()
+  var i = 0
+  while i < args.length {
+    let a = args[i]
+    if a == "--dry-run" {
+      if o.dry_run {
+        usage("--dry-run given twice")
+      }
+      o.dry_run = true
+    } else if a == "--regex" or a == "--to" or a == "--counter" or a == "--start" or a == "--match" {
+      if i + 1 >= args.length {
+        usage("missing value for ${a}")
+      }
+      let v = args[i + 1]
+      i += 1
+      let taken = if a == "--regex" {
+        o.regex_pattern is some(_)
+      } else if a == "--to" {
+        o.to is some(_)
+      } else if a == "--counter" {
+        o.counter is some(_)
+      } else if a == "--start" {
+        o.start is some(_)
+      } else {
+        o.match_pattern is some(_)
+      }
+      if taken {
+        usage("${a} given twice")
+      }
+      if a == "--regex" {
+        o.regex_pattern = v
+      } else if a == "--to" {
+        o.to = v
+      } else if a == "--counter" {
+        o.counter = v
+      } else if a == "--start" {
+        o.start = v
+      } else {
+        o.match_pattern = v
+      }
+    } else if a.starts_with("--") {
+      usage("unknown option ${a}")
+    } else {
+      if o.has_dir {
+        usage("unexpected argument ${a}")
+      }
+      o.dir = a
+      o.has_dir = true
+    }
+    i += 1
+  }
+  return o
+}
+
+// Number of capture groups: unescaped `(` outside bracket classes.
+fn count_groups(pattern: String) -> Int {
+  let cs = pattern.chars()
+  var n = 0
+  var i = 0
+  while i < cs.length {
+    let c = cs[i]
+    if c == "\\" {
+      i += 2
+    } else if c == "[" {
+      i += 1
+      if i < cs.length and cs[i] == "^" {
+        i += 1
+      }
+      if i < cs.length and cs[i] == "]" {
+        i += 1
+      }
+      while i < cs.length and cs[i] != "]" {
+        if cs[i] == "\\" {
+          i += 1
+        }
+        i += 1
+      }
+      i += 1
+    } else {
+      if c == "(" {
+        n += 1
+      }
+      i += 1
+    }
+  }
+  return n
+}
+
+fn compile_or_usage(pattern: String) -> regex.Regex {
+  let r = try regex.compile(pattern) catch err {
+    usage("invalid pattern ${pattern}: ${err.message()}")
+  }
+  return r
+}
+
+// Splits a template into pieces; none if it is malformed or names a group
+// above `groups`.
+fn parse_template(template: String, groups: Int) -> List<Piece>? {
+  let cs = template.chars()
+  var pieces: List<Piece> = []
+  var lit = ""
+  var i = 0
+  while i < cs.length {
+    let c = cs[i]
+    if c == "{" {
+      if i + 1 < cs.length and cs[i + 1] == "{" {
+        lit = "${lit}{"
+        i += 2
+      } else {
+        var j = i + 1
+        var digits = ""
+        while j < cs.length and cs[j].is_digit() {
+          digits = "${digits}${cs[j]}"
+          j += 1
+        }
+        if digits.is_empty() or j >= cs.length or cs[j] != "}" {
+          return none
+        }
+        let n = try digits.to_int() catch err {
+          return none
+        }
+        if n > groups {
+          return none
+        }
+        if not lit.is_empty() {
+          pieces.append(Piece(text: lit))
+          lit = ""
+        }
+        pieces.append(Piece(group: n))
+        i = j + 1
+      }
+    } else if c == "}" {
+      if i + 1 < cs.length and cs[i + 1] == "}" {
+        lit = "${lit}}"
+        i += 2
+      } else {
+        return none
+      }
+    } else {
+      lit = "${lit}${c}"
+      i += 1
+    }
+  }
+  if not lit.is_empty() {
+    pieces.append(Piece(text: lit))
+  }
+  return pieces
+}
+
+// The text of group n of the match of the whole name; "" if it took no part.
+fn group_text(groups: List<String?>, n: Int) -> String {
+  if n < groups.length {
+    return groups[n] ?? ""
+  }
+  return ""
+}
+
+fn render(pieces: List<Piece>, groups: List<String?>) -> String {
+  var out = ""
+  for p in pieces {
+    if p.group is some(n) {
+      out = "${out}${group_text(groups, n)}"
+    } else {
+      out = "${out}${p.text}"
+    }
+  }
+  return out
+}
+
+// Regular files directly in dir (not links, directories or specials), by name.
+fn candidates(dir: String) -> List<String> {
+  let out = try process.run_command(process.Command(
+    program: "find",
+    args: [".", "-mindepth", "1", "-maxdepth", "1", "-type", "f", "-print0"],
+    dir: dir
+  )) catch err {
+    fail("cannot list ${dir}: ${err.message()}", 2)
+  }
+  if out.status != 0 {
+    fail("cannot list ${dir}", 2)
+  }
+  var names: List<String> = []
+  for part in out.stdout.split("\u{0}") {
+    if part.starts_with("./") {
+      names.append(part.slice(from: 2, to: part.length))
+    }
+  }
+  return names.sorted()
+}
+
+// The whole-name match of a pattern: its groups, or none.
+fn whole_match(re: regex.Regex, name: String) -> List<String?>? {
+  if not re.matches(name) {
+    return none
+  }
+  if re.find(name) is some(m) {
+    if m.start == 0 and m.end == name.length {
+      return m.groups
+    }
+  }
+  return []
+}
+
+type Rename {
+  old: String
+  new: String
+}
+
+fn check_name(name: String) {
+  if name.is_empty() or name == "." or name == ".." or name.contains("/") or name.contains("\u{0}") {
+    fail("invalid name: ${name}", 1)
+  }
+}
+
+fn main() {
+  let o = parse_args(process.args())
+  let is_regex = o.regex_pattern is some(_)
+  let is_counter = o.counter is some(_)
+  if not o.has_dir {
+    usage("app DIR --regex PATTERN --to TEMPLATE [--dry-run] | app DIR --counter TEMPLATE [--start N] [--match PATTERN] [--dry-run]")
+  }
+  if is_regex == is_counter {
+    usage("give exactly one of --regex and --counter")
+  }
+
+  var pieces: List<Piece> = []
+  var re: regex.Regex? = none
+  var match_re: regex.Regex? = none
+  var counter_template = ""
+  var run_start = 0
+  var run_end = 0
+  var start = 1
+
+  if o.regex_pattern is some(pattern) {
+    if o.start is some(_) or o.match_pattern is some(_) {
+      usage("--start and --match only go with --counter")
+    }
+    guard_to(o)
+    let template = o.to ?? ""
+    re = compile_or_usage(pattern)
+    let parsed = parse_template(template, count_groups(pattern))
+    if parsed is none {
+      usage("invalid template ${template}")
+    }
+    pieces = parsed
+  } else if o.counter is some(template) {
+    if o.to is some(_) {
+      usage("--to only goes with --regex")
+    }
+    counter_template = template
+    let cs = template.chars()
+    var runs = 0
+    var prev_hash = false
+    var idx = 0
+    for c in cs {
+      if c == "#" {
+        if not prev_hash {
+          runs += 1
+          run_start = idx
+        }
+        run_end = idx + 1
+        prev_hash = true
+      } else {
+        prev_hash = false
+      }
+      idx += 1
+    }
+    if runs != 1 {
+      usage("template needs exactly one run of #")
+    }
+    if o.start is some(s) {
+      if not s.is_digit() {
+        usage("bad --start ${s}")
+      }
+      start = try s.to_int() catch err {
+        usage("bad --start ${s}")
+      }
+    }
+    if o.match_pattern is some(mp) {
+      match_re = compile_or_usage(mp)
+    }
+  }
+
+  if not files.is_dir(o.dir) {
+    fail("not a directory: ${o.dir}", 2)
+  }
+
+  var batch: List<Rename> = []
+  var k = 0
+  for name in candidates(o.dir) {
+    var new_name = ""
+    if re is some(r) {
+      let groups = whole_match(r, name)
+      if groups is none {
+        continue
+      }
+      new_name = render(pieces, groups)
+    } else {
+      if match_re is some(mr) {
+        if not mr.matches(name) {
+          continue
+        }
+      }
+      let num = "${start + k}"
+      let width = run_end - run_start
+      let cs = counter_template.chars()
+      new_name = "${cs.take(run_start).join("")}${num.pad_start(width, fill: "0")}${cs.drop(run_end).join("")}"
+      k += 1
+    }
+    if new_name != name {
+      batch.append(Rename(old: name, new: new_name))
+    }
+  }
+
+  for b in batch {
+    check_name(b.new)
+  }
+  var seen: Set<String> = {}
+  for b in batch {
+    if seen.contains(b.new) {
+      fail("conflict: ${b.new}", 1)
+    }
+    seen.add(b.new)
+  }
+  let existing = try files.list(o.dir) catch err {
+    fail("cannot list ${o.dir}: ${err.message()}", 2)
+  }
+  var present: Set<String> = {}
+  for e in existing {
+    present.add(e)
+  }
+  for b in batch {
+    if present.contains(b.new) {
+      fail("exists: ${b.new}", 1)
+    }
+  }
+
+  var lines: List<String> = []
+  for b in batch {
+    if not o.dry_run {
+      try files.rename(path.join(o.dir, name: b.old), path.join(o.dir, name: b.new)) catch err {
+        for l in lines {
+          print(l)
+        }
+        fail("${err.message()}", 1)
+      }
+    }
+    lines.append("${b.old} -> ${b.new}")
+  }
+  for l in lines {
+    print(l)
+  }
+  let verb = if o.dry_run { "would rename" } else { "renamed" }
+  print("${verb} ${batch.length}")
+}
+
+fn guard_to(o: Options) {
+  if o.to is none {
+    usage("--regex needs --to")
+  }
+}

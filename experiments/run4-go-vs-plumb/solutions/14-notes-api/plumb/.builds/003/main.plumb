@@ -1,0 +1,224 @@
+import db
+import env
+import http
+import json
+
+type Note {
+  id: Int
+  title: String
+  body: String
+  tag: String?
+}
+
+// A request body that passed validation. `tag_given` tells "tag": null
+// (clear it) from a tag that was left out.
+type Input {
+  title: String? = none
+  body: String? = none
+  tag: String? = none
+  tag_given: Bool = false
+}
+
+type Invalid implements Error {
+  text: String
+
+  fn message(self) -> String {
+    return self.text
+  }
+}
+
+fn error_response(status: Int, message: String) -> http.Response {
+  return http.json(status, {"error": message})
+}
+
+fn not_found() -> http.Response {
+  return error_response(404, "not found")
+}
+
+fn method_not_allowed() -> http.Response {
+  return error_response(405, "method not allowed")
+}
+
+// The id in the path: digits only, and it must fit an Int.
+fn parse_id(text: String) -> Int? {
+  if text.is_empty() {
+    return none
+  }
+  for c in text.chars() {
+    if c < "0" or c > "9" {
+      return none
+    }
+  }
+  let n = try text.to_int() catch err {
+    return none
+  }
+  if n < 1 {
+    return none
+  }
+  return n
+}
+
+// Reads the body as a JSON object. `creating`: title is required.
+fn parse_input(req: http.Request, creating: Bool) throws -> Input {
+  let value = try json.parse(req.text()) catch err {
+    throw Invalid(text: "invalid JSON")
+  }
+  if value is json.Value.Object(fields) {
+    var input = Input()
+    if fields["title"] is some(t) {
+      if t is json.Value.String(s) and s.length >= 1 and s.length <= 200 {
+        input.title = s
+      } else {
+        throw Invalid(text: "invalid field: title")
+      }
+    } else if creating {
+      throw Invalid(text: "invalid field: title")
+    }
+    if fields["body"] is some(b) {
+      if b is json.Value.String(s) {
+        input.body = s
+      } else {
+        throw Invalid(text: "invalid field: body")
+      }
+    }
+    if fields["tag"] is some(g) {
+      input.tag_given = true
+      if g is json.Value.String(s) {
+        input.tag = s
+      } else if g is json.Value.Null {
+        input.tag = none
+      } else {
+        throw Invalid(text: "invalid field: tag")
+      }
+    }
+    return input
+  }
+  throw Invalid(text: "invalid JSON")
+}
+
+fn find_note(conn: db.Connection, id: Int) throws -> Note? {
+  let rows = try conn.query<Note>("select id, title, body, tag from notes where id = ?", [id])
+  if rows.is_empty() {
+    return none
+  }
+  return rows[0]
+}
+
+fn create_note(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let input = try parse_input(req, creating: true) catch err {
+    return error_response(400, err.message())
+  }
+  let title = input.title ?? ""
+  let body = input.body ?? ""
+  let id = try conn.insert("insert into notes (title, body, tag) values (?, ?, ?)", [title, body, input.tag])
+  return http.json(201, Note(id: id, title: title, body: body, tag: input.tag))
+}
+
+fn list_notes(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let all = try conn.query<Note>("select id, title, body, tag from notes order by id", [])
+  let q = req.query("q") ?? ""
+  if q.is_empty() {
+    return http.json(200, {"notes": all})
+  }
+  let found = all.filter(n => n.title.contains(q) or n.body.contains(q))
+  return http.json(200, {"notes": found})
+}
+
+fn get_note(id: Int, conn: db.Connection) throws -> http.Response {
+  if try find_note(conn, id) is some(note) {
+    return http.json(200, note)
+  }
+  return not_found()
+}
+
+fn patch_note(id: Int, req: http.Request, conn: db.Connection) throws -> http.Response {
+  if try find_note(conn, id) is none {
+    return not_found()
+  }
+  let input = try parse_input(req, creating: false) catch err {
+    return error_response(400, err.message())
+  }
+  // read, change, write: one transaction, so concurrent patches don't mix
+  let updated = try conn.transaction(() => {
+    if try find_note(conn, id) is some(note) {
+      var n = note
+      if input.title is some(t) {
+        n.title = t
+      }
+      if input.body is some(b) {
+        n.body = b
+      }
+      if input.tag_given {
+        n.tag = input.tag
+      }
+      try conn.execute("update notes set title = ?, body = ?, tag = ? where id = ?", [n.title, n.body, n.tag, id])
+      return some(n)
+    }
+    return none
+  })
+  if updated is some(n) {
+    return http.json(200, n)
+  }
+  return not_found()
+}
+
+fn delete_note(id: Int, conn: db.Connection) throws -> http.Response {
+  let changed = try conn.execute_counting("delete from notes where id = ?", [id])
+  if changed == 0 {
+    return not_found()
+  }
+  return http.Response(status: 204, body: "".bytes())
+}
+
+fn collection(req: http.Request, conn: db.Connection) throws -> http.Response {
+  if req.method == "POST" {
+    return try create_note(req, conn)
+  }
+  if req.method == "GET" {
+    return try list_notes(req, conn)
+  }
+  return method_not_allowed()
+}
+
+fn item(req: http.Request, conn: db.Connection) throws -> http.Response {
+  let known = req.method == "GET" or req.method == "PATCH" or req.method == "DELETE"
+  if not known {
+    return method_not_allowed()
+  }
+  let id = parse_id(req.param("id") ?? "") ?? 0
+  if id == 0 {
+    return not_found()
+  }
+  if req.method == "GET" {
+    return try get_note(id, conn)
+  }
+  if req.method == "PATCH" {
+    return try patch_note(id, req, conn)
+  }
+  return try delete_note(id, conn)
+}
+
+fn make_router(conn: db.Connection) -> http.Router {
+  var router = http.Router()
+  router.any("/notes", req => try collection(req, conn))
+  router.any("/notes/:id", req => try item(req, conn))
+  router.any("/*rest", req => not_found())
+  return router
+}
+
+fn open_db(path: String) throws -> db.Connection {
+  with conn = try db.open(path) {
+    try conn.execute("create table if not exists notes (id integer primary key autoincrement, title text not null, body text not null, tag text)", [])
+    return conn
+  }
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int() catch err {
+    throw Failure(message: "bad PORT")
+  }
+  let path = env.get("DB_PATH") ?? "notes.db"
+  with conn = try open_db(path) {
+    try http.serve_with(make_router(conn), options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  }
+}

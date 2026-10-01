@@ -1,0 +1,375 @@
+import json
+import http
+import env
+import files
+import encoding
+import process
+
+type Product {
+  id: String
+  name: String
+  category: String
+  price_cents: Int
+  in_stock: Bool
+}
+
+type FilterState {
+  category: String? = none
+  min_price: Int = 0
+  max_price: Int? = none
+  in_stock: Bool? = none
+  sort: String = "id"
+}
+
+fn validate_product(p: Product) throws {
+  if p.id.is_empty() {
+    throw Failure(message: "product id is empty")
+  }
+  for cp in p.id.code_points() {
+    let is_valid = (cp >= 97 and cp <= 122) or (cp >= 65 and cp <= 90) or
+                   (cp >= 48 and cp <= 57) or cp == 45 or cp == 95
+    if not is_valid {
+      throw Failure(message: "product id contains invalid character")
+    }
+  }
+  if p.price_cents < 0 {
+    throw Failure(message: "price_cents must be >= 0")
+  }
+}
+
+fn load_catalog(path: String) throws -> List<Product> {
+  let text = try files.read(path)
+  let products: List<Product> = try json.decode(text)
+
+  var seen: Set<String> = {}
+  for p in products {
+    try validate_product(p)
+    if seen.contains(p.id) {
+      throw Failure(message: "duplicate product id: ${p.id}")
+    }
+    seen.add(p.id)
+  }
+
+  return products
+}
+
+fn parse_bool(s: String) throws -> Bool {
+  if s == "true" {
+    return true
+  } else if s == "false" {
+    return false
+  } else {
+    throw Failure(message: "not a bool")
+  }
+}
+
+fn parse_int(s: String) throws -> Int {
+  return try s.to_int()
+}
+
+fn parse_limit(s: String) throws -> Int {
+  let n = try parse_int(s)
+  if n < 1 or n > 100 {
+    throw Failure(message: "limit out of range")
+  }
+  return n
+}
+
+fn parse_price(s: String) throws -> Int {
+  let n = try parse_int(s)
+  if n < 0 {
+    throw Failure(message: "price cannot be negative")
+  }
+  return n
+}
+
+fn matches_filters(p: Product, filters: FilterState) -> Bool {
+  if filters.category is some(cat) and p.category != cat {
+    return false
+  }
+  if p.price_cents < filters.min_price {
+    return false
+  }
+  if filters.max_price is some(max) and p.price_cents > max {
+    return false
+  }
+  if filters.in_stock is some(in_stock) and p.in_stock != in_stock {
+    return false
+  }
+  return true
+}
+
+fn compare_products(a: Product, b: Product, sort: String) -> Int {
+  let cmp_result = match sort {
+    "price_asc" => {
+      if a.price_cents < b.price_cents { -1 }
+      else if a.price_cents > b.price_cents { 1 }
+      else { 0 }
+    }
+    "price_desc" => {
+      if a.price_cents > b.price_cents { -1 }
+      else if a.price_cents < b.price_cents { 1 }
+      else { 0 }
+    }
+    "name" => {
+      if a.name < b.name { -1 }
+      else if a.name > b.name { 1 }
+      else { 0 }
+    }
+    _ => {
+      if a.id < b.id { -1 }
+      else if a.id > b.id { 1 }
+      else { 0 }
+    }
+  }
+
+  if cmp_result != 0 {
+    return cmp_result
+  }
+
+  if a.id < b.id { -1 }
+  else if a.id > b.id { 1 }
+  else { 0 }
+}
+
+fn encode_cursor(filter_state: FilterState, offset: Int) -> String {
+  var cursor_obj: Map<String, json.Value> = {}
+  cursor_obj["c"] = if filter_state.category is some(cat) { json.Value.String(value: cat) } else { json.Value.Null }
+  cursor_obj["min"] = json.integer(filter_state.min_price)
+  cursor_obj["max"] = if filter_state.max_price is some(max) { json.integer(max) } else { json.Value.Null }
+  cursor_obj["s"] = if filter_state.in_stock is some(stock) { json.Value.Bool(value: stock) } else { json.Value.Null }
+  cursor_obj["sort"] = json.Value.String(value: filter_state.sort)
+  cursor_obj["off"] = json.integer(offset)
+
+  let encoded = json.encode(json.Value.Object(fields: cursor_obj))
+  return encoded.bytes().base64()
+}
+
+fn decode_cursor(cursor_str: String, expected: FilterState) throws -> Int {
+  let decoded_bytes = try encoding.from_base64(cursor_str)
+  let decoded_text = decoded_bytes.text_lossy()
+  let cursor_obj: json.Value = try json.parse(decoded_text)
+
+  if cursor_obj is json.Value.Object(obj) {
+    let c_val = obj["c"] ?? json.Value.Null
+    let cat = match c_val {
+      json.Value.String(s) => s
+      json.Value.Null => none
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    let min_val = obj["min"] ?? json.Value.Null
+    let min = match min_val {
+      json.Value.Number(n) => try n.to_int()
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    let max_val = obj["max"] ?? json.Value.Null
+    let max: Int? = match max_val {
+      json.Value.Number(n) => try n.to_int()
+      json.Value.Null => none
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    let stock_val = obj["s"] ?? json.Value.Null
+    let stock = match stock_val {
+      json.Value.Bool(b) => b
+      json.Value.Null => none
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    let sort_val = obj["sort"] ?? json.Value.Null
+    let sort = match sort_val {
+      json.Value.String(s) => s
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    let off_val = obj["off"] ?? json.Value.Null
+    let offset = match off_val {
+      json.Value.Number(n) => try n.to_int()
+      _ => throw Failure(message: "invalid cursor")
+    }
+
+    if cat != expected.category or min != expected.min_price or
+       max != expected.max_price or stock != expected.in_stock or
+       sort != expected.sort {
+      throw Failure(message: "cursor mismatch")
+    }
+
+    return offset
+  } else {
+    throw Failure(message: "invalid cursor")
+  }
+}
+
+fn build_product_json(p: Product) -> json.Value {
+  var obj: Map<String, json.Value> = {}
+  obj["id"] = json.Value.String(value: p.id)
+  obj["name"] = json.Value.String(value: p.name)
+  obj["category"] = json.Value.String(value: p.category)
+  obj["price_cents"] = json.integer(p.price_cents)
+  obj["in_stock"] = json.Value.Bool(value: p.in_stock)
+  return json.Value.Object(fields: obj)
+}
+
+fn get_products_handler(req: http.Request, catalog: Shared<List<Product>>) throws -> http.Response {
+  var filters = FilterState()
+  var limit = 20
+  var offset = 0
+
+  if req.query("category") is some(cat) {
+    filters.category = some(cat)
+  }
+
+  if req.query("min_price") is some(min_str) {
+    filters.min_price = try parse_price(min_str) catch err {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: min_price")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+  }
+
+  if req.query("max_price") is some(max_str) {
+    filters.max_price = try parse_price(max_str) catch err {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: max_price")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+  }
+
+  if filters.max_price is some(max) and filters.min_price > max {
+    var error_obj: Map<String, json.Value> = {}
+    error_obj["error"] = json.Value.String(value: "invalid parameter: max_price")
+    return http.json(400, json.Value.Object(fields: error_obj))
+  }
+
+  if req.query("in_stock") is some(stock_str) {
+    filters.in_stock = try parse_bool(stock_str) catch err {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: in_stock")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+  }
+
+  if req.query("sort") is some(sort_str) {
+    if sort_str != "id" and sort_str != "price_asc" and sort_str != "price_desc" and sort_str != "name" {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: sort")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+    filters.sort = sort_str
+  }
+
+  if req.query("limit") is some(limit_str) {
+    limit = try parse_limit(limit_str) catch err {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: limit")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+  }
+
+  if req.query("cursor") is some(cursor_str) {
+    offset = try decode_cursor(cursor_str, filters) catch err {
+      var error_obj: Map<String, json.Value> = {}
+      error_obj["error"] = json.Value.String(value: "invalid parameter: cursor")
+      return http.json(400, json.Value.Object(fields: error_obj))
+    }
+  }
+
+  with all_products = catalog.read() {
+    var filtered = []
+    for p in all_products {
+      if matches_filters(p, filters) {
+        filtered.append(p)
+      }
+    }
+
+    var i_sort = 0
+    while i_sort < filtered.length {
+      var j = i_sort + 1
+      while j < filtered.length {
+        if compare_products(filtered[i_sort], filtered[j], sort: filters.sort) > 0 {
+          let tmp = filtered[i_sort]
+          filtered[i_sort] = filtered[j]
+          filtered[j] = tmp
+        }
+        j += 1
+      }
+      i_sort += 1
+    }
+
+    var items = []
+    var next_cursor: String? = none
+
+    var i = offset
+    while i < offset + limit and i < filtered.length {
+      items.append(filtered[i])
+      i += 1
+    }
+
+    if offset + limit < filtered.length {
+      next_cursor = encode_cursor(filters, offset + limit)
+    }
+
+    var items_array: List<json.Value> = []
+    for item in items {
+      items_array.append(build_product_json(item))
+    }
+
+    var response: Map<String, json.Value> = {}
+    response["items"] = json.Value.Array(items: items_array)
+    response["next_cursor"] = if next_cursor is some(c) { json.Value.String(value: c) } else { json.Value.Null }
+
+    return http.json(200, json.Value.Object(fields: response))
+  }
+}
+
+fn get_product_handler(req: http.Request, catalog: Shared<List<Product>>) throws -> http.Response {
+  let id = req.param("id") ?? ""
+
+  with all_products = catalog.read() {
+    for p in all_products {
+      if p.id == id {
+        return http.json(200, build_product_json(p))
+      }
+    }
+  }
+
+  var error_obj: Map<String, json.Value> = {}
+  error_obj["error"] = json.Value.String(value: "not found")
+  return http.json(404, json.Value.Object(fields: error_obj))
+}
+
+fn main() throws {
+  let port_str = env.get("PORT") ?? "8080"
+  let port = try port_str.to_int() catch err {
+    eprint("error: PORT must be an integer")
+    process.exit(1)
+  }
+
+  let catalog_path = env.get("CATALOG_PATH") ?? throw Failure(message: "CATALOG_PATH not set")
+
+  let products = try load_catalog(catalog_path) catch err {
+    eprint("error: ${err.message()}")
+    process.exit(1)
+  }
+
+  let catalog = Shared<List<Product>>(products)
+
+  var router = http.Router()
+  router.get("/products", req => try get_products_handler(req, catalog))
+  router.get("/products/:id", req => try get_product_handler(req, catalog))
+
+  router.any("*", req => {
+    var error_obj: Map<String, json.Value> = {}
+    if req.raw_path.starts_with("/products") {
+      error_obj["error"] = json.Value.String(value: "method not allowed")
+      http.json(405, json.Value.Object(fields: error_obj))
+    } else {
+      error_obj["error"] = json.Value.String(value: "not found")
+      http.json(404, json.Value.Object(fields: error_obj))
+    }
+  })
+
+  try http.serve_with(router, options: http.ServerOptions(host: "127.0.0.1", port: port))
+}

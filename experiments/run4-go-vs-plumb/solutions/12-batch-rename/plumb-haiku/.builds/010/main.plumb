@@ -1,0 +1,330 @@
+import regex
+import files
+import path
+import process
+
+enum Mode {
+  Regex(pattern: String, template: String)
+  Counter(template: String, start: Int, match_pattern: String?)
+}
+
+type Options {
+  dir: String? = none
+  mode: Mode? = none
+  dry_run: Bool = false
+}
+
+type ParseResult {
+  opts: Options
+  err: String
+}
+
+type RenameRecord {
+  old_name: String
+  new_name: String
+}
+
+fn parse_args() throws -> ParseResult {
+  let args = process.args()
+  var opts = Options()
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+
+    if arg == "--regex" {
+      i += 1
+      if i >= args.length {
+        return ParseResult(opts: opts, err: "usage: --regex requires PATTERN")
+      }
+      let pattern = args[i]
+      i += 1
+      if i >= args.length or args[i] != "--to" {
+        return ParseResult(opts: opts, err: "usage: --regex must be followed by --to TEMPLATE")
+      }
+      i += 1
+      if i >= args.length {
+        return ParseResult(opts: opts, err: "usage: --to requires TEMPLATE")
+      }
+      let template = args[i]
+      opts.mode = Mode.Regex(pattern: pattern, template: template)
+      i += 1
+    } else if arg == "--counter" {
+      i += 1
+      if i >= args.length {
+        return ParseResult(opts: opts, err: "usage: --counter requires TEMPLATE")
+      }
+      let template = args[i]
+      var start = 1
+      var match_pattern: String? = none
+      i += 1
+
+      while i < args.length and not ["--dry-run", "--regex", "--counter"].contains(args[i]) {
+        if args[i] == "--start" {
+          i += 1
+          if i >= args.length {
+            return ParseResult(opts: opts, err: "usage: --start requires N")
+          }
+          let parsed_start = try args[i].to_int() catch _ {
+            return ParseResult(opts: opts, err: "usage: --start N: N must be a whole number")
+          }
+          if parsed_start < 0 {
+            return ParseResult(opts: opts, err: "usage: --start N: N must be non-negative")
+          }
+          start = parsed_start
+          i += 1
+        } else if args[i] == "--match" {
+          i += 1
+          if i >= args.length {
+            return ParseResult(opts: opts, err: "usage: --match requires PATTERN")
+          }
+          match_pattern = args[i]
+          i += 1
+        } else {
+          return ParseResult(opts: opts, err: "usage: unknown option ${args[i]}")
+        }
+      }
+
+      opts.mode = Mode.Counter(template: template, start: start, match_pattern: match_pattern)
+    } else if arg == "--dry-run" {
+      opts.dry_run = true
+      i += 1
+    } else if arg.starts_with("--") {
+      return ParseResult(opts: opts, err: "usage: unknown option ${arg}")
+    } else {
+      if opts.dir is some(_) {
+        return ParseResult(opts: opts, err: "usage: DIR specified multiple times")
+      }
+      opts.dir = arg
+      i += 1
+    }
+  }
+
+  return ParseResult(opts: opts, err: "")
+}
+
+fn validate_options(opts: Options) -> String {
+  if opts.dir is none {
+    return "usage: DIR is required"
+  }
+  if opts.mode is none {
+    return "usage: exactly one of --regex and --counter must be given"
+  }
+  return ""
+}
+
+fn validate_name(name: String) -> String {
+  if name.is_empty() or name == "." or name == ".." {
+    return "error: invalid name: ${name}"
+  }
+  if name.contains("/") or name.contains("\u{0000}") {
+    return "error: invalid name: ${name}"
+  }
+  return ""
+}
+
+fn apply_regex_mode(filename: String, pattern: String, template: String) throws -> String? {
+  let re = try regex.compile(pattern)
+  if not re.matches(filename) {
+    return none
+  }
+
+  let m = re.find(filename) ?? return none
+
+  var result_parts: List<String> = []
+  let chars = template.chars()
+  var i = 0
+
+  while i < chars.length {
+    let char = chars[i]
+
+    if char == "{" {
+      if i + 1 < chars.length and chars[i + 1] == "{" {
+        result_parts.append("{")
+        i += 2
+      } else {
+        i += 1
+        var num_parts: List<String> = []
+        while i < chars.length {
+          let c = chars[i]
+          if c.is_digit() {
+            num_parts.append(c)
+            i += 1
+          } else {
+            break
+          }
+        }
+        if i < chars.length and chars[i] == "}" {
+          let num_str = num_parts.join("")
+          let group_num = try num_str.to_int() catch _ {
+            throw Failure(message: "usage: invalid group number in template")
+          }
+          if group_num < 0 or group_num > 9 or group_num >= m.groups.length {
+            throw Failure(message: "usage: group ${group_num} out of range")
+          }
+          result_parts.append(m.groups[group_num] ?? "")
+          i += 1
+        } else {
+          throw Failure(message: "usage: unclosed brace in template")
+        }
+      }
+    } else if char == "}" {
+      if i + 1 < chars.length and chars[i + 1] == "}" {
+        result_parts.append("}")
+        i += 2
+      } else {
+        throw Failure(message: "usage: unmatched } in template")
+      }
+    } else {
+      result_parts.append(char)
+      i += 1
+    }
+  }
+
+  return result_parts.join("")
+}
+
+fn apply_counter_mode(index: Int, template: String, start: Int) throws -> String {
+  var count = 0
+  var hash_start = -1
+  let chars = template.chars()
+
+  for j in 0..<chars.length {
+    if chars[j] == "#" {
+      if hash_start == -1 {
+        hash_start = j
+      }
+      count += 1
+    } else if hash_start >= 0 {
+      break
+    }
+  }
+
+  if hash_start == -1 {
+    throw Failure(message: "usage: template must contain # characters")
+  }
+
+  if hash_start + count < chars.length {
+    for j in (hash_start + count)..<chars.length {
+      if chars[j] == "#" {
+        throw Failure(message: "usage: template must contain exactly one run of #")
+      }
+    }
+  }
+
+  let num = start + index
+  let num_str = "${num}"
+  let padded = if num_str.length >= count {
+    num_str
+  } else {
+    num_str.pad_start(count, "0")
+  }
+
+  let before = template.slice(0, hash_start)
+  let after = template.slice(hash_start + count, template.length)
+
+  return "${before}${padded}${after}"
+}
+
+fn process_batch(dir: String, candidates: List<String>, mode: Mode) throws -> List<RenameRecord> {
+  var renames: List<RenameRecord> = []
+  var new_names: Map<String, Bool> = {}
+
+  for filename in candidates {
+    let new_name: String = match mode {
+      Mode.Regex(pattern, template) => {
+        let transformed = try apply_regex_mode(filename, pattern: pattern, template: template)
+        if transformed is some(t) {
+          t
+        } else {
+          filename
+        }
+      }
+      Mode.Counter(template, start, match_pattern) => {
+        if match_pattern is some(pattern) {
+          let re = try regex.compile(pattern)
+          if not re.matches(filename) {
+            filename
+          } else {
+            try apply_counter_mode(renames.length, template: template, start: start)
+          }
+        } else {
+          try apply_counter_mode(renames.length, template: template, start: start)
+        }
+      }
+    }
+
+    if new_name == filename {
+      continue
+    }
+
+    let validation = validate_name(new_name)
+    if not validation.is_empty() {
+      throw Failure(message: validation)
+    }
+
+    if files.exists(path.join(dir, new_name)) {
+      throw Failure(message: "error: exists: ${new_name}")
+    }
+
+    if new_names[new_name] ?? false {
+      throw Failure(message: "error: conflict: ${new_name}")
+    }
+
+    new_names[new_name] = true
+    renames.append(RenameRecord(old_name: filename, new_name: new_name))
+  }
+
+  return renames
+}
+
+fn main() throws {
+  let result = try parse_args()
+
+  if not result.err.is_empty() {
+    eprint(result.err)
+    process.exit(64)
+  }
+
+  let opts = result.opts
+  let validation_err = validate_options(opts)
+  if not validation_err.is_empty() {
+    eprint(validation_err)
+    process.exit(64)
+  }
+
+  let dir = opts.dir ?? ""
+  let mode = opts.mode ?? return
+
+  if not files.is_dir(dir) {
+    eprint("error: not a directory: ${dir}")
+    process.exit(2)
+  }
+
+  let all_entries = try files.list(dir)
+  var candidates: List<String> = []
+
+  for entry in all_entries {
+    let full_path = path.join(dir, entry)
+    if files.exists(full_path) and not files.is_dir(full_path) {
+      candidates.append(entry)
+    }
+  }
+
+  let renames = try process_batch(dir, candidates: candidates, mode: mode)
+
+  if opts.dry_run {
+    for rename in renames {
+      print("${rename.old_name} -> ${rename.new_name}")
+    }
+    let count = renames.length
+    print("would rename ${count}")
+  } else {
+    for rename in renames {
+      try files.rename(path.join(dir, rename.old_name), path.join(dir, rename.new_name))
+      print("${rename.old_name} -> ${rename.new_name}")
+    }
+    let count = renames.length
+    print("renamed ${count}")
+  }
+}

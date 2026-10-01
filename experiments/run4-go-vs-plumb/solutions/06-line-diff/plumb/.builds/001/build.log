@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:40:28
+   |
+40 |       context = v.to_int() catch err { 1_000_000_000_000 }
+   |                            ^^^^^
+   = help: write `try f(x) catch err { ... }`

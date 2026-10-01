@@ -1,0 +1,237 @@
+import json
+import io
+
+type WhereClause {
+  path: String
+  value: String
+}
+
+type Options {
+  where: List<WhereClause> = []
+  select: List<String> = []
+}
+
+fn parse_args() -> Options {
+  let args = process.args()
+  var where_clauses: List<WhereClause> = []
+  var select_paths: List<String> = []
+  var i = 0
+
+  while i < args.length {
+    let arg = args[i]
+
+    if arg == "--where" {
+      i += 1
+      if i >= args.length {
+        usage("--where requires a value")
+      }
+      let clause = args[i]
+      let eq_pos = clause.find("=")
+      if eq_pos is some(pos) {
+        let path = clause.substring(0, pos)
+        let value = clause.substring(pos + 1, clause.length)
+        if path.is_empty() {
+          usage("empty path in --where")
+        }
+        if not is_valid_path(path) {
+          usage("invalid path in --where")
+        }
+        where_clauses.append(WhereClause(path: path, value: value))
+      } else {
+        usage("--where requires '='")
+      }
+    } else if arg == "--select" {
+      i += 1
+      if i >= args.length {
+        usage("--select requires a value")
+      }
+      let paths = args[i].split(",")
+      for path in paths {
+        if path.is_empty() {
+          usage("empty path in --select")
+        }
+        if not is_valid_path(path) {
+          usage("invalid path in --select")
+        }
+        select_paths.append(path)
+      }
+    } else {
+      usage("unknown option: ${arg}")
+    }
+
+    i += 1
+  }
+
+  return Options(where: where_clauses, select: select_paths)
+}
+
+fn is_valid_path(path: String) -> Bool {
+  if path.is_empty() {
+    return false
+  }
+  let parts = path.split(".")
+  for part in parts {
+    if part.is_empty() {
+      return false
+    }
+  }
+  return true
+}
+
+fn usage(msg: String) -> Never {
+  eprint("usage: ${msg}")
+  process.exit(64)
+}
+
+fn find_value(obj: json.Value, path: String) -> json.Value? {
+  let parts = path.split(".")
+  var current: json.Value? = obj
+
+  for part in parts {
+    if current is some(c) {
+      if c is json.Value.Object(fields) {
+        current = fields[part]
+      } else {
+        return none
+      }
+    } else {
+      return none
+    }
+  }
+
+  return current
+}
+
+fn value_matches(val: json.Value?, target: String) -> Bool {
+  if val is none {
+    return false
+  }
+
+  if val is some(v) {
+    match v {
+      json.Value.String(s) => {
+        return s == target
+      }
+      json.Value.Number(n) => {
+        return n.text == target
+      }
+      json.Value.Bool(b) => {
+        return if b { "true" } else { "false" } == target
+      }
+      json.Value.Null => {
+        return target == "null"
+      }
+      _ => {
+        return false
+      }
+    }
+  }
+
+  return false
+}
+
+fn encode_value(val: json.Value) -> String {
+  match val {
+    json.Value.Null => "null"
+    json.Value.Bool(b) => if b { "true" } else { "false" }
+    json.Value.Number(n) => n.text
+    json.Value.String(s) => escape_string(s)
+    json.Value.Array(items) => {
+      let elements = items.map(v => encode_value(v))
+      return "[${elements.join(",")}]"
+    }
+    json.Value.Object(fields) => {
+      let pairs: List<String> = []
+      for entry in fields {
+        pairs.append("\"${entry.key}\":${encode_value(entry.value)}")
+      }
+      return "{${pairs.join(",")}}"
+    }
+  }
+}
+
+fn escape_string(s: String) -> String {
+  var result = "\""
+  for char in s {
+    let code = char.codepoint()
+    let escaped = match code {
+      34 => "\\\""
+      92 => "\\\\"
+      8 => "\\b"
+      9 => "\\t"
+      10 => "\\n"
+      12 => "\\f"
+      13 => "\\r"
+      _ => {
+        if code < 32 {
+          let hex = if code < 16 { "0" } else { "" }
+          "\\u00${hex}${code.to_hex()}"
+        } else {
+          char
+        }
+      }
+    }
+    result += escaped
+  }
+  result += "\""
+  return result
+}
+
+fn process_record(obj: json.Value, options: Options) -> json.Value? {
+  // Check all where conditions
+  for clause in options.where {
+    let val = find_value(obj, clause.path)
+    if not value_matches(val, clause.value) {
+      return none
+    }
+  }
+
+  // If no --select, return the whole object
+  if options.select.is_empty() {
+    return obj
+  }
+
+  // Build selected object
+  var result: Map<String, json.Value> = {}
+  for path in options.select {
+    let val = find_value(obj, path)
+    result[path] = val ?? json.Value.Null
+  }
+
+  return json.Value.Object(result)
+}
+
+fn main() throws {
+  let options = parse_args()
+  var line_num = 0
+  var had_error = false
+
+  while try io.read_line() is some(line) {
+    line_num += 1
+
+    // Skip empty or whitespace-only lines
+    if line.trim().is_empty() {
+      continue
+    }
+
+    let obj = try json.parse(line) catch err {
+      eprint("error: line ${line_num}: invalid JSON")
+      had_error = true
+      continue
+    }
+
+    if not (obj is json.Value.Object(_)) {
+      eprint("error: line ${line_num}: not an object")
+      had_error = true
+      continue
+    }
+
+    if let result = process_record(obj, options) {
+      print(encode_value(result))
+    }
+  }
+
+  if had_error {
+    process.exit(1)
+  }
+}

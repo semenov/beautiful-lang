@@ -1,0 +1,40 @@
+error: can't change `lst`: it's declared with `let`
+  --> main.plumb:126:7
+    |
+126 |       lst.append(sample)
+    |       ^^^
+    = help: declare it with `var lst = ...`
+error: there is no parameter `x`
+  --> main.plumb:135:43
+    |
+135 |       s.samples[sample.name] = lst.filter(x: Sample => x.ts > cutoff)
+    |                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the parameter here is `test`
+error: unknown name `x`
+  --> main.plumb:135:56
+    |
+135 |       s.samples[sample.name] = lst.filter(x: Sample => x.ts > cutoff)
+    |                                                        ^
+error: there is no parameter `x`
+  --> main.plumb:165:18
+    |
+165 |       lst.filter(x: Sample => x.ts > cutoff)
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the parameter here is `test`
+error: unknown name `x`
+  --> main.plumb:165:31
+    |
+165 |       lst.filter(x: Sample => x.ts > cutoff)
+    |                               ^
+error: there is no parameter `sample_item`
+  --> main.plumb:196:38
+    |
+196 |     let sorted_values = filtered.map(sample_item: Sample => sample_item.value).sorted()
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: the parameter here is `transform`
+error: unknown name `sample_item`
+  --> main.plumb:196:61
+    |
+196 |     let sorted_values = filtered.map(sample_item: Sample => sample_item.value).sorted()
+    |                                                             ^^^^^^^^^^^
+7 error(s)

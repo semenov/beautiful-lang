@@ -1,0 +1,162 @@
+import http
+import json
+import env
+import time
+
+type Bucket {
+  tokens: Float
+  last_refilled: time.Instant
+}
+
+type Stats {
+  allowed: Int = 0
+  denied: Int = 0
+  keys: Int = 0
+}
+
+type State {
+  buckets: Map<String, Bucket>
+  stats: Stats
+  capacity: Float
+  refill_per_sec: Float
+}
+
+fn add_tokens(state: State, now: time.Instant) {
+  for entry in state.buckets {
+    let key = entry.key
+    let bucket = entry.value
+    let elapsed = now.since(bucket.last_refilled).seconds()
+    let new_tokens = bucket.tokens + elapsed * state.refill_per_sec
+    let clamped = if new_tokens > state.capacity { state.capacity } else { new_tokens }
+    state.buckets[key] = Bucket(tokens: clamped, last_refilled: now)
+  }
+}
+
+fn check(req: http.Request, state: Shared<State>) throws -> http.Response {
+  // Parse JSON body
+  let body: CheckRequest = try json.decode<CheckRequest>(req.text())
+
+  // Validate key
+  if body.key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is missing or empty"))
+  }
+
+  with s = state.lock() {
+    let now = time.now()
+
+    // Refill all buckets
+    add_tokens(s, now)
+
+    // Get or create bucket for this key
+    let existing = s.buckets[body.key]
+    let bucket = if existing is none {
+      Bucket(tokens: s.capacity, last_refilled: now)
+    } else {
+      existing ?? Bucket(tokens: s.capacity, last_refilled: now)
+    }
+
+    // Check if we have tokens
+    if bucket.tokens >= 1.0 {
+      // Allow the request
+      let new_tokens = bucket.tokens - 1.0
+      s.buckets[body.key] = Bucket(tokens: new_tokens, last_refilled: now)
+      s.stats.allowed += 1
+
+      // Update distinct keys count if this is a new key
+      if existing is none {
+        s.stats.keys += 1
+      }
+
+      let remaining = new_tokens.floor().to_int()
+      return http.json(200, AllowedResponse(allowed: true, remaining: remaining))
+    } else {
+      // Deny the request
+      s.stats.denied += 1
+
+      // Calculate retry_after: how many seconds until we have 1 token
+      let tokens_needed = 1.0 - bucket.tokens
+      let seconds_needed = tokens_needed / s.refill_per_sec
+      let retry_after = seconds_needed.ceil().to_int()
+      let retry_after_final = if retry_after < 1 { 1 } else { retry_after }
+
+      return http.json(429, DeniedResponse(allowed: false, remaining: 0, retry_after: retry_after_final))
+        .with_header("Retry-After", "${retry_after_final}")
+    }
+  }
+}
+
+fn stats(req: http.Request, state: Shared<State>) throws -> http.Response {
+  with s = state.read() {
+    return http.json(200, s.stats)
+  }
+}
+
+fn not_found(req: http.Request) throws -> http.Response {
+  return http.json(404, ErrorResponse(error: "not found"))
+}
+
+fn method_not_allowed(req: http.Request) throws -> http.Response {
+  return http.json(405, ErrorResponse(error: "method not allowed"))
+}
+
+type CheckRequest {
+  key: String
+}
+
+type AllowedResponse {
+  allowed: Bool
+  remaining: Int
+}
+
+type DeniedResponse {
+  allowed: Bool
+  remaining: Int
+  retry_after: Int
+}
+
+type ErrorResponse {
+  error: String
+}
+
+fn main() throws {
+  // Parse environment variables
+  let port_str = env.get("PORT") ?? "8080"
+  let port = try port_str.to_int() catch err {
+    eprint("error: PORT is not a valid integer")
+    process.exit(2)
+  }
+
+  let capacity_str = env.get("CAPACITY") ?? "10"
+  let capacity = try capacity_str.to_int() catch err {
+    eprint("error: CAPACITY is not a valid integer")
+    process.exit(2)
+  }
+
+  if capacity < 1 {
+    eprint("error: CAPACITY must be at least 1")
+    process.exit(2)
+  }
+
+  let refill_per_sec_str = env.get("REFILL_PER_SEC") ?? "1"
+  let refill_per_sec = try refill_per_sec_str.to_float() catch err {
+    eprint("error: REFILL_PER_SEC is not a valid number")
+    process.exit(2)
+  }
+
+  if refill_per_sec <= 0.0 {
+    eprint("error: REFILL_PER_SEC must be greater than 0")
+    process.exit(2)
+  }
+
+  // Create shared state
+  let state = Shared<State>(State(capacity: capacity.to_float(), refill_per_sec: refill_per_sec))
+
+  // Set up router
+  var router = http.Router()
+  router.post("/check", req => try check(req, state))
+  router.get("/stats", req => try stats(req, state))
+  router.any("*rest", not_found)
+
+  // Serve
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}

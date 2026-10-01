@@ -1,0 +1,353 @@
+import files
+import io
+import process
+
+type Options {
+  min_level: Int = 1
+  max_level: Int = 6
+  file: String? = none
+}
+
+type Heading {
+  level: Int
+  text: String
+  slug: String
+}
+
+fn main() throws {
+  let opts = try parse_options()
+  let content = try read_input(opts.file)
+  let headings = parse_headings(content, min_level: opts.min_level, max_level: opts.max_level)
+
+  if headings.is_empty() {
+    return
+  }
+
+  for heading in headings {
+    let indent = " ".repeat((heading.level - opts.min_level) * 2)
+    print("${indent}- [${heading.text}](#${heading.slug})")
+  }
+}
+
+fn parse_options() throws -> Options {
+  let args = process.args()
+
+  var min_level = 1
+  var max_level = 6
+  var file: String? = none
+  var i = 1
+
+  while i < args.length {
+    let arg = args[i]
+
+    if arg == "--min-level" {
+      i += 1
+      if i >= args.length {
+        usage("--min-level requires a value")
+      }
+      min_level = try args[i].to_int() catch err {
+        usage("invalid min-level value")
+      }
+    } else if arg == "--max-level" {
+      i += 1
+      if i >= args.length {
+        usage("--max-level requires a value")
+      }
+      max_level = try args[i].to_int() catch err {
+        usage("invalid max-level value")
+      }
+    } else if arg.starts_with("--") {
+      usage("unknown option: ${arg}")
+    } else if file is none {
+      file = arg
+    } else {
+      usage("multiple files not allowed")
+    }
+
+    i += 1
+  }
+
+  if min_level < 1 or min_level > 6 {
+    usage("min-level must be between 1 and 6")
+  }
+  if max_level < 1 or max_level > 6 {
+    usage("max-level must be between 1 and 6")
+  }
+  if min_level > max_level {
+    usage("min-level must not be greater than max-level")
+  }
+
+  return Options(min_level: min_level, max_level: max_level, file: file)
+}
+
+fn read_input(file: String?) throws -> String {
+  if file is some(path) {
+    return try files.read(path) catch err {
+      eprint("error: cannot read ${path}")
+      process.exit(2)
+    }
+  }
+
+  let data = try io.read_all()
+  return data.text_lossy()
+}
+
+fn parse_headings(content: String, min_level: Int, max_level: Int) -> List<Heading> {
+  let lines = content.split("\n")
+  var headings: List<Heading> = []
+  var slug_count: Map<String, Int> = {}
+  var in_fence = false
+  var fence_char: String? = none
+  var fence_count = 0
+
+  for line_raw in lines {
+    let line = strip_trailing_cr(line_raw)
+
+    let leading_spaces = count_leading_spaces(line)
+    if leading_spaces <= 3 {
+      let fence_info = check_fence_marker(line.slice(leading_spaces, line.length))
+      if fence_info is some(info) {
+        if in_fence {
+          if info.char == fence_char and info.count >= fence_count {
+            in_fence = false
+            fence_char = none
+          }
+        } else {
+          in_fence = true
+          fence_char = info.char
+          fence_count = info.count
+        }
+        continue
+      }
+    }
+
+    if in_fence {
+      continue
+    }
+
+    let heading_info = parse_heading_line(line)
+    if heading_info is some(info) {
+      let slug_base = text_to_slug(info.text)
+      let slug = if slug_base.is_empty() {
+        ""
+      } else {
+        let count = slug_count[slug_base] ?? 0
+        slug_count[slug_base] = count + 1
+        if count == 0 {
+          slug_base
+        } else {
+          "${slug_base}-${count}"
+        }
+      }
+
+      if not info.text.is_empty() and info.level >= min_level and info.level <= max_level {
+        headings.append(Heading(level: info.level, text: info.text, slug: slug))
+      }
+    }
+  }
+
+  return headings
+}
+
+fn strip_trailing_cr(text: String) -> String {
+  if text.ends_with("\r") {
+    return text.slice(0, text.length - 1)
+  }
+  return text
+}
+
+type FenceInfo {
+  char: String
+  count: Int
+}
+
+fn check_fence_marker(text: String) -> FenceInfo? {
+  if text.length < 3 {
+    return none
+  }
+
+  let first_char = text.slice(0, 1)
+  if first_char != "`" and first_char != "~" {
+    return none
+  }
+
+  var count = 0
+  for i in 0..<text.length {
+    let c = text.slice(i, i + 1)
+    if c == first_char {
+      count += 1
+    } else if c != " " and c != "\t" {
+      break
+    }
+  }
+
+  if count >= 3 {
+    return some(FenceInfo(char: first_char, count: count))
+  }
+
+  return none
+}
+
+type HeadingInfo {
+  level: Int
+  text: String
+}
+
+fn parse_heading_line(line: String) -> HeadingInfo? {
+  let leading_spaces = count_leading_spaces(line)
+
+  if leading_spaces > 3 {
+    return none
+  }
+
+  let rest = line.slice(leading_spaces, line.length)
+
+  var hash_count = 0
+  for i in 0..<rest.length {
+    let c = rest.slice(i, i + 1)
+    if c == "#" {
+      hash_count += 1
+    } else {
+      break
+    }
+  }
+
+  if hash_count == 0 or hash_count > 6 {
+    return none
+  }
+
+  let after_hashes = rest.slice(hash_count, rest.length)
+
+  if after_hashes.is_empty() {
+    return some(HeadingInfo(level: hash_count, text: ""))
+  }
+
+  let first_char = after_hashes.slice(0, 1)
+  if first_char != " " and first_char != "\t" {
+    return none
+  }
+
+  let text_part = after_hashes.slice(1, after_hashes.length).trim()
+
+  let final_text = strip_trailing_hashes(text_part)
+
+  return some(HeadingInfo(level: hash_count, text: final_text))
+}
+
+fn strip_trailing_hashes(text: String) -> String {
+  var trimmed = text.trim_end()
+
+  if trimmed.is_empty() {
+    return ""
+  }
+
+  var hash_start = trimmed.length
+  for i in (0..<trimmed.length).reversed() {
+    let c = trimmed.slice(i, i + 1)
+    if c == "#" {
+      hash_start = i
+    } else {
+      break
+    }
+  }
+
+  if hash_start < trimmed.length {
+    if hash_start == 0 {
+      return ""
+    }
+
+    let before_hashes = trimmed.slice(hash_start - 1, hash_start)
+    if before_hashes == " " or before_hashes == "\t" {
+      return trimmed.slice(0, hash_start - 1).trim_end()
+    }
+  }
+
+  return trimmed
+}
+
+fn count_leading_spaces(text: String) -> Int {
+  var count = 0
+  for i in 0..<text.length {
+    let c = text.slice(i, i + 1)
+    if c == " " or c == "\t" {
+      count += 1
+    } else {
+      break
+    }
+  }
+  return count
+}
+
+fn text_to_slug(text: String) -> String {
+  let lower = text.lower()
+
+  var slug_chars: List<String> = []
+  for i in 0..<lower.length {
+    let c = lower.slice(i, i + 1)
+    if is_valid_slug_char(c) {
+      slug_chars.append(c)
+    }
+  }
+
+  var result_parts: List<String> = []
+  for c in slug_chars {
+    if c == " " {
+      result_parts.append("-")
+    } else {
+      result_parts.append(c)
+    }
+  }
+
+  return result_parts.join("")
+}
+
+fn is_valid_slug_char(c: String) -> Bool {
+  if c == " " or c == "-" or c == "_" {
+    return true
+  }
+
+  let chars = c.chars()
+  if chars.is_empty() {
+    return false
+  }
+
+  let code = c.code_points()[0]
+
+  if code >= 97 and code <= 122 {
+    return true
+  }
+
+  if code >= 48 and code <= 57 {
+    return true
+  }
+
+  if is_unicode_letter_or_digit(code) {
+    return true
+  }
+
+  return false
+}
+
+fn is_unicode_letter_or_digit(code: Int) -> Bool {
+  if code >= 128 {
+    if code >= 192 and code <= 687 {
+      return true
+    }
+    if code >= 913 and code <= 969 {
+      return true
+    }
+    if code >= 1040 and code <= 1103 {
+      return true
+    }
+    if code >= 256 {
+      return true
+    }
+  }
+
+  return false
+}
+
+fn usage(msg: String) -> Never {
+  eprint("usage: app [--min-level N] [--max-level M] [FILE]")
+  process.exit(64)
+}

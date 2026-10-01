@@ -1,0 +1,4 @@
+# app
+./main.go:7:2: "regexp" imported and not used
+./main.go:8:2: "sort" imported and not used
+./main.go:133:2: declared and not used: result

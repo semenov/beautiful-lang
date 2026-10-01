@@ -1,0 +1,6 @@
+error: there are no tuples to unpack in `for`
+  --> main.plumb:50:7
+   |
+50 |   for (i, line) in lines.indexed() {
+   |       ^
+   = help: `for item in xs.indexed()` gives `item.index`, `item.value`; `for entry in map` gives `entry.key`, `entry.value`

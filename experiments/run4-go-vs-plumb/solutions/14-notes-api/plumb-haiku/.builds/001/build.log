@@ -1,0 +1,31 @@
+error: `process` is imported but not used
+  --> main.plumb:5:8
+  |
+5 | import process
+  |        ^^^^^^^
+  = help: remove the import
+error: nothing here can fail
+  --> main.plumb:36:14
+   |
+36 |   let port = try env.get("PORT") ?? throw Failure(message: "PORT environment variable not set")
+   |              ^^^^^^^^^^^^^^^^^^^
+   = help: remove `try`
+error: nothing here can fail
+  --> main.plumb:37:17
+   |
+37 |   let db_path = try env.get("DB_PATH") ?? throw Failure(message: "DB_PATH environment variable not set")
+   |                 ^^^^^^^^^^^^^^^^^^^^^^
+   = help: remove `try`
+error: there is no `+` on text
+  --> main.plumb:101:10
+    |
+101 |         ["%" + decoded_q + "%", "%" + decoded_q + "%"]
+    |          ^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:101:33
+    |
+101 |         ["%" + decoded_q + "%", "%" + decoded_q + "%"]
+    |                                 ^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+5 error(s)

@@ -1,0 +1,7 @@
+error: `json` is imported but not used
+  --> main.plumb:3:8
+  |
+3 | import json
+  |        ^^^^
+  = help: remove the import
+1 error(s)

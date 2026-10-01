@@ -1,0 +1,34 @@
+error: `sql` is imported but not used
+  --> main.plumb:5:8
+  |
+5 | import sql
+  |        ^^^
+  = help: remove the import
+error: module `csv` has no `BadCsv`
+  --> main.plumb:141:15
+    |
+141 |     throw csv.BadCsv()
+    |               ^^^^^^
+error: module `csv` has no `BadCsv`
+  --> main.plumb:147:15
+    |
+147 |     throw csv.BadCsv()
+    |               ^^^^^^
+error: expected `String`, found `Bytes`
+  --> main.plumb:161:30
+    |
+161 |   let parsed = try csv.parse(req.body) catch err {
+    |                              ^^^^^^^^
+error: `import_csv` has 3 or more parameters: name every argument after the first
+  --> main.plumb:198:32
+    |
+198 |     return try import_csv(req, conn, gate)
+    |                                ^^^^
+    = help: write (…, conn: …, gate: …)
+error: `route` has 3 or more parameters: name every argument after the first
+  --> main.plumb:216:46
+    |
+216 |     router.use((req, next) => try route(req, conn, gate))
+    |                                              ^^^^
+    = help: write (…, conn: …, gate: …)
+6 error(s)

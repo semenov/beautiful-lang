@@ -1,0 +1,5 @@
+error: expected a name for the error: `catch err { ... }`, found `{`
+  --> main.plumb:200:53
+    |
+200 |   let status = try parts[status_idx].to_int() catch {
+    |                                                     ^

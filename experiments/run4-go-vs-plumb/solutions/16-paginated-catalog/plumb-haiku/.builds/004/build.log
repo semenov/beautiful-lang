@@ -1,0 +1,51 @@
+error: `compare_products` must return a `Int` at the end
+  --> main.plumb:102:66
+    |
+102 | fn compare_products(a: Product, b: Product, sort: String) -> Int {
+    |                                                                  ^
+    = help: add `return ...` as the last line
+error: the result (`Int`) is not used
+  --> main.plumb:130:20
+    |
+130 |   if a.id < b.id { -1 }
+    |                    ^^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+error: the result (`Int`) is not used
+  --> main.plumb:131:25
+    |
+131 |   else if a.id > b.id { 1 }
+    |                         ^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+error: the arms have different types: `String` and `_?`
+  --> main.plumb:157:26
+    |
+157 |       json.Value.Null => none
+    |                          ^^^^
+error: expected `String`, found `_?`
+  --> main.plumb:157:26
+    |
+157 |       json.Value.Null => none
+    |                          ^^^^
+error: the arms have different types: `Bool` and `_?`
+  --> main.plumb:177:26
+    |
+177 |       json.Value.Null => none
+    |                          ^^^^
+error: expected `Bool`, found `_?`
+  --> main.plumb:177:26
+    |
+177 |       json.Value.Null => none
+    |                          ^^^^
+error: `some(x)` is only a pattern
+  --> main.plumb:221:24
+    |
+221 |     filters.category = some(cat)
+    |                        ^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: `compare_products` has 3 or more parameters: name every argument after the first
+  --> main.plumb:291:47
+    |
+291 |         if compare_products(filtered[i_sort], filtered[j], sort: filters.sort) > 0 {
+    |                                               ^^^^^^^^^^^
+    = help: write (…, b: …, sort: …)
+9 error(s)

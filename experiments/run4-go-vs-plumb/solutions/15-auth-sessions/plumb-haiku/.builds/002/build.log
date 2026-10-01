@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:263:51
+    |
+263 |   let port = (env.get("PORT") ?? "8080").to_int() catch err { 8080 }
+    |                                                   ^^^^^
+    = help: write `try f(x) catch err { ... }`

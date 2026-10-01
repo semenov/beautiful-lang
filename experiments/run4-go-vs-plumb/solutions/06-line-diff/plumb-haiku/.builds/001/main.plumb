@@ -1,0 +1,265 @@
+import files
+import process
+
+type Change {
+  kind: String    // "keep", "remove", "add"
+  line: String
+  line_num_old: Int  // 1-based, or 0 if not in old file
+  line_num_new: Int  // 1-based, or 0 if not in new file
+}
+
+type Hunk {
+  old_start: Int
+  old_count: Int
+  new_start: Int
+  new_count: Int
+  changes: List<Change>
+}
+
+fn split_lines(text: String) -> List<String> {
+  var lines: List<String> = []
+  var current = ""
+  for char in text {
+    current += char
+    if char == "\n" {
+      lines.append(current)
+      current = ""
+    }
+  }
+  if not current.is_empty() {
+    lines.append(current)
+  }
+  return lines
+}
+
+fn lcs_length(old_lines: List<String>, new_lines: List<String>, i: Int, j: Int, memo: Map<String, Int>) -> Int {
+  if i >= old_lines.length() or j >= new_lines.length() {
+    return 0
+  }
+  let key = "${i},${j}"
+  if memo[key] is some(val) {
+    return val
+  }
+
+  var result = 0
+  if old_lines[i] == new_lines[j] {
+    result = 1 + lcs_length(old_lines, new_lines, i + 1, j + 1, memo)
+  } else {
+    let left = lcs_length(old_lines, new_lines, i + 1, j, memo)
+    let right = lcs_length(old_lines, new_lines, i, j + 1, memo)
+    result = if left >= right { left } else { right }
+  }
+  memo[key] = result
+  return result
+}
+
+fn compute_changes(old_lines: List<String>, new_lines: List<String>) -> List<Change> {
+  var changes: List<Change> = []
+  var i = 0
+  var j = 0
+  var old_line_num = 1
+  var new_line_num = 1
+  let memo: Map<String, Int> = {}
+
+  while i < old_lines.length() or j < new_lines.length() {
+    if i < old_lines.length() and j < new_lines.length() and old_lines[i] == new_lines[j] {
+      changes.append(Change(kind: "keep", line: old_lines[i], line_num_old: old_line_num, line_num_new: new_line_num))
+      i += 1
+      j += 1
+      old_line_num += 1
+      new_line_num += 1
+    } else if j >= new_lines.length() or (i < old_lines.length() and lcs_length(old_lines, new_lines, i + 1, j, memo) >= lcs_length(old_lines, new_lines, i, j + 1, memo)) {
+      changes.append(Change(kind: "remove", line: old_lines[i], line_num_old: old_line_num, line_num_new: 0))
+      i += 1
+      old_line_num += 1
+    } else {
+      changes.append(Change(kind: "add", line: new_lines[j], line_num_old: 0, line_num_new: new_line_num))
+      j += 1
+      new_line_num += 1
+    }
+  }
+
+  return changes
+}
+
+fn group_into_hunks(changes: List<Change>, context: Int) -> List<Hunk> {
+  var hunks: List<Hunk> = []
+  var current_hunk: Hunk? = none
+  var kept_count = 0
+
+  for i in 0..<changes.length() {
+    let change = changes[i]
+
+    if change.kind == "keep" {
+      kept_count += 1
+      if current_hunk is some(hunk) {
+        hunk.changes.append(change)
+        if change.line_num_old > 0 {
+          hunk.old_count += 1
+        }
+        if change.line_num_new > 0 {
+          hunk.new_count += 1
+        }
+      }
+    } else {
+      if kept_count > context and current_hunk is some(hunk) {
+        // Trim the kept lines to context
+        var to_remove = kept_count - context
+        var idx = hunk.changes.length() - kept_count
+        while to_remove > 0 and idx < hunk.changes.length() {
+          if hunk.changes[idx].kind == "keep" {
+            hunk.changes.remove(idx)
+            hunk.old_count -= 1
+            hunk.new_count -= 1
+            to_remove -= 1
+          } else {
+            idx += 1
+          }
+        }
+        current_hunk = none
+      }
+
+      if current_hunk is none {
+        // Start a new hunk
+        var hunk_changes: List<Change> = []
+
+        // Add context before this change
+        var start_idx = if i >= context { i - context } else { 0 }
+        var idx = start_idx
+        while idx < i {
+          hunk_changes.append(changes[idx])
+          idx += 1
+        }
+
+        hunk_changes.append(change)
+
+        let old_start = if start_idx > 0 { changes[start_idx].line_num_old } else { 1 }
+        let new_start = if start_idx > 0 { changes[start_idx].line_num_new } else { 1 }
+
+        var old_count = 0
+        var new_count = 0
+        for c in hunk_changes {
+          if c.line_num_old > 0 { old_count += 1 }
+          if c.line_num_new > 0 { new_count += 1 }
+        }
+
+        current_hunk = Hunk(old_start: old_start, old_count: old_count, new_start: new_start, new_count: new_count, changes: hunk_changes)
+      } else if current_hunk is some(hunk) {
+        hunk.changes.append(change)
+        if change.line_num_old > 0 {
+          hunk.old_count += 1
+        }
+        if change.line_num_new > 0 {
+          hunk.new_count += 1
+        }
+      }
+
+      kept_count = 0
+    }
+  }
+
+  if current_hunk is some(hunk) {
+    hunks.append(hunk)
+  }
+
+  return hunks
+}
+
+fn format_hunk_header(hunk: Hunk) -> String {
+  let old_str = if hunk.old_count == 1 { "${hunk.old_start}" } else { "${hunk.old_start},${hunk.old_count}" }
+  let new_str = if hunk.new_count == 1 { "${hunk.new_start}" } else { "${hunk.new_start},${hunk.new_count}" }
+  return "@@ -${old_str} +${new_str} @@"
+}
+
+fn main() throws {
+  let args = process.args()
+
+  var context = 3
+  var file_idx = 1
+
+  // Parse -U flag
+  if args.length() > 1 and args[1] == "-U" {
+    if args.length() < 4 {
+      eprint("usage: app [-U N] OLD NEW")
+      process.exit(2)
+    }
+    let n_str = args[2]
+    match try n_str.to_int() catch err {
+      process.exit(2)
+    } {
+      n => {
+        if n < 0 {
+          eprint("usage: app [-U N] OLD NEW")
+          process.exit(2)
+        }
+        context = n
+        file_idx = 3
+      }
+    }
+  }
+
+  if args.length() < file_idx + 2 {
+    eprint("usage: app [-U N] OLD NEW")
+    process.exit(2)
+  }
+
+  let old_file = args[file_idx]
+  let new_file = args[file_idx + 1]
+
+  if args.length() > file_idx + 2 {
+    eprint("usage: app [-U N] OLD NEW")
+    process.exit(2)
+  }
+
+  // Read files
+  let old_text = try files.read(old_file) catch err {
+    eprint("error: cannot read ${old_file}")
+    process.exit(2)
+  }
+
+  let new_text = try files.read(new_file) catch err {
+    eprint("error: cannot read ${new_file}")
+    process.exit(2)
+  }
+
+  // Split into lines
+  let old_lines = split_lines(old_text)
+  let new_lines = split_lines(new_text)
+
+  // Compute changes
+  let changes = compute_changes(old_lines, new_lines)
+
+  // Check if there are any changes
+  var has_changes = false
+  for change in changes {
+    if change.kind != "keep" {
+      has_changes = true
+      break
+    }
+  }
+
+  if not has_changes {
+    process.exit(0)
+  }
+
+  // Print header
+  print("--- ${old_file}")
+  print("+++ ${new_file}")
+
+  // Group into hunks
+  let hunks = group_into_hunks(changes, context)
+
+  // Print hunks
+  for hunk in hunks {
+    print(format_hunk_header(hunk))
+    for change in hunk.changes {
+      match change.kind {
+        "keep" => print(" ${change.line}")
+        "remove" => print("-${change.line}")
+        "add" => print("+${change.line}")
+      }
+    }
+  }
+
+  process.exit(1)
+}

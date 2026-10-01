@@ -1,0 +1,159 @@
+import cli
+import http
+import io
+import time
+import url
+import files
+import process
+
+type Options {
+  concurrency: Int = 4
+  timeout: Float = 10.0
+  file: String? = none
+  args: List<String> = []
+}
+
+type FetchResult {
+  url: String
+  status: Int? = none
+  bytes: Int? = none
+  error: String? = none
+}
+
+fn validate_url(u: String) -> Bool {
+  if u.starts_with("http://") or u.starts_with("https://") {
+    let parsed = try url.parse(u) catch err {
+      return false
+    }
+    return not parsed.host.is_empty()
+  }
+  return false
+}
+
+fn fetch_url(u: String, timeout_ms: Int) throws -> FetchResult {
+  if not validate_url(u) {
+    return FetchResult(url: u, error: "invalid-url")
+  }
+
+  var redirect_count = 0
+  var current_url = u
+
+  while redirect_count < 10 {
+    let req = http.ClientRequest(
+      url: current_url,
+      timeout: time.millis(timeout_ms),
+      follow_redirects: false
+    )
+
+    let res = try http.send(req) catch err {
+      if err.message().contains("timeout") or err.message().contains("Timeout") {
+        return FetchResult(url: u, error: "timeout")
+      } else if err.message().contains("connect") or err.message().contains("connection") {
+        return FetchResult(url: u, error: "connect")
+      }
+      return FetchResult(url: u, error: "other")
+    }
+
+    // Check for redirect
+    let status = res.status
+    if status == 301 or status == 302 or status == 303 or status == 307 or status == 308 {
+      if status == 301 or status == 302 or status == 303 {
+        // These change POST to GET
+      }
+
+      let location = res.headers["location"]
+      if location is some(loc) {
+        // Resolve relative URLs
+        current_url = url.resolve(current_url, reference: loc)
+        redirect_count += 1
+        continue
+      } else {
+        return FetchResult(url: u, status: status, bytes: res.body.length)
+      }
+    }
+
+    // Not a redirect, return the result
+    return FetchResult(url: u, status: status, bytes: res.body.length)
+  }
+
+  // Too many redirects
+  return FetchResult(url: u, error: "redirects")
+}
+
+fn fetch_all(urls: List<String>, concurrency: Int, timeout_ms: Int) throws -> List<FetchResult> {
+  let results = try urls.parallel_map(limit: concurrency, transform: u => try fetch_url(u, timeout_ms: timeout_ms))
+  return results
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>()
+
+  // Validate options
+  if opts.concurrency < 1 {
+    eprint("usage: app [--concurrency N] [--timeout SECONDS] [FILE]")
+    process.exit(64)
+  }
+
+  if opts.timeout <= 0.0 {
+    eprint("usage: app [--concurrency N] [--timeout SECONDS] [FILE]")
+    process.exit(64)
+  }
+
+  // Read URLs
+  var urls: List<String> = []
+
+  if opts.file is some(file_path) {
+    let content = try files.read(file_path) catch err {
+      eprint("error: cannot read ${file_path}")
+      process.exit(2)
+    }
+
+    for line in content.split("\n") {
+      let trimmed = line.trim()
+      if not trimmed.is_empty() and not trimmed.starts_with("#") {
+        urls.append(trimmed)
+      }
+    }
+  } else {
+    // Read from stdin
+    while try io.read_line() is some(line) {
+      let trimmed = line.trim()
+      if not trimmed.is_empty() and not trimmed.starts_with("#") {
+        urls.append(trimmed)
+      }
+    }
+  }
+
+  // Fetch all URLs
+  let timeout_ms = (opts.timeout * 1000.0).ceil()
+  let results = try fetch_all(urls, concurrency: opts.concurrency, timeout_ms: timeout_ms)
+
+  // Output results in order
+  var ok_count = 0
+  var bad_status_count = 0
+  var failed_count = 0
+
+  for result in results {
+    if result.error is some(err) {
+      print("${result.url} error ${err}")
+      failed_count += 1
+    } else if result.status is some(status) {
+      let bytes = result.bytes ?? 0
+      print("${result.url} ${status} ${bytes}")
+      if status >= 200 and status < 300 {
+        ok_count += 1
+      } else {
+        bad_status_count += 1
+      }
+    }
+  }
+
+  let total = ok_count + bad_status_count + failed_count
+  print("total ${total} ok ${ok_count} bad-status ${bad_status_count} failed ${failed_count}")
+
+  if ok_count == total and total > 0 or total == 0 {
+    process.exit(0)
+  } else {
+    process.exit(1)
+  }
+}

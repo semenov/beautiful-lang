@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:202:8
+    |
+202 |     if let port_int = try num.to_int() catch _ { none } is some(p) {
+    |        ^^^

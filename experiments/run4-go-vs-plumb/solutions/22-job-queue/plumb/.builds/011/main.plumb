@@ -1,0 +1,309 @@
+import env
+import http
+import json
+import process
+import time
+
+type Job {
+  id: Int
+  ms: Int
+  input: String
+  // queued, running, done or cancelled
+  status: String = "queued"
+  result: String? = none
+}
+
+type State {
+  // job N is jobs[N - 1]
+  jobs: List<Job> = []
+  shutting_down: Bool = false
+}
+
+// What a client sees of a job.
+type JobView {
+  id: Int
+  status: String
+  result: String?
+}
+
+type Created {
+  id: Int
+}
+
+type Stats {
+  queued: Int
+  running: Int
+  done: Int
+  cancelled: Int
+}
+
+type ErrorBody {
+  error: String
+}
+
+type Config {
+  port: Int = 8080
+  workers: Int = 2
+  shutdown_grace_ms: Int = 5000
+}
+
+// Largest number of jobs that can wait in line at once.
+let queue_capacity = 1_000_000
+
+// How often a running job looks at whether it was cancelled.
+let slice_ms = 10
+
+fn fail(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+fn view(job: Job) -> JobView {
+  return JobView(id: job.id, status: job.status, result: job.result)
+}
+
+fn reverse(text: String) -> String {
+  return text.chars().reversed().join("")
+}
+
+// A job's id from the path: only digits, no leading zero.
+fn parse_id(text: String) -> Int? {
+  if text.is_empty() or text.starts_with("0") {
+    return none
+  }
+  for c in text.chars() {
+    if not c.is_digit() {
+      return none
+    }
+  }
+  let id = try text.to_int() catch err {
+    return none
+  }
+  return id
+}
+
+// The job in the request, or the reason it is invalid.
+fn parse_job(body: String) throws -> Job {
+  let value = try json.parse(body)
+  if value is json.Value.Object(fields) {
+    let ms_value = fields["ms"] ?? throw Failure(message: "ms is missing")
+    let input_value = fields["input"] ?? throw Failure(message: "input is missing")
+    if ms_value is json.Value.Number(n) {
+      let ms = try n.to_int()
+      if ms < 0 or ms > 60000 {
+        throw Failure(message: "ms must be from 0 to 60000")
+      }
+      if input_value is json.Value.String(text) {
+        return Job(id: 0, ms: ms, input: text)
+      }
+      throw Failure(message: "input must be a string")
+    }
+    throw Failure(message: "ms must be an integer")
+  }
+  throw Failure(message: "the body must be a JSON object")
+}
+
+fn submit(req: http.Request, state: Shared<State>, queue: Channel<Int>) -> http.Response {
+  let parsed = try parse_job(req.text()) catch err {
+    return fail(400, err.message())
+  }
+  with s = state.lock() {
+    let id = s.jobs.length + 1
+    var job = parsed
+    job.id = id
+    if not queue.try_send(id) {
+      return fail(503, "too many jobs")
+    }
+    s.jobs.append(job)
+    return http.json(202, Created(id: id))
+  }
+}
+
+fn get_job(req: http.Request, state: Shared<State>) -> http.Response {
+  let id = parse_id(req.param("id") ?? "") ?? 0
+  with s = state.read() {
+    if id < 1 or id > s.jobs.length {
+      return fail(404, "no such job")
+    }
+    return http.json(200, view(s.jobs[id - 1]))
+  }
+}
+
+fn cancel_job(req: http.Request, state: Shared<State>) -> http.Response {
+  let id = parse_id(req.param("id") ?? "") ?? 0
+  with s = state.lock() {
+    if id < 1 or id > s.jobs.length {
+      return fail(404, "no such job")
+    }
+    let status = s.jobs[id - 1].status
+    if status == "done" or status == "cancelled" {
+      return fail(409, "job is ${status}")
+    }
+    s.jobs[id - 1].status = "cancelled"
+    return http.json(200, view(s.jobs[id - 1]))
+  }
+}
+
+fn count_status(s: State, status: String) -> Int {
+  var n = 0
+  for job in s.jobs {
+    if job.status == status {
+      n += 1
+    }
+  }
+  return n
+}
+
+fn running_count(state: Shared<State>) -> Int {
+  with s = state.read() {
+    return count_status(s, status: "running")
+  }
+}
+
+fn with_len(state: Shared<State>) -> Int {
+  with s = state.read() {
+    return s.jobs.length
+  }
+}
+
+fn get_stats(state: Shared<State>) -> http.Response {
+  with s = state.read() {
+    return http.json(200, Stats(
+      queued: count_status(s, status: "queued"),
+      running: count_status(s, status: "running"),
+      done: count_status(s, status: "done"),
+      cancelled: count_status(s, status: "cancelled")
+    ))
+  }
+}
+
+fn make_router(state: Shared<State>, queue: Channel<Int>) -> http.Router {
+  var router = http.Router()
+  router.post("/jobs", req => submit(req, state: state, queue: queue))
+  router.get("/jobs/:id", req => get_job(req, state))
+  router.post("/jobs/:id/cancel", req => cancel_job(req, state))
+  router.get("/stats", req => get_stats(state))
+  router.any("/*rest", req => fail(404, "not found"))
+  return router
+}
+
+// Waits `ms` milliseconds, in short steps, unless the job is cancelled
+// meanwhile. True if the time passed.
+fn wait_for(id: Int, ms: Int, state: Shared<State>) throws -> Bool {
+  let end = time.now().plus(time.millis(ms))
+  while true {
+    with s = state.read() {
+      if s.jobs[id - 1].status != "running" {
+        return false
+      }
+    }
+    let left = end.since(time.now()).millis()
+    if left <= 0 {
+      return true
+    }
+    let step = if left < slice_ms { left } else { slice_ms }
+    try time.sleep(time.millis(step))
+  }
+  return false
+}
+
+// Moves job `id` from queued to running; its work, or none if it must not run.
+fn start_job(id: Int, state: Shared<State>) -> Job? {
+  with s = state.lock() {
+    if s.shutting_down or s.jobs[id - 1].status != "queued" {
+      return none
+    }
+    s.jobs[id - 1].status = "running"
+    return s.jobs[id - 1]
+  }
+}
+
+fn run_job(job: Job, state: Shared<State>) throws {
+  let finished = try wait_for(job.id, ms: job.ms, state: state)
+  if finished {
+    let result = reverse(job.input)
+    with s = state.lock() {
+      if s.jobs[job.id - 1].status == "running" {
+        s.jobs[job.id - 1].status = "done"
+        s.jobs[job.id - 1].result = result
+      }
+    }
+  }
+}
+
+// Runs jobs from the queue until it is closed; gives the number it ran.
+fn worker(state: Shared<State>, queue: Channel<Int>) throws -> Int {
+  var ran = 0
+  while try queue.receive() is some(id) {
+    if start_job(id, state) is some(job) {
+      try run_job(job, state: state) catch err {
+        eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} worker error ${err.message()} ${time.now().nanos.div(1_000_000) % 100000}")
+        throw err
+      }
+      ran += 1
+    }
+  }
+  return ran
+}
+
+// Waits for SIGTERM, then: no new jobs, wait for the running ones, report.
+fn shutdown(state: Shared<State>, grace_ms: Int) -> Never {
+  let deadline = time.now().plus(time.millis(grace_ms))
+  var at_signal: List<Int> = []
+  with s = state.lock() {
+    s.shutting_down = true
+    for job in s.jobs {
+      if job.status == "running" {
+        at_signal.append(job.id)
+      }
+    }
+  }
+  eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} signal, at_signal=${at_signal} total=${with_len(state)}")
+  var timed_out = false
+  while true {
+    let running = running_count(state)
+    eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} loop running=${running}")
+    if running == 0 {
+      break
+    }
+    if time.now().since(deadline).millis() >= 0 {
+      timed_out = true
+      break
+    }
+    try time.sleep(time.millis(5)) catch err {
+      eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} sleep failed")
+    }
+  }
+  var completed = 0
+  var abandoned = 0
+  with s = state.read() {
+    for id in at_signal {
+      if s.jobs[id - 1].status == "done" {
+        completed += 1
+      }
+    }
+    for job in s.jobs {
+      if job.status == "queued" or job.status == "running" {
+        abandoned += 1
+      }
+    }
+  }
+  eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} printing")
+  print("shutdown: completed ${completed}, abandoned ${abandoned}")
+  process.exit(if timed_out { 1 } else { 0 })
+}
+
+fn main() throws {
+  let config = try env.decode<Config>()
+  let state = Shared<State>(State())
+  let queue = Channel<Int>(capacity: queue_capacity)
+  var tasks: List<Task<Int>> = []
+  for _ in 0..<config.workers {
+    tasks.append(spawn worker(state, queue: queue))
+  }
+  try http.serve_with(make_router(state, queue), options: http.ServerOptions(port: config.port, host: "127.0.0.1"))
+  eprint("DEBUG ${time.now().nanos.div(1_000_000) % 100000} serve returned")
+  shutdown(state, grace_ms: config.shutdown_grace_ms)
+  for t in tasks {
+    let _ = try t.wait()
+  }
+}

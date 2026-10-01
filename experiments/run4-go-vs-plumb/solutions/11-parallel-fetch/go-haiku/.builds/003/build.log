@@ -1,0 +1,2 @@
+# app
+./main.go:192:6: syntax error: unexpected name isRedirectStatus, expected (

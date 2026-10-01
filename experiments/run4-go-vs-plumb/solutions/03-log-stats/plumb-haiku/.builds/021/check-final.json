@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "nearest-rank percentiles (n=20, n=100, n=1)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "percentiles with repeated values (n=7)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "error rate exact, halves up, only 5xx",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ties ordered by endpoint, query stripped, method distinct",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "malformed lines counted, empty lines and CRLF fine",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='GET /ok count=8 error_rate=0.00% p50=5 p95=5 max=5\\ntotal=8 malformed=9\\n' stderr=''"
+  },
+  {
+   "name": "latency leading zeros, bytes dash, odd time text",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "min-count hides endpoints but totals count them",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode paths sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no final newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "several files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-count",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: a value is missing after --min-count (see --help)\\n'"
+  },
+  {
+   "name": "usage error --min-count 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-count x",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: the option --min-count: expected a whole number, found \"x\"\\n'"
+  },
+  {
+   "name": "usage error --bogus",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unknown option --bogus (see --help)\\n'"
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,5 @@
+error: expected a type, found `{`
+  --> main.plumb:111:44
+    |
+111 | fn parse_record(text: String, pos: Int) -> {fields: List<String>, end_pos: Int}? {
+    |                                            ^

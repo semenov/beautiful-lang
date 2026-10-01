@@ -1,0 +1,16 @@
+error: this block must end with a `Map<String, Value>` value
+  --> main.plumb:79:10
+   |
+79 |     _ => {}
+   |          ^^
+error: the arms have different types: `Map<String, Value>` and `nothing`
+  --> main.plumb:79:10
+   |
+79 |     _ => {}
+   |          ^^
+error: expected `Map<String, Value>`, found `nothing`
+  --> main.plumb:79:10
+   |
+79 |     _ => {}
+   |          ^^
+3 error(s)

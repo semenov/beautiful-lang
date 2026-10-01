@@ -1,0 +1,5 @@
+error: expected a pattern, found `not`
+  --> main.plumb:55:11
+   |
+55 |   if v is not json.Value.Object(fields) {
+   |           ^^^

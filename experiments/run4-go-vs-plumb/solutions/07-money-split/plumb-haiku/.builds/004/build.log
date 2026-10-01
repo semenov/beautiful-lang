@@ -1,0 +1,70 @@
+error: unknown name `process`
+  --> main.plumb:22:14
+   |
+22 |   let args = process.args()
+   |              ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:27:5
+   |
+27 |     process.exit(64)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:32:5
+   |
+32 |     process.exit(64)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:42:7
+   |
+42 |       process.exit(2)
+   |       ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:61:7
+   |
+61 |       process.exit(1)
+   |       ^^^^^^^
+   = help: add `import process` at the top of the file
+error: `none` can't match a `String`: it's never missing
+  --> main.plumb:120:125
+    |
+120 |       if balance < 0 and (debtor_name is none or balance < debtor_balance or (balance == debtor_balance and (debtor_name is none or name < (debtor_name ?? "")))) {
+    |                                                                                                                             ^^^^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:120:141
+    |
+120 |       if balance < 0 and (debtor_name is none or balance < debtor_balance or (balance == debtor_balance and (debtor_name is none or name < (debtor_name ?? "")))) {
+    |                                                                                                                                             ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `none` can't match a `String`: it's never missing
+  --> main.plumb:125:133
+    |
+125 |       if balance > 0 and (creditor_name is none or balance > creditor_balance or (balance == creditor_balance and (creditor_name is none or name < (creditor_name ?? "")))) {
+    |                                                                                                                                     ^^^^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:125:149
+    |
+125 |       if balance > 0 and (creditor_name is none or balance > creditor_balance or (balance == creditor_balance and (creditor_name is none or name < (creditor_name ?? "")))) {
+    |                                                                                                                                                     ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:136:18
+    |
+136 |     let debtor = debtor_name ?? ""
+    |                  ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:137:20
+    |
+137 |     let creditor = creditor_name ?? ""
+    |                    ^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `Float` has no method `to_int`
+  --> main.plumb:187:65
+    |
+187 |   let amount_cents = (amount_decimal * 100).round(0).to_float().to_int()
+    |                                                                 ^^^^^^
+12 error(s)

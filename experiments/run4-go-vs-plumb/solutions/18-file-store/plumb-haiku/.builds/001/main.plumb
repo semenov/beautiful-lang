@@ -1,0 +1,202 @@
+import env
+import http
+import json
+import files
+import url
+import crypto
+import path as path_module
+
+type Config {
+  port: Int
+  store_dir: String
+  max_bytes: Int
+}
+
+type FileInfo {
+  name: String
+  size: Int
+  sha256: String
+}
+
+type FilesList {
+  files: List<FileInfo>
+}
+
+type ErrorResponse {
+  error: String
+}
+
+fn decode_config() throws -> Config {
+  let port_str = env.get("PORT") ?? "8080"
+  let store_dir = env.get("STORE_DIR") ?? "/tmp/store"
+  let max_bytes_str = env.get("MAX_BYTES") ?? "1048576"
+
+  let port = try port_str.to_int()
+  let max_bytes = try max_bytes_str.to_int()
+
+  return Config(
+    port: port,
+    store_dir: store_dir,
+    max_bytes: max_bytes
+  )
+}
+
+fn is_valid_name(name: String) -> Bool {
+  if name.is_empty() or name.length > 100 {
+    return false
+  }
+
+  if name.starts_with(".") {
+    return false
+  }
+
+  for char in name {
+    let code = char.as_bytes()[0]
+    // ASCII letters, digits, . - _
+    let is_letter = (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
+    let is_digit = code >= 48 and code <= 57
+    let is_special = code == 46 or code == 45 or code == 95 // . - _
+
+    if not (is_letter or is_digit or is_special) {
+      return false
+    }
+  }
+
+  return true
+}
+
+fn get_file_info(store_dir: String, name: String) throws -> FileInfo {
+  let file_path = path_module.join(store_dir, name)
+  let data = try files.read_bytes(file_path)
+  let hash_bytes = crypto.sha256(data)
+  let hash_hex = hash_bytes.hex()
+
+  return FileInfo(
+    name: name,
+    size: data.length,
+    sha256: hash_hex
+  )
+}
+
+fn list_files_handler(req: http.Request, config: Config) throws -> http.Response {
+  if not files.is_dir(config.store_dir) {
+    return http.json(200, FilesList(files: []))
+  }
+
+  let entries = try files.list(config.store_dir)
+  var result: List<FileInfo> = []
+
+  for entry in entries {
+    if entry.starts_with(".") {
+      continue
+    }
+
+    if is_valid_name(entry) {
+      if entry is some(info) {
+        let file_info = try get_file_info(config.store_dir, entry) catch err {
+          continue
+        }
+        result.append(file_info)
+      }
+    }
+  }
+
+  result.sort(by: (a, b) => a.name < b.name)
+
+  return http.json(200, FilesList(files: result))
+}
+
+fn put_file_handler(req: http.Request, config: Config, name: String) throws -> http.Response {
+  let name_decoded = try url.decode(name)
+
+  if not is_valid_name(name_decoded) {
+    return http.json(400, ErrorResponse(error: "invalid name"))
+  }
+
+  if req.body.length > config.max_bytes {
+    return http.json(413, ErrorResponse(error: "too large"))
+  }
+
+  try files.make_dir(config.store_dir)
+
+  let file_path = path_module.join(config.store_dir, name_decoded)
+
+  let exists_before = files.exists(file_path)
+
+  try files.write_bytes(file_path, req.body)
+
+  let hash_bytes = crypto.sha256(req.body)
+  let hash_hex = hash_bytes.hex()
+
+  let status = if exists_before { 200 } else { 201 }
+
+  let response = FileInfo(
+    name: name_decoded,
+    size: req.body.length,
+    sha256: hash_hex
+  )
+
+  return http.json(status, response)
+}
+
+fn get_file_handler(req: http.Request, config: Config, name: String) throws -> http.Response {
+  let name_decoded = try url.decode(name)
+
+  if not is_valid_name(name_decoded) {
+    return http.json(400, ErrorResponse(error: "invalid name"))
+  }
+
+  let file_path = path_module.join(config.store_dir, name_decoded)
+
+  let data = try files.read_bytes(file_path) catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  return http.bytes(200, data: data, content_type: "application/octet-stream")
+}
+
+fn delete_file_handler(req: http.Request, config: Config, name: String) throws -> http.Response {
+  let name_decoded = try url.decode(name)
+
+  if not is_valid_name(name_decoded) {
+    return http.json(400, ErrorResponse(error: "invalid name"))
+  }
+
+  let file_path = path_module.join(config.store_dir, name_decoded)
+
+  try files.delete(file_path) catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  var response = http.Response(status: 204, body: Bytes())
+  return response
+}
+
+fn main() throws {
+  let config = try decode_config()
+
+  var router = http.Router()
+
+  router.get("/files", req => try list_files_handler(req, config))
+
+  router.put("/files/*name", req => {
+    let name = req.param("name") ?? ""
+    return try put_file_handler(req, config, name)
+  })
+
+  router.get("/files/*name", req => {
+    let name = req.param("name") ?? ""
+    return try get_file_handler(req, config, name)
+  })
+
+  router.delete("/files/*name", req => {
+    let name = req.param("name") ?? ""
+    return try delete_file_handler(req, config, name)
+  })
+
+  router.any("*path", req => {
+    return http.json(404, ErrorResponse(error: "not found"))
+  })
+
+  try http.serve(router, port: config.port)
+}

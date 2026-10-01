@@ -1,0 +1,8 @@
+# app
+./test.go:8:6: main redeclared in this block
+	./main.go:74:6: other declaration of main
+./test_decode.go:8:6: main redeclared in this block
+	./main.go:74:6: other declaration of main
+./test_query.go:9:6: main redeclared in this block
+	./main.go:74:6: other declaration of main
+./main.go:9:2: "net/url" imported and not used

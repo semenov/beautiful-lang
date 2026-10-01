@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "register returns 201 with the username",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "duplicate username in another case is 409",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid usernames are 400",
+   "ok": false,
+   "detail": "[HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid username\"}', HTTP 400 '{\"error\":\"invalid username\"}']"
+  },
+  {
+   "name": "invalid passwords are 400; length counts code points",
+   "ok": false,
+   "detail": "([HTTP 400 '{\"error\":\"invalid password\"}', HTTP 400 '{\"error\":\"invalid JSON\"}', HTTP 400 '{\"error\":\"invalid password\"}', HTTP 400 '{\"error\":\"invalid password\"}', HTTP 400 '{\"error\":\"invalid password\"}'], HTTP 201 '{\"username\":\"pw_user8\"}', HTTP 201 '{\"username\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}')"
+  },
+  {
+   "name": "invalid JSON is 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "login is case-insensitive and returns a strong token",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "each login is a separate session with a new token",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "wrong password and unknown user give the same 401",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode password works exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing or bad token is 401",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "logout ends only that session",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "404 for unknown paths, 405 for wrong methods",
+   "ok": false,
+   "detail": "([HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}'], [HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}'])"
+  },
+  {
+   "name": "racing registrations of one name: exactly one succeeds",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel registrations and logins of different users",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "password text does not appear in the database",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "users and sessions survive a restart",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "sessions expire after SESSION_TTL_SECONDS",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

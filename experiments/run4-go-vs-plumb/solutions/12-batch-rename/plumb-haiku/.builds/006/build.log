@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:235:12
+    |
+235 |         if let transformed = try apply_regex_mode(filename, pattern, template) {
+    |            ^^^

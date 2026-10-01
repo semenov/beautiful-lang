@@ -1,0 +1,55 @@
+error: `path` is imported but not used
+  --> main.plumb:2:8
+  |
+2 | import path
+  |        ^^^^
+  = help: remove the import
+error: `io` is imported but not used
+  --> main.plumb:4:8
+  |
+4 | import io
+  |        ^^
+  = help: remove the import
+error: unknown name `cli`
+  --> main.plumb:24:18
+   |
+24 |   let opts = try cli.decode<Options>()
+   |                  ^^^
+   = help: add `import cli` at the top of the file
+error: unknown name `process`
+  --> main.plumb:29:5
+   |
+29 |     process.exit(64)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:37:5
+   |
+37 |     process.exit(64)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:43:5
+   |
+43 |     process.exit(2)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:49:5
+   |
+49 |     process.exit(2)
+   |     ^^^^^^^
+   = help: add `import process` at the top of the file
+error: expected `Int`, found `String`
+  --> main.plumb:135:44
+    |
+135 |   groups = groups.sorted_by(g => [-g.size, g.hash])
+    |                                            ^^^^^^
+    = help: parse it: `try text.to_int()`
+error: unknown name `process`
+  --> main.plumb:160:5
+    |
+160 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+9 error(s)

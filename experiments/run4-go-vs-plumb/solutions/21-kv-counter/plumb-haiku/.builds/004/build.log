@@ -1,0 +1,5 @@
+error: expected a field or method name, found `var`
+  --> main.plumb:294:23
+    |
+294 |   let port = try (env.var("PORT") ?? "8080").to_int() catch _ {
+    |                       ^^^

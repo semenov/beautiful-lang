@@ -1,0 +1,286 @@
+import time
+import files
+import process
+
+type Error implements Error {
+  message: String
+  exit_code: Int
+
+  fn message(self) -> String {
+    return self.message
+  }
+}
+
+// Parse command-line arguments manually to support options anywhere
+type ParsedArgs {
+  command: String
+  positionals: List<String>
+  options: Map<String, String>
+}
+
+fn parse_args(args: List<String>) -> ParsedArgs? {
+  var command: String? = none
+  var positionals: List<String> = []
+  var options: Map<String, String> = {}
+  var i = 0
+
+  while i < args.length {
+    let arg = args[i]
+
+    if arg.starts_with("--") {
+      // This is an option
+      let eq_pos = arg.index_of("=")
+
+      if eq_pos is some(pos) {
+        // Option with = separator
+        let opt_name = arg.slice(2, pos)
+        let opt_value = arg.slice(pos + 1, arg.length)
+        options[opt_name] = opt_value
+      } else {
+        // Option with value in next arg
+        let opt_name = arg.slice(2, arg.length)
+        i += 1
+        if i >= args.length {
+          return none
+        }
+        options[opt_name] = args[i]
+      }
+    } else if command is none {
+      command = arg
+    } else {
+      positionals.append(arg)
+    }
+
+    i += 1
+  }
+
+  if command is some(c) {
+    return ParsedArgs(command: c, positionals: positionals, options: options)
+  }
+  return none
+}
+
+// Parse weekend days from a comma-separated list
+fn parse_weekend_days(text: String) -> Set<time.Weekday>? {
+  var days: Set<time.Weekday> = {}
+
+  if text.is_empty() {
+    return days
+  }
+
+  let day_names = text.split(",")
+  for day_name in day_names {
+    let trimmed = day_name.trim()
+    let day = match trimmed {
+      "mon" => time.Weekday.Monday
+      "tue" => time.Weekday.Tuesday
+      "wed" => time.Weekday.Wednesday
+      "thu" => time.Weekday.Thursday
+      "fri" => time.Weekday.Friday
+      "sat" => time.Weekday.Saturday
+      "sun" => time.Weekday.Sunday
+      _ => return none
+    }
+    days.insert(day)
+  }
+
+  return days
+}
+
+// Load holidays from a file
+fn load_holidays(path: String) throws -> Set<time.Date> {
+  var holidays: Set<time.Date> = {}
+
+  let content = try files.read(path) catch err {
+    throw Error(message: "cannot read ${path}", exit_code: 2)
+  }
+
+  let lines = content.split("\n")
+  for item in lines.indexed() {
+    let line = item.value
+    let actual_line = item.index + 1
+
+    // Remove comment
+    let comment_pos = line.index_of("#")
+    let trimmed_line = if comment_pos is some(pos) {
+      line.slice(0, pos).trim()
+    } else {
+      line.trim()
+    }
+
+    // Skip empty lines
+    if trimmed_line.is_empty() {
+      continue
+    }
+
+    // Parse the date
+    let date = try time.parse_date(trimmed_line) catch _ {
+      throw Error(message: "${path}:${actual_line}: invalid date", exit_code: 2)
+    }
+
+    holidays.insert(date)
+  }
+
+  return holidays
+}
+
+// Check if a date is a business day
+fn is_business_day(date: time.Date, holidays: Set<time.Date>, weekend: Set<time.Weekday>) -> Bool {
+  if holidays.contains(date) {
+    return false
+  }
+
+  let weekday = date.weekday()
+  if weekend.contains(weekday) {
+    return false
+  }
+
+  return true
+}
+
+// Count business days between start and end (start inclusive, end exclusive)
+fn count_business_days(start: time.Date, end: time.Date, holidays: Set<time.Date>, weekend: Set<time.Weekday>) -> Int {
+  var count = 0
+  var current = start
+
+  while current.is_before(end) or current == end {
+    if is_business_day(current, holidays, weekend) {
+      count += 1
+    }
+
+    if current == end {
+      break
+    }
+
+    current = current.plus_days(1)
+  }
+
+  return count
+}
+
+// Command: between
+fn cmd_between(start_str: String, end_str: String, holidays: Set<time.Date>, weekend: Set<time.Weekday>) throws {
+  let start = try time.parse_date(start_str) catch _ {
+    throw Error(message: "invalid date: ${start_str}", exit_code: 2)
+  }
+
+  let end = try time.parse_date(end_str) catch _ {
+    throw Error(message: "invalid date: ${end_str}", exit_code: 2)
+  }
+
+  if start == end {
+    print("0")
+    return
+  }
+
+  if start.is_before(end) {
+    let count = count_business_days(start, end.plus_days(-1), holidays, weekend)
+    print("${count}")
+  } else {
+    let count = count_business_days(end, start.plus_days(-1), holidays, weekend)
+    print("-${count}")
+  }
+}
+
+// Command: add
+fn cmd_add(date_str: String, n_str: String, holidays: Set<time.Date>, weekend: Set<time.Weekday>) throws {
+  let date = try time.parse_date(date_str) catch _ {
+    throw Error(message: "invalid date: ${date_str}", exit_code: 2)
+  }
+
+  let n = try n_str.to_int() catch _ {
+    throw Error(message: "invalid count: ${n_str}", exit_code: 64)
+  }
+
+  let result = if n == 0 {
+    // If date is a business day, return it; otherwise, first business day after
+    if is_business_day(date, holidays, weekend) {
+      date
+    } else {
+      var current = date.plus_days(1)
+      while not is_business_day(current, holidays, weekend) {
+        current = current.plus_days(1)
+      }
+      current
+    }
+  } else if n > 0 {
+    // Find the n-th business day after date
+    var count = 0
+    var current = date.plus_days(1)
+    while count < n {
+      if is_business_day(current, holidays, weekend) {
+        count += 1
+        if count == n {
+          break
+        }
+      }
+      current = current.plus_days(1)
+    }
+    current
+  } else {
+    // Find the |n|-th business day before date
+    var count = 0
+    var current = date.plus_days(-1)
+    while count < -n {
+      if is_business_day(current, holidays, weekend) {
+        count += 1
+        if count == -n {
+          break
+        }
+      }
+      current = current.plus_days(-1)
+    }
+    current
+  }
+
+  print(result.iso())
+}
+
+fn main() throws {
+  let args = process.args()
+
+  if args.is_empty() {
+    throw Error(message: "usage: app between|add [options]", exit_code: 64)
+  }
+
+  let parsed = parse_args(args) ?? {
+    throw Error(message: "usage: app between|add [options]", exit_code: 64)
+  }
+
+  // Parse options
+  let holidays_file = parsed.options["holidays"]
+  let weekend_str = parsed.options["weekend"] ?? "sat,sun"
+
+  let holidays = if holidays_file is some(file) {
+    try load_holidays(file)
+  } else {
+    var empty: Set<time.Date> = {}
+    empty
+  }
+
+  let weekend = parse_weekend_days(weekend_str) ?? {
+    throw Error(message: "usage: app between|add [options]", exit_code: 64)
+  }
+
+  if weekend.length == 7 {
+    throw Error(message: "usage: app between|add [options]", exit_code: 64)
+  }
+
+  match parsed.command {
+    "between" => {
+      if parsed.positionals.length != 2 {
+        throw Error(message: "usage: app between START END [--holidays FILE] [--weekend DAYS]", exit_code: 64)
+      }
+      try cmd_between(parsed.positionals[0], parsed.positionals[1], holidays, weekend)
+    }
+    "add" => {
+      if parsed.positionals.length != 2 {
+        throw Error(message: "usage: app add DATE N [--holidays FILE] [--weekend DAYS]", exit_code: 64)
+      }
+      try cmd_add(parsed.positionals[0], parsed.positionals[1], holidays, weekend)
+    }
+    _ => {
+      throw Error(message: "usage: app between|add [options]", exit_code: 64)
+    }
+  }
+}

@@ -1,0 +1,6 @@
+error: `throws` goes before `->`
+  --> main.plumb:118:48
+    |
+118 | fn parse_csv_body(body: String) -> ParseResult throws {
+    |                                                ^^^^^^
+    = help: write `fn f() throws -> T`

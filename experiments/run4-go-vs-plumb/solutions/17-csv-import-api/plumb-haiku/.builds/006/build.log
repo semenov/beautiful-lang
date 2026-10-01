@@ -1,0 +1,109 @@
+error: `json` is imported but not used
+  --> main.plumb:2:8
+  |
+2 | import json
+  |        ^^^^
+  = help: remove the import
+error: `String` has no method `length`
+  --> main.plumb:55:45
+   |
+55 |   let after = email.slice(at_pos + 1, email.length())
+   |                                             ^^^^^^
+error: `String` has no method `length`
+  --> main.plumb:67:39
+   |
+67 |   if dot_pos == 0 or dot_pos == after.length() - 1 {
+   |                                       ^^^^^^
+error: `String` has no method `length`
+  --> main.plumb:77:12
+   |
+77 |   if email.length() > 254 {
+   |            ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:96:26
+   |
+96 |   let len = name.chars().length()
+   |                          ^^^^^^
+error: `List<List<String>>` has no method `length`
+  --> main.plumb:144:11
+    |
+144 |   if rows.length() < 1 {
+    |           ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:150:13
+    |
+150 |   if header.length() != 3 {
+    |             ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:159:23
+    |
+159 |   for i in 0..<header.length() {
+    |                       ^^^^^^
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:172:19
+    |
+172 |   let email_idx = email_col ?? 0
+    |                   ^^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:173:18
+    |
+173 |   let name_idx = name_col ?? 0
+    |                  ^^^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:174:17
+    |
+174 |   let age_idx = age_col ?? 0
+    |                 ^^^^^^^
+    = help: remove `?? ...`
+error: `List<List<String>>` has no method `length`
+  --> main.plumb:188:27
+    |
+188 |   for row_idx in 1..<rows.length() {
+    |                           ^^^^^^
+error: `List<String>` has no method `length`
+  --> main.plumb:192:12
+    |
+192 |     if row.length() != 3 {
+    |            ^^^^^^
+error: `validate_email` has 3 or more parameters: name every argument after the first
+  --> main.plumb:202:30
+    |
+202 |     if validate_email(email, stored_emails, file_emails) is some(msg) {
+    |                              ^^^^^^^^^^^^^
+    = help: write (…, stored_emails: …, file_emails: …)
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:218:17
+    |
+218 |       let age = try age_str.to_int() ?? 0
+    |                 ^^^^^^^^^^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `List<User>` has no method `length`
+  --> main.plumb:235:68
+    |
+235 |   return http.json(201, ImportedResponse(imported: users_to_insert.length()))
+    |                                                                    ^^^^^^
+error: no `return` inside a lambda
+  --> main.plumb:268:9
+    |
+268 |         return handle_method_not_allowed()
+    |         ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:268:16
+    |
+268 |         return handle_method_not_allowed()
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+error: no `return` inside a lambda
+  --> main.plumb:270:9
+    |
+270 |         return handle_not_found()
+    |         ^^^^^^
+    = help: the lambda's last line is its value
+error: this function returns nothing (it has no `->`)
+  --> main.plumb:270:16
+    |
+270 |         return handle_not_found()
+    |                ^^^^^^^^^^^^^^^^^^
+20 error(s)

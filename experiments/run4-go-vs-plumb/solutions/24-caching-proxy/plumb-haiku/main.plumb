@@ -1,0 +1,296 @@
+import http
+import json
+import env
+import time
+
+// Error responses
+type ErrorResponse {
+  error: String
+  status: Int? = none
+}
+
+// Cache entry with response data and timing
+type CacheEntry {
+  status: Int
+  body: Bytes
+  content_type: String
+  cached_at: time.Instant
+}
+
+// Result wrapper for coalescing - can be either waiting or completed
+type FetchResult {
+  entry: CacheEntry? = none
+  completed: Bool = false
+}
+
+// Shared state for cache and in-flight requests
+type CacheState {
+  cache: Map<String, CacheEntry> = {}
+  in_flight: Map<String, FetchResult> = {}
+  access_times: Map<String, time.Instant> = {}
+  cache_ttl_ms: Int
+  cache_max_entries: Int
+  upstream_timeout_ms: Int
+  upstream_url: String
+}
+
+fn main() throws {
+  let port_str = env.get("PORT") ?? "8080"
+  let port = try port_str.to_int() catch err {
+    eprint("error: PORT is not a valid integer")
+    return
+  }
+
+  let upstream = env.get("UPSTREAM") ?? throw Failure(message: "UPSTREAM environment variable not set")
+
+  let cache_ttl_ms_str = env.get("CACHE_TTL_MS") ?? "60000"
+  let cache_ttl_ms = try cache_ttl_ms_str.to_int() catch err {
+    eprint("error: CACHE_TTL_MS is not a valid integer")
+    return
+  }
+
+  let cache_max_entries_str = env.get("CACHE_MAX_ENTRIES") ?? "1000"
+  let cache_max_entries = try cache_max_entries_str.to_int() catch err {
+    eprint("error: CACHE_MAX_ENTRIES is not a valid integer")
+    return
+  }
+
+  let upstream_timeout_ms_str = env.get("UPSTREAM_TIMEOUT_MS") ?? "5000"
+  let upstream_timeout_ms = try upstream_timeout_ms_str.to_int() catch err {
+    eprint("error: UPSTREAM_TIMEOUT_MS is not a valid integer")
+    return
+  }
+
+  // Validate environment variables
+  if cache_ttl_ms < 1 or cache_max_entries < 1 or upstream_timeout_ms < 1 {
+    eprint("error: All timing and limit values must be >= 1")
+    return
+  }
+
+  let state = Shared<CacheState>(CacheState(
+    cache_ttl_ms: cache_ttl_ms,
+    cache_max_entries: cache_max_entries,
+    upstream_timeout_ms: upstream_timeout_ms,
+    upstream_url: upstream
+  ))
+
+  var router = http.Router()
+  router.any("*path", req => try handle_request(req, state))
+
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}
+
+fn handle_request(req: http.Request, state: Shared<CacheState>) throws -> http.Response {
+  // Only handle GET requests
+  if req.method != "GET" {
+    return http.json(405, ErrorResponse(error: "method not allowed"))
+  }
+
+  // Build cache key from raw path and query
+  let cache_key = if req.raw_query.is_empty() {
+    req.raw_path
+  } else {
+    "${req.raw_path}?${req.raw_query}"
+  }
+
+  // Try to get from cache
+  var cached_entry: CacheEntry? = none
+
+  with s = state.lock() {
+    if s.cache.contains_key(cache_key) {
+      let entry = s.cache[cache_key] ?? throw Failure(message: "cache entry disappeared")
+      let now = time.now()
+      let age = now.since(entry.cached_at)
+
+      if age.is_shorter_than(time.millis(s.cache_ttl_ms)) {
+        // Entry is fresh, use it
+        cached_entry = entry
+        // Update access time for LRU
+        s.access_times[cache_key] = now
+      }
+    }
+  }
+
+  if cached_entry is some(entry) {
+    return http.bytes(entry.status, data: entry.body, content_type: entry.content_type)
+      .with_header("X-Cache", "HIT")
+  }
+
+  // Need to fetch from upstream, but handle coalescing
+  let result = try fetch_with_coalescing(cache_key, state)
+
+  if result.entry is some(e) {
+    let cache_header = if result.is_fetcher { "MISS" } else { "HIT" }
+    return http.bytes(e.status, data: e.body, content_type: e.content_type)
+      .with_header("X-Cache", cache_header)
+  } else {
+    // This shouldn't happen, but handle it gracefully
+    return http.json(502, ErrorResponse(error: "upstream unavailable"))
+      .with_header("X-Cache", "MISS")
+  }
+}
+
+type FetchWithCoalescingResult {
+  entry: CacheEntry?
+  is_fetcher: Bool
+}
+
+fn fetch_with_coalescing(cache_key: String, state: Shared<CacheState>) throws -> FetchWithCoalescingResult {
+  var is_fetcher = false
+
+  // Check if another request is already fetching this key
+  with s = state.lock() {
+    if s.in_flight.contains_key(cache_key) {
+      // Another request is already fetching this
+      is_fetcher = false
+    } else {
+      // We are the fetcher
+      is_fetcher = true
+      s.in_flight[cache_key] = FetchResult(entry: none, completed: false)
+    }
+  }
+
+  if not is_fetcher {
+    // Wait for the other request to complete
+    var attempt = 0
+    while attempt < 500 {
+      with s = state.lock() {
+        if s.in_flight.contains_key(cache_key) {
+          let result = s.in_flight[cache_key] ?? throw Failure(message: "in_flight entry disappeared")
+          if result.completed {
+            return FetchWithCoalescingResult(entry: result.entry, is_fetcher: false)
+          }
+        } else {
+          // Entry was removed, fetch is done
+          break
+        }
+      }
+      // Sleep a bit before trying again
+      try time.sleep(time.millis(1))
+      attempt += 1
+    }
+    return FetchWithCoalescingResult(entry: none, is_fetcher: false)
+  }
+
+  // We are the fetcher - fetch from upstream
+  let result = try fetch_upstream(cache_key, state)
+
+  // Update the in-flight result for other waiters
+  with s = state.lock() {
+    if s.in_flight.contains_key(cache_key) {
+      s.in_flight[cache_key] = FetchResult(entry: result, completed: true)
+    }
+  }
+
+  // Cache the successful result (200 only)
+  if result is some(entry) and entry.status == 200 {
+    with s = state.lock() {
+      // Check cache size and evict LRU if needed
+      if s.cache.length >= s.cache_max_entries {
+        var oldest_key = ""
+        var oldest_time = time.now()
+
+        for entry_key in s.access_times.entries() {
+          if oldest_key.is_empty() or entry_key.value.nanos < oldest_time.nanos {
+            oldest_key = entry_key.key
+            oldest_time = entry_key.value
+          }
+        }
+
+        if not oldest_key.is_empty() {
+          s.cache.remove(oldest_key)
+          s.access_times.remove(oldest_key)
+        }
+      }
+
+      s.cache[cache_key] = entry
+      s.access_times[cache_key] = time.now()
+    }
+  }
+
+  // Remove from in-flight tracking
+  with s = state.lock() {
+    s.in_flight.remove(cache_key)
+  }
+
+  return FetchWithCoalescingResult(entry: result, is_fetcher: true)
+}
+
+fn fetch_upstream(cache_key: String, state: Shared<CacheState>) throws -> CacheEntry? {
+  var upstream_url = ""
+  var upstream_timeout_ms = 5000
+
+  with config = state.read() {
+    upstream_url = config.upstream_url
+    upstream_timeout_ms = config.upstream_timeout_ms
+  }
+
+  // Build the full upstream URL
+  let upstream_path = if cache_key.starts_with("/") {
+    cache_key
+  } else {
+    "/${cache_key}"
+  }
+
+  let full_url = "${upstream_url}${upstream_path}"
+  eprint("DEBUG: Fetching from upstream: ${full_url}")
+
+  // Make the request with timeout
+  let req = http.ClientRequest(
+    url: full_url,
+    timeout: time.millis(upstream_timeout_ms)
+  )
+
+  let res = try http.send(req) catch err {
+    eprint("DEBUG: Error fetching from upstream: ${err.message()}")
+    // Handle timeout
+    if err is time.TimedOut {
+      let error_body = json.encode(ErrorResponse(error: "upstream timeout"))
+      return CacheEntry(
+        status: 504,
+        body: error_body.bytes(),
+        content_type: "application/json",
+        cached_at: time.now()
+      )
+    }
+    // Any other error (connection failed, etc)
+    let error_body = json.encode(ErrorResponse(error: "upstream unavailable"))
+    return CacheEntry(
+      status: 502,
+      body: error_body.bytes(),
+      content_type: "application/json",
+      cached_at: time.now()
+    )
+  }
+
+  eprint("DEBUG: Got response with status ${res.status}")
+
+  let content_type = res.headers["content-type"] ?? "application/octet-stream"
+
+  // Handle different status codes
+  if res.status == 200 {
+    return CacheEntry(
+      status: res.status,
+      body: res.body,
+      content_type: content_type,
+      cached_at: time.now()
+    )
+  } else if res.status < 500 {
+    // 3xx, 4xx: don't cache, return as-is
+    return CacheEntry(
+      status: res.status,
+      body: res.body,
+      content_type: content_type,
+      cached_at: time.now()
+    )
+  } else {
+    // 5xx: return error response
+    let error_body = json.encode(ErrorResponse(error: "upstream error", status: res.status))
+    return CacheEntry(
+      status: 502,
+      body: error_body.bytes(),
+      content_type: "application/json",
+      cached_at: time.now()
+    )
+  }
+}

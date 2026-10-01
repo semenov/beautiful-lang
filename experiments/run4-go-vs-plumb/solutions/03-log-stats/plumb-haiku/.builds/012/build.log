@@ -1,0 +1,7 @@
+error: `/` on two `Int`s is not allowed
+  --> main.plumb:252:24
+    |
+252 |   let rate_times_100 = errors * 10000 / total
+    |                        ^^^^^^^^^^^^^^^^^^^^^^
+    = help: write `a.div(b)` for whole-number division, or `a.to_float() / b.to_float()`
+1 error(s)

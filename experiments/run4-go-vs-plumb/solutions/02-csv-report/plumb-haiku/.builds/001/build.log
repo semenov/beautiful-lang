@@ -1,0 +1,5 @@
+error: text uses double quotes only
+  --> main.plumb:23:19
+   |
+23 |   if text[pos] == '"' {
+   |                   ^

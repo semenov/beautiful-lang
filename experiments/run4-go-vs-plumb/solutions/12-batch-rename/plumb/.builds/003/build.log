@@ -1,0 +1,5 @@
+error: unknown escape; known: \n \t \r \0 \" \\ \$ \u{1F600}
+  --> main.plumb:141:22
+    |
+141 |         lit = "${lit}\{"
+    |                      ^

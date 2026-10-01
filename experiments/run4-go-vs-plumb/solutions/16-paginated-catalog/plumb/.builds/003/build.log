@@ -1,0 +1,47 @@
+error: `fail` returns `Never`, so it must not finish
+  --> main.plumb:50:35
+   |
+50 | fn fail(message: String) -> Never {
+   |                                   ^
+   = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:52:3
+   |
+52 |   process.exit(1)
+   |   ^^^^^^^
+   = help: add `import process` at the top of the file
+error: there is no `+` on text
+  --> main.plumb:70:10
+   |
+70 |   return "0".repeat(20 - s.length) + s
+   |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: unknown name `files`
+  --> main.plumb:88:18
+   |
+88 |   let text = try files.read(path) catch err {
+   |                  ^^^^^
+   = help: add `import files` at the top of the file
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:163:19
+    |
+163 |   if min_price is some(lo) and max_price is some(hi) and lo > hi {
+    |                   ^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:163:45
+    |
+163 |   if min_price is some(lo) and max_price is some(hi) and lo > hi {
+    |                                             ^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `lo`
+  --> main.plumb:163:58
+    |
+163 |   if min_price is some(lo) and max_price is some(hi) and lo > hi {
+    |                                                          ^^
+error: unknown name `hi`
+  --> main.plumb:163:63
+    |
+163 |   if min_price is some(lo) and max_price is some(hi) and lo > hi {
+    |                                                               ^^
+8 error(s)

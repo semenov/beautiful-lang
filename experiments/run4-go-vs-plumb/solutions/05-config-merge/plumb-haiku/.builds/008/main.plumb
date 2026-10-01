@@ -1,0 +1,296 @@
+import json
+import env
+import files
+import process
+
+type EnvVar {
+  key: String
+  value: String
+}
+
+fn main() throws {
+  let args = process.args()
+
+  // Check for no arguments or arguments starting with -
+  if args.length == 0 or (args.length > 0 and args[0].starts_with("-")) {
+    eprint("usage: app FILE...")
+    process.exit(64)
+  }
+
+  // Load and merge all JSON files
+  var config: json.Value = json.Value.Object(fields: {})
+
+  for file in args {
+    let content = try files.read(file) catch err {
+      if err is files.NotFound {
+        eprint("error: cannot read ${file}")
+        process.exit(2)
+      }
+      eprint("error: cannot read ${file}")
+      process.exit(2)
+    }
+
+    let parsed = try json.parse(content) catch err {
+      eprint("error: invalid JSON in ${file}")
+      process.exit(2)
+    }
+
+    // Check if it's an object
+    let is_object = match parsed {
+      json.Value.Object(_) => true
+      _ => false
+    }
+    if not is_object {
+      eprint("error: ${file} is not an object")
+      process.exit(2)
+    }
+
+    // Merge into config
+    config = merge_values(config, parsed)
+  }
+
+  // Apply environment variables
+  let env_vars = env.all()
+  var app_vars: List<EnvVar> = []
+
+  for entry in env_vars {
+    if entry.key.starts_with("APP_") {
+      app_vars.append(EnvVar(key: entry.key, value: entry.value))
+    }
+  }
+
+  // Sort by key name
+  app_vars = app_vars.sorted_by(e => e.key)
+
+  for var_entry in app_vars {
+    let rest = var_entry.key.drop(4)  // Remove "APP_" prefix
+    if rest.is_empty() {
+      continue  // APP_ with nothing after, skip
+    }
+
+    // Split on __ (two underscores) and lowercase
+    let parts = rest.split("__")
+    let lowered_parts: List<String> = []
+    for part in parts {
+      if part.is_empty() {
+        // Empty part means something like APP_DB__ or APP___X, skip
+        continue
+      }
+      lowered_parts.append(part.lowercase())
+    }
+
+    if lowered_parts.is_empty() {
+      continue  // All parts were empty, skip
+    }
+
+    // Parse the value
+    let value = parse_value(var_entry.value)
+
+    // Set the value at the path
+    config = set_nested(config, lowered_parts, value)
+  }
+
+  // Validate
+  validate_config(config)
+
+  // Output as formatted JSON
+  print(format_json(config, 0))
+}
+
+fn merge_values(a: json.Value, b: json.Value) -> json.Value {
+  if a is json.Value.Object(a_obj) and b is json.Value.Object(b_obj) {
+    var result = a_obj
+    for entry in b_obj {
+      result[entry.key] = entry.value
+      // Recursively merge if both have objects for the same key
+      if a_obj[entry.key] is some(av) and av is json.Value.Object(_) and entry.value is json.Value.Object(_) {
+        result[entry.key] = merge_values(av, entry.value)
+      }
+    }
+    return json.Value.Object(fields: result)
+  }
+  return b
+}
+
+fn parse_value(text: String) -> json.Value {
+  // Try to parse as JSON first
+  let parsed = try json.parse(text) catch err {
+    // On parse error, return as string
+    return json.Value.String(value: text)
+  }
+  return parsed
+}
+
+fn set_nested(root: json.Value, path: List<String>, value: json.Value) -> json.Value {
+  if path.length == 0 {
+    return value
+  }
+
+  let key = path[0]
+  let rest = path.drop(1)
+
+  var obj: Map<String, json.Value> = {}
+
+  if root is json.Value.Object(fields) {
+    obj = fields
+  }
+
+  if rest.is_empty() {
+    obj[key] = value
+  } else {
+    let next_val = obj[key] ?? json.Value.Object(fields: {})
+    let is_obj = match next_val {
+      json.Value.Object(_) => true
+      _ => false
+    }
+    if not is_obj {
+      obj[key] = json.Value.Object(fields: {})
+    }
+    obj[key] = set_nested(next_val, rest, value)
+  }
+
+  return json.Value.Object(fields: obj)
+}
+
+fn validate_config(config: json.Value) throws {
+  // Check service.name
+  if not has_non_empty_string(config, ["service", "name"]) {
+    eprint("error: invalid service.name")
+    process.exit(1)
+  }
+
+  // Check db.host
+  if not has_non_empty_string(config, ["db", "host"]) {
+    eprint("error: invalid db.host")
+    process.exit(1)
+  }
+
+  // Check db.port
+  if not is_valid_port(config, ["db", "port"]) {
+    eprint("error: invalid db.port")
+    process.exit(1)
+  }
+}
+
+fn has_non_empty_string(config: json.Value, path: List<String>) -> Bool {
+  let val = get_nested(config, path)
+  if val is json.Value.String(s) {
+    return not s.is_empty()
+  }
+  return false
+}
+
+fn get_nested(root: json.Value, path: List<String>) -> json.Value? {
+  var current = root
+  for key in path {
+    if current is json.Value.Object(fields) {
+      if fields[key] is some(v) {
+        current = v
+      } else {
+        return none
+      }
+    } else {
+      return none
+    }
+  }
+  return current
+}
+
+fn is_valid_port(config: json.Value, path: List<String>) -> Bool {
+  let val = get_nested(config, path)
+  if val is json.Value.Number(num) {
+    let port_int = try num.to_int() catch _ { none }
+    if port_int is some(p) {
+      return p >= 1 and p <= 65535
+    }
+  }
+  return false
+}
+
+fn format_json(value: json.Value, indent: Int) -> String {
+  let indent_str = " ".repeat(indent)
+  let next_indent_str = " ".repeat(indent + 2)
+
+  if value is json.Value.Null {
+    return "null"
+  } else if value is json.Value.Bool(b) {
+    return if b { "true" } else { "false" }
+  } else if value is json.Value.Number(num) {
+    return num.to_string()
+  } else if value is json.Value.String(s) {
+    return escape_json_string(s)
+  } else if value is json.Value.Array(items) {
+    if items.is_empty() {
+      return "[]"
+    }
+    var result = "[\n"
+    for item in items.indexed() {
+      result += next_indent_str
+      result += format_json(item.value, indent + 2)
+      if item.index < items.length - 1 {
+        result += ","
+      }
+      result += "\n"
+    }
+    result += indent_str
+    result += "]"
+    return result
+  } else if value is json.Value.Object(fields) {
+    if fields.is_empty() {
+      return "{}"
+    }
+    var result = "{\n"
+    let keys = fields.keys().sorted()
+    for key in keys.indexed() {
+      let k = key.value
+      result += next_indent_str
+      result += escape_json_string(k)
+      result += ": "
+      result += format_json(fields[k] ?? json.Value.Null, indent + 2)
+      if key.index < keys.length - 1 {
+        result += ","
+      }
+      result += "\n"
+    }
+    result += indent_str
+    result += "}"
+    return result
+  }
+
+  return ""
+}
+
+fn escape_json_string(s: String) -> String {
+  var result = "\""
+  for ch in s.chars() {
+    if ch == "\"" {
+      result += "\\\""
+    } else if ch == "\\" {
+      result += "\\\\"
+    } else if ch == "\u{0008}" {
+      result += "\\b"
+    } else if ch == "\t" {
+      result += "\\t"
+    } else if ch == "\n" {
+      result += "\\n"
+    } else if ch == "\u{000C}" {
+      result += "\\f"
+    } else if ch == "\u{000D}" {
+      result += "\\r"
+    } else {
+      let code = ch.char_code()
+      if code < 32 {
+        result += "\\u00"
+        let hex = code.to_string(16)
+        if hex.length == 1 {
+          result += "0"
+        }
+        result += hex
+      } else {
+        result += ch
+      }
+    }
+  }
+  result += "\""
+  return result
+}

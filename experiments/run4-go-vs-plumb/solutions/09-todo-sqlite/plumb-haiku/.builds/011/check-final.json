@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "database file created at TODO_DB",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ids never reused",
+   "ok": false,
+   "detail": "step ['add', 'd']: expected exit=0 stdout='added 4\\n'; got exit=0 timed_out=False stdout='added 3\\n' stderr=''"
+  },
+  {
+   "name": "tags sorted, deduplicated, filtered exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "overdue: open, due strictly before today",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "SQL-like title stored verbatim",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search: % and _ are literal",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search is case-sensitive substring",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "quotes, backslashes and unicode",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "done is idempotent",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown ids exit 3",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "leap day accepted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid dates rejected, nothing stored",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "TODO_DB empty",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "150 todos",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

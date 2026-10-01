@@ -1,0 +1,5 @@
+error: expected `)` to close the call, found `if`
+  --> main.plumb:287:43
+    |
+287 |     filtered.sort_by(a => [a.price_cents] if filters.sort == "price_asc" else if filters.sort == "price_desc" { [a.price_cents] } else if filters.sort == "name" { [a.name, a.id] } else { [a.id] })
+    |                                           ^^

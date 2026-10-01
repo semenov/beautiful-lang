@@ -1,0 +1,7 @@
+error: `??` needs a value that may be missing, but this is a `Connection`
+  --> main.plumb:274:20
+    |
+274 |   let connection = conn ?? panic("No connection")
+    |                    ^^^^
+    = help: remove `?? ...`
+1 error(s)

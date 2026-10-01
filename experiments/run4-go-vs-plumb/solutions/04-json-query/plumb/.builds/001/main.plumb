@@ -1,0 +1,445 @@
+// json-query: filter JSON Lines by field values and print selected fields.
+// See usage below. Own JSON reader: it must keep numbers as written and keys
+// in input order, and tell "invalid JSON" from "not an object".
+
+let usage = "usage: app [--where PATH=VALUE]... [--select PATH,PATH...]"
+
+// A parsed JSON value. Numbers, true, false and null keep their text.
+enum Node {
+  Text(s: String)
+  Lit(raw: String)
+  Arr(items: List<Node>)
+  Obj(keys: List<String>, vals: List<Node>)
+}
+
+type Condition {
+  path: List<String>
+  value: String
+}
+
+type Query {
+  conditions: List<Condition> = []
+  select: List<String> = []
+  has_select: Bool = false
+}
+
+type Reader {
+  cs: List<Int>
+  pos: Int = 0
+
+  fn peek(self) -> Int {
+    if self.pos < self.cs.length {
+      return self.cs[self.pos]
+    }
+    return -1
+  }
+
+  mutating fn skip_space() {
+    while self.pos < self.cs.length {
+      let c = self.cs[self.pos]
+      if c == 32 or c == 9 or c == 10 or c == 13 {
+        self.pos += 1
+      } else {
+        return
+      }
+    }
+  }
+
+  mutating fn expect_word(word: String, node: Node) throws -> Node {
+    for c in word.code_points() {
+      if self.peek() != c {
+        throw Failure(message: "invalid")
+      }
+      self.pos += 1
+    }
+    return node
+  }
+
+  mutating fn read_digits() throws -> String {
+    var out = ""
+    while self.peek() >= 48 and self.peek() <= 57 {
+      out += self.cs[self.pos].character()
+      self.pos += 1
+    }
+    if out.is_empty() {
+      throw Failure(message: "invalid")
+    }
+    return out
+  }
+
+  mutating fn read_number() throws -> Node {
+    var out = ""
+    if self.peek() == 45 {
+      out += "-"
+      self.pos += 1
+    }
+    if self.peek() == 48 {
+      out += "0"
+      self.pos += 1
+    } else {
+      out += try self.read_digits()
+    }
+    if self.peek() == 46 {
+      self.pos += 1
+      out += "." + (try self.read_digits())
+    }
+    if self.peek() == 101 or self.peek() == 69 {
+      out += self.cs[self.pos].character()
+      self.pos += 1
+      if self.peek() == 43 or self.peek() == 45 {
+        out += self.cs[self.pos].character()
+        self.pos += 1
+      }
+      out += try self.read_digits()
+    }
+    return Lit(raw: out)
+  }
+
+  mutating fn read_hex4() throws -> Int {
+    var n = 0
+    for _ in 0..<4 {
+      let c = self.peek()
+      var d = -1
+      if c >= 48 and c <= 57 {
+        d = c - 48
+      } else if c >= 97 and c <= 102 {
+        d = c - 87
+      } else if c >= 65 and c <= 70 {
+        d = c - 55
+      }
+      if d < 0 {
+        throw Failure(message: "invalid")
+      }
+      n = n * 16 + d
+      self.pos += 1
+    }
+    return n
+  }
+
+  // After the opening quote has been read.
+  mutating fn read_string_body() throws -> String {
+    var out = ""
+    while true {
+      let c = self.peek()
+      if c < 0 or c < 32 {
+        throw Failure(message: "invalid")
+      }
+      self.pos += 1
+      if c == 34 {
+        return out
+      }
+      if c != 92 {
+        out += c.character()
+        continue
+      }
+      let e = self.peek()
+      self.pos += 1
+      if e == 34 {
+        out += "\""
+      } else if e == 92 {
+        out += "\\"
+      } else if e == 47 {
+        out += "/"
+      } else if e == 98 {
+        out += 8.character()
+      } else if e == 102 {
+        out += 12.character()
+      } else if e == 110 {
+        out += 10.character()
+      } else if e == 114 {
+        out += 13.character()
+      } else if e == 116 {
+        out += 9.character()
+      } else if e == 117 {
+        let u = try self.read_hex4()
+        if u >= 0xD800 and u <= 0xDBFF {
+          if self.peek() == 92 and self.pos + 1 < self.cs.length and self.cs[self.pos + 1] == 117 {
+            let save = self.pos
+            self.pos += 2
+            let lo = try self.read_hex4()
+            if lo >= 0xDC00 and lo <= 0xDFFF {
+              out += (0x10000 + (u - 0xD800) * 1024 + (lo - 0xDC00)).character()
+            } else {
+              // a lone high surrogate; read the next escape again on its own
+              self.pos = save
+              out += 0xFFFD.character()
+            }
+          } else {
+            out += 0xFFFD.character()
+          }
+        } else {
+          out += u.character()
+        }
+      } else {
+        throw Failure(message: "invalid")
+      }
+    }
+    return out
+  }
+
+  mutating fn read_value() throws -> Node {
+    self.skip_space()
+    let c = self.peek()
+    if c == 123 {
+      self.pos += 1
+      var keys: List<String> = []
+      var vals: List<Node> = []
+      self.skip_space()
+      if self.peek() == 125 {
+        self.pos += 1
+        return Obj(keys: keys, vals: vals)
+      }
+      while true {
+        self.skip_space()
+        if self.peek() != 34 {
+          throw Failure(message: "invalid")
+        }
+        self.pos += 1
+        keys.append(try self.read_string_body())
+        self.skip_space()
+        if self.peek() != 58 {
+          throw Failure(message: "invalid")
+        }
+        self.pos += 1
+        vals.append(try self.read_value())
+        self.skip_space()
+        let d = self.peek()
+        self.pos += 1
+        if d == 125 {
+          return Obj(keys: keys, vals: vals)
+        }
+        if d != 44 {
+          throw Failure(message: "invalid")
+        }
+      }
+    }
+    if c == 91 {
+      self.pos += 1
+      var items: List<Node> = []
+      self.skip_space()
+      if self.peek() == 93 {
+        self.pos += 1
+        return Arr(items: items)
+      }
+      while true {
+        items.append(try self.read_value())
+        self.skip_space()
+        let d = self.peek()
+        self.pos += 1
+        if d == 93 {
+          return Arr(items: items)
+        }
+        if d != 44 {
+          throw Failure(message: "invalid")
+        }
+      }
+    }
+    if c == 34 {
+      self.pos += 1
+      return Text(s: try self.read_string_body())
+    }
+    if c == 116 {
+      return try self.expect_word("true", node: Lit(raw: "true"))
+    }
+    if c == 102 {
+      return try self.expect_word("false", node: Lit(raw: "false"))
+    }
+    if c == 110 {
+      return try self.expect_word("null", node: Lit(raw: "null"))
+    }
+    if c == 45 or (c >= 48 and c <= 57) {
+      return try self.read_number()
+    }
+    throw Failure(message: "invalid")
+  }
+}
+
+fn parse_line(line: String) throws -> Node {
+  var r = Reader(cs: line.code_points())
+  let v = try r.read_value()
+  r.skip_space()
+  if r.pos != r.cs.length {
+    throw Failure(message: "invalid")
+  }
+  return v
+}
+
+fn find_path(node: Node, path: List<String>) -> Node? {
+  var cur = node
+  for key in path {
+    if cur is Obj(keys, vals) {
+      if keys.index_of(key) is some(i) {
+        cur = vals[i]
+      } else {
+        return none
+      }
+    } else {
+      return none
+    }
+  }
+  return cur
+}
+
+fn matches(node: Node, value: String) -> Bool {
+  if node is Text(s) {
+    return s == value
+  }
+  if node is Lit(raw) {
+    return raw == value
+  }
+  return false
+}
+
+fn hex2(n: Int) -> String {
+  let digits = "0123456789abcdef"
+  return "00" + digits.slice(from: n.div(16), to: n.div(16) + 1) + digits.slice(from: n % 16, to: n % 16 + 1)
+}
+
+fn quote(s: String) -> String {
+  var out = "\""
+  for c in s.code_points() {
+    if c == 34 {
+      out += "\\\""
+    } else if c == 92 {
+      out += "\\\\"
+    } else if c == 8 {
+      out += "\\b"
+    } else if c == 9 {
+      out += "\\t"
+    } else if c == 10 {
+      out += "\\n"
+    } else if c == 12 {
+      out += "\\f"
+    } else if c == 13 {
+      out += "\\r"
+    } else if c < 32 {
+      out += "\\u" + hex2(c)
+    } else {
+      out += c.character()
+    }
+  }
+  return out + "\""
+}
+
+fn render(node: Node) -> String {
+  return match node {
+    Text(s) => quote(s)
+    Lit(raw) => raw
+    Arr(items) => "[" + items.map(x => render(x)).join(",") + "]"
+    Obj(keys, vals) => render_object(keys, vals)
+  }
+}
+
+fn render_object(keys: List<String>, vals: List<Node>) -> String {
+  var parts: List<String> = []
+  for i in 0..<keys.length {
+    parts.append(quote(keys[i]) + ":" + render(vals[i]))
+  }
+  return "{" + parts.join(",") + "}"
+}
+
+// Splits a PATH; none if it or any key is empty.
+fn split_path(text: String) -> List<String>? {
+  let keys = text.split(".")
+  if keys.any(k => k.is_empty()) {
+    return none
+  }
+  return keys
+}
+
+fn bad_usage() -> Never {
+  eprint(usage)
+  process.exit(64)
+}
+
+fn parse_args(args: List<String>) -> Query {
+  var q = Query()
+  var i = 0
+  while i < args.length {
+    let opt = args[i]
+    if opt != "--where" and opt != "--select" {
+      bad_usage()
+    }
+    if i + 1 >= args.length {
+      bad_usage()
+    }
+    let val = args[i + 1]
+    i += 2
+    if opt == "--where" {
+      if val.index_of("=") is some(eq) {
+        let path = val.slice(from: 0, to: eq)
+        let want = val.slice(from: eq + 1, to: val.length)
+        if split_path(path) is some(keys) {
+          q.conditions.append(Condition(path: keys, value: want))
+        } else {
+          bad_usage()
+        }
+      } else {
+        bad_usage()
+      }
+    } else {
+      let paths = val.split(",")
+      if paths.any(p => split_path(p) is none) {
+        bad_usage()
+      }
+      q.select = paths
+      q.has_select = true
+    }
+  }
+  return q
+}
+
+fn run(q: Query) throws -> Bool {
+  var ok = true
+  var n = 0
+  while try io.read_line() is some(line) {
+    n += 1
+    if line.trim().is_empty() {
+      continue
+    }
+    let rec = try parse_line(line) catch _ {
+      eprint("error: line ${n}: invalid JSON")
+      ok = false
+      continue
+    }
+    if rec is Obj(keys, vals) {
+      var hit = true
+      for c in q.conditions {
+        if find_path(rec, path: c.path) is some(v) {
+          if not matches(v, value: c.value) {
+            hit = false
+            break
+          }
+        } else {
+          hit = false
+          break
+        }
+      }
+      if not hit {
+        continue
+      }
+      if q.has_select {
+        var parts: List<String> = []
+        for p in q.select {
+          let found = find_path(rec, path: p.split(".")) ?? Lit(raw: "null")
+          parts.append(quote(p) + ":" + render(found))
+        }
+        print("{" + parts.join(",") + "}")
+      } else {
+        print(render_object(keys, vals))
+      }
+    } else {
+      eprint("error: line ${n}: not an object")
+      ok = false
+    }
+  }
+  return ok
+}
+
+fn main() throws {
+  let q = parse_args(process.args())
+  let ok = try run(q)
+  if not ok {
+    process.exit(1)
+  }
+}

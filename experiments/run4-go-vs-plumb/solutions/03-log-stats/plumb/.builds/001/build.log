@@ -1,0 +1,18 @@
+error: `path` is never used
+  --> main.plumb:109:7
+    |
+109 |   let path = target.index_of("?") is some(q)
+    |       ^^^^
+    = help: remove it, or write `let _ = ...` to drop a value on purpose
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:109:38
+    |
+109 |   let path = target.index_of("?") is some(q)
+    |                                      ^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: `String` has no method `trim_start_zeros`
+  --> main.plumb:159:36
+    |
+159 |       } else if digits_value(value.trim_start_zeros()) == 0 {
+    |                                    ^^^^^^^^^^^^^^^^
+3 error(s)

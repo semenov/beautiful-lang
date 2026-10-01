@@ -1,0 +1,6 @@
+error: expected `JobStatus`, found `Cancelled`
+  --> main.plumb:183:28
+    |
+183 |       updated_job.status = Cancelled()
+    |                            ^^^^^^^^^^^
+1 error(s)

@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:94:11
+   |
+94 |     while let chunk = try stdin.read_text() {
+   |           ^^^

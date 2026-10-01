@@ -1,0 +1,249 @@
+import db
+import env
+import http
+import json
+import log
+
+type EventRow {
+  id: Int
+  name: String
+  capacity: Int
+  remaining: Int
+}
+
+type ReservationRow {
+  id: Int
+  event_id: Int
+  seats: Int
+  status: String
+}
+
+type KeyRow {
+  reservation_id: Int
+  event_id: Int
+  seats: Int
+}
+
+type ErrorBody {
+  error: String
+}
+
+fn fail(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+// A positive integer id from a path part, or none.
+fn parse_id(text: String) -> Int? {
+  if text.is_empty() {
+    return none
+  }
+  for c in text.chars() {
+    if c < "0" or c > "9" {
+      return none
+    }
+  }
+  let n = try text.to_int() catch _ {
+    return none
+  }
+  if n < 1 {
+    return none
+  }
+  return n
+}
+
+// The body as a JSON object, or none.
+fn parse_object(req: http.Request) -> Map<String, json.Value>? {
+  let v = try json.parse(req.text()) catch _ {
+    return none
+  }
+  if v is json.Value.Object(fields) {
+    return fields
+  }
+  return none
+}
+
+fn int_field(fields: Map<String, json.Value>, name: String) -> Int? {
+  if fields[name] is some(v) {
+    if v is json.Value.Number(n) {
+      let i = try n.to_int() catch _ {
+        return none
+      }
+      return i
+    }
+  }
+  return none
+}
+
+fn find_event(conn: db.Connection, id: Int) throws -> EventRow? {
+  let rows = try conn.query<EventRow>("select e.id as id, e.name as name, e.capacity as capacity, e.capacity - coalesce((select sum(r.seats) from reservations r where r.event_id = e.id and r.status = 'active'), 0) as remaining from events e where e.id = ?", [id])
+  if rows.is_empty() {
+    return none
+  }
+  return rows[0]
+}
+
+fn find_reservation(conn: db.Connection, id: Int) throws -> ReservationRow? {
+  let rows = try conn.query<ReservationRow>("select id, event_id, seats, status from reservations where id = ?", [id])
+  if rows.is_empty() {
+    return none
+  }
+  return rows[0]
+}
+
+fn create_event(req: http.Request, conn: db.Connection, lock: Shared<Int>) throws -> http.Response {
+  let parsed = parse_object(req)
+  if parsed is none {
+    return fail(400, "invalid JSON")
+  }
+  let fields = parsed ?? {}
+  var name = ""
+  if fields["name"] is some(v) {
+    if v is json.Value.String(s) {
+      name = s
+    }
+  }
+  if name.is_empty() {
+    return fail(400, "invalid name")
+  }
+  let capacity = int_field(fields, name: "capacity") ?? 0
+  if capacity < 1 or capacity > 100000 {
+    return fail(400, "invalid capacity")
+  }
+  with _ = lock.lock() {
+    let id = try conn.insert("insert into events (name, capacity) values (?, ?)", [name, capacity])
+    return http.json(201, EventRow(id: id, name: name, capacity: capacity, remaining: capacity))
+  }
+}
+
+fn get_event(id: Int, conn: db.Connection) throws -> http.Response {
+  if try find_event(conn, id) is some(e) {
+    return http.json(200, e)
+  }
+  return fail(404, "not found")
+}
+
+fn create_reservation(req: http.Request, event_id: Int, conn: db.Connection, lock: Shared<Int>) throws -> http.Response {
+  let parsed = parse_object(req)
+  if parsed is none {
+    return fail(400, "invalid JSON")
+  }
+  let fields = parsed ?? {}
+  let seats = int_field(fields, name: "seats") ?? 0
+  if seats < 1 {
+    return fail(400, "invalid seats")
+  }
+  let key = req.header("idempotency-key") ?? ""
+  with _ = lock.lock() {
+    if not key.is_empty() {
+      let keys = try conn.query<KeyRow>("select reservation_id, event_id, seats from idempotency where key = ?", [key])
+      if not keys.is_empty() {
+        let k = keys[0]
+        if k.event_id != event_id or k.seats != seats {
+          return fail(422, "idempotency key reused")
+        }
+        if try find_reservation(conn, k.reservation_id) is some(r) {
+          return http.json(201, r)
+        }
+      }
+    }
+    let found = try find_event(conn, event_id)
+    if found is none {
+      return fail(404, "not found")
+    }
+    let event = found ?? EventRow(id: 0, name: "", capacity: 0, remaining: 0)
+    if event.remaining < seats {
+      return fail(409, "not enough seats")
+    }
+    let id = try conn.transaction(() => {
+      let rid = try conn.insert("insert into reservations (event_id, seats, status) values (?, ?, 'active')", [event_id, seats])
+      if not key.is_empty() {
+        try conn.execute("insert into idempotency (key, reservation_id, event_id, seats) values (?, ?, ?, ?)", [key, rid, event_id, seats])
+      }
+      rid
+    })
+    return http.json(201, ReservationRow(id: id, event_id: event_id, seats: seats, status: "active"))
+  }
+}
+
+fn get_reservation(id: Int, conn: db.Connection) throws -> http.Response {
+  if try find_reservation(conn, id) is some(r) {
+    return http.json(200, r)
+  }
+  return fail(404, "not found")
+}
+
+fn cancel_reservation(id: Int, conn: db.Connection, lock: Shared<Int>) throws -> http.Response {
+  with _ = lock.lock() {
+    let found = try find_reservation(conn, id)
+    if found is none {
+      return fail(404, "not found")
+    }
+    var r = found ?? ReservationRow(id: 0, event_id: 0, seats: 0, status: "")
+    if r.status == "cancelled" {
+      return fail(409, "already cancelled")
+    }
+    try conn.execute("update reservations set status = 'cancelled' where id = ?", [id])
+    r.status = "cancelled"
+    return http.json(200, r)
+  }
+}
+
+fn route(req: http.Request, conn: db.Connection, lock: Shared<Int>) throws -> http.Response {
+  let parts = req.path.split("/")
+  // "/events" splits into ["", "events"]
+  if parts.length < 2 or parts[0] != "" {
+    return fail(404, "not found")
+  }
+  let m = req.method
+  if parts.length == 2 and parts[1] == "events" {
+    if m == "POST" {
+      return try create_event(req, conn, lock)
+    }
+    return fail(405, "method not allowed")
+  }
+  if parts.length == 3 and parts[1] == "events" {
+    if m != "GET" {
+      return fail(405, "method not allowed")
+    }
+    if parse_id(parts[2]) is some(id) {
+      return try get_event(id, conn)
+    }
+    return fail(404, "not found")
+  }
+  if parts.length == 4 and parts[1] == "events" and parts[3] == "reservations" {
+    if m != "POST" {
+      return fail(405, "method not allowed")
+    }
+    if parse_id(parts[2]) is some(id) {
+      return try create_reservation(req, id, conn, lock)
+    }
+    return fail(404, "not found")
+  }
+  if parts.length == 3 and parts[1] == "reservations" {
+    if m != "GET" and m != "DELETE" {
+      return fail(405, "method not allowed")
+    }
+    if parse_id(parts[2]) is some(id) {
+      if m == "GET" {
+        return try get_reservation(id, conn)
+      }
+      return try cancel_reservation(id, conn, lock)
+    }
+    return fail(404, "not found")
+  }
+  return fail(404, "not found")
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int()
+  let path = env.get("DB_PATH") ?? "reservations.db"
+  with conn = try db.open(path) {
+    try conn.execute("create table if not exists events (id integer primary key autoincrement, name text not null, capacity integer not null)", [])
+    try conn.execute("create table if not exists reservations (id integer primary key autoincrement, event_id integer not null, seats integer not null, status text not null)", [])
+    try conn.execute("create table if not exists idempotency (key text primary key, reservation_id integer not null, event_id integer not null, seats integer not null)", [])
+    let lock = Shared<Int>(0)
+    var router = http.Router()
+    router.any("/*rest", req => try route(req, conn, lock))
+    try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  }
+}

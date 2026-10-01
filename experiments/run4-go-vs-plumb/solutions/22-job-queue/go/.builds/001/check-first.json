@@ -1,0 +1,64 @@
+{
+ "cases": [
+  {
+   "name": "job runs and returns reversed input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ids are 1, 2, 3 in order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "at most WORKERS run at once, in submission order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid submissions are 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown jobs and paths are 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel submissions get distinct consecutive ids",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cancel a queued job",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cancel a running job frees the worker",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "cancel done or cancelled job is 409",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stats count every status",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "SIGTERM lets running jobs finish",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "SIGTERM gives up after the grace period",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

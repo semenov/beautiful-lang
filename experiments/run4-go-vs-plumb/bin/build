@@ -1,0 +1,7 @@
+#!/bin/sh
+# Compile the solution in the current directory (solutions/<task>/<lang>).
+# Every call is logged and its source is snapshotted.
+here=$(pwd -P)
+lang=$(basename "$here")
+task=$(basename "$(dirname "$here")")
+exec python3 "$(dirname "$0")/harness.py" build "$task" "$lang"

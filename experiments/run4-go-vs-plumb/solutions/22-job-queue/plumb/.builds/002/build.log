@@ -1,0 +1,6 @@
+error: `throws` goes before `->`
+  --> main.plumb:85:35
+   |
+85 | fn parse_job(body: String) -> Job throws {
+   |                                   ^^^^^^
+   = help: write `fn f() throws -> T`

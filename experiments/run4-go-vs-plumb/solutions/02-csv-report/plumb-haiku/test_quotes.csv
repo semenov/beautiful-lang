@@ -1,0 +1,5 @@
+group,amount
+"Group, with comma",10.50
+"Group with ""quotes""",5.25
+"Group with
+newline",3.00

@@ -1,0 +1,67 @@
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:69:15
+   |
+69 |       if t is json.Value.String(s) and s.length >= 1 and s.length <= 200 {
+   |               ^^^^^^^^^^^^^^^^^^^^
+   = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `s`
+  --> main.plumb:69:40
+   |
+69 |       if t is json.Value.String(s) and s.length >= 1 and s.length <= 200 {
+   |                                        ^
+error: unknown name `s`
+  --> main.plumb:69:58
+   |
+69 |       if t is json.Value.String(s) and s.length >= 1 and s.length <= 200 {
+   |                                                          ^
+error: unknown name `s`
+  --> main.plumb:70:23
+   |
+70 |         input.title = s
+   |                       ^
+error: can't figure out the type here
+  --> main.plumb:142:17
+    |
+142 |   let updated = try conn.transaction(() => {
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: add a type: `let xs: List<Int> = []`
+error: no `return` inside a lambda
+  --> main.plumb:155:7
+    |
+155 |       return some(n)
+    |       ^^^^^^
+    = help: the lambda's last line is its value
+error: `some(x)` is only a pattern
+  --> main.plumb:155:14
+    |
+155 |       return some(n)
+    |              ^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: no `return` inside a lambda
+  --> main.plumb:157:5
+    |
+157 |     return none
+    |     ^^^^^^
+    = help: the lambda's last line is its value
+error: expected `Response`, found `_?`
+  --> main.plumb:157:12
+    |
+157 |     return none
+    |            ^^^^
+error: `some(...)` can't match a `_`: it's never missing
+  --> main.plumb:159:17
+    |
+159 |   if updated is some(n) {
+    |                 ^^^^^^^
+error: unknown name `n`
+  --> main.plumb:160:27
+    |
+160 |     return http.json(200, n)
+    |                           ^
+error: `patch_note` has 3 or more parameters: name every argument after the first
+  --> main.plumb:196:31
+    |
+196 |     return try patch_note(id, req, conn)
+    |                               ^^^
+    = help: write (…, req: …, conn: …)
+12 error(s)

@@ -1,0 +1,5 @@
+error: expected `{`, found `contains`
+  --> main.plumb:100:16
+    |
+100 |     if s.cache contains cache_key {
+    |                ^^^^^^^^

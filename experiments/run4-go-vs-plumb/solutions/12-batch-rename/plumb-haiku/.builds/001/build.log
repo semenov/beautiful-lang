@@ -1,0 +1,5 @@
+error: text uses double quotes only
+  --> main.plumb:128:23
+    |
+128 |     if template[i] == '{' {
+    |                       ^

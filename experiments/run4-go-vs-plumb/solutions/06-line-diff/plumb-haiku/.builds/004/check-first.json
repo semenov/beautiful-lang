@@ -1,0 +1,124 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "equal files: exit 0, no output",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "two empty files are equal",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "empty old file",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "empty new file",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "tie-break: earliest lines kept, removals first",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "tie-break: swapped lines",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "replaced block: removals before additions",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "moved block, minimal diff",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "-U 0: zero counts use the line before",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "gap of exactly 2N kept lines joins hunks",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "gap of 2N+1 kept lines splits hunks",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "context clipped at both ends, -U 2",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "missing final newline differs",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "missing final newline on a kept line",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "CR is part of the line",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "unicode lines, names as given",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "missing file",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  },
+  {
+   "name": "usage error old.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error old.txt new.txt x.txt",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: cannot read x.txt\\n'"
+  },
+  {
+   "name": "usage error -U x old.txt new.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error -U -1 old.txt new.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error -q old.txt new.txt",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='--- old.txt\\n+++ new.txt\\n@@ -1,2 +1,2 @@\\n-a\\r\\n\\n+a\\n\\n b\\n\\n' stderr=''"
+  },
+  {
+   "name": "large files",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='usage: app [-U N] OLD NEW\\n'"
+  }
+ ]
+}

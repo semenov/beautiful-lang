@@ -1,0 +1,42 @@
+error: `?.` can't change the value inside an optional
+  --> main.plumb:83:7
+   |
+83 |       s.pending_by_source[source]?.append(id)
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: take it out, change it and put it back: `var v = x ?? ...`, change `v`, then `x = v`
+error: `Set<String>` has no method `append`
+  --> main.plumb:88:24
+   |
+88 |       s.active_sources.append(source)
+   |                        ^^^^^^
+error: expected `Int`, found `String`
+  --> main.plumb:118:19
+    |
+118 |         "source": event.source,
+    |                   ^^^^^^^^^^^^
+    = help: parse it: `try text.to_int()`
+error: expected `Int`, found `String`
+  --> main.plumb:119:19
+    |
+119 |         "status": status_str,
+    |                   ^^^^^^^^^^
+    = help: parse it: `try text.to_int()`
+error: can't change `event_id`: it's declared with `let`
+  --> main.plumb:165:9
+    |
+165 |         event_id = first_id
+    |         ^^^^^^^^
+    = help: declare it with `var event_id = ...`
+error: can't change `payload_bytes`: it's declared with `let`
+  --> main.plumb:169:11
+    |
+169 |           payload_bytes = event.payload_bytes
+    |           ^^^^^^^^^^^^^
+    = help: declare it with `var payload_bytes = ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:183:14
+    |
+183 |     let id = event_id ?? 0
+    |              ^^^^^^^^
+    = help: remove `?? ...`
+7 error(s)

@@ -1,0 +1,21 @@
+error: `some(...)` can't match a `String`: it's never missing
+  --> main.plumb:114:31
+    |
+114 |   let title_str = if title is some(t) { t } else { "" }
+    |                               ^^^^^^^
+error: unknown name `t`
+  --> main.plumb:114:41
+    |
+114 |   let title_str = if title is some(t) { t } else { "" }
+    |                                         ^
+error: `some(...)` can't match a `String`: it's never missing
+  --> main.plumb:385:32
+    |
+385 |   let text = if search_text is some(t) { t } else { "" }
+    |                                ^^^^^^^
+error: unknown name `t`
+  --> main.plumb:385:42
+    |
+385 |   let text = if search_text is some(t) { t } else { "" }
+    |                                          ^
+4 error(s)

@@ -1,0 +1,65 @@
+error: `Set<Weekday>` has no method `insert`
+  --> main.plumb:73:10
+   |
+73 |     days.insert(day)
+   |          ^^^^^^
+error: `Set<Date>` has no method `insert`
+  --> main.plumb:111:14
+    |
+111 |     holidays.insert(date)
+    |              ^^^^^^
+error: `is_business_day` has 3 or more parameters: name every argument after the first
+  --> main.plumb:135:33
+    |
+135 |     if is_business_day(current, holidays, weekend) {
+    |                                 ^^^^^^^^
+    = help: write (…, holidays: …, weekend: …)
+error: `count_business_days` has 3 or more parameters: name every argument after the first
+  --> main.plumb:166:44
+    |
+166 |     let count = count_business_days(start, end.plus_days(-1), holidays, weekend)
+    |                                            ^^^^^^^^^^^^^^^^^
+    = help: write (…, end: …, holidays: …, weekend: …)
+error: `count_business_days` has 3 or more parameters: name every argument after the first
+  --> main.plumb:169:42
+    |
+169 |     let count = count_business_days(end, start.plus_days(-1), holidays, weekend)
+    |                                          ^^^^^^^^^^^^^^^^^^^
+    = help: write (…, end: …, holidays: …, weekend: …)
+error: `is_business_day` has 3 or more parameters: name every argument after the first
+  --> main.plumb:187:30
+    |
+187 |     if is_business_day(date, holidays, weekend) {
+    |                              ^^^^^^^^
+    = help: write (…, holidays: …, weekend: …)
+error: `is_business_day` has 3 or more parameters: name every argument after the first
+  --> main.plumb:191:42
+    |
+191 |       while not is_business_day(current, holidays, weekend) {
+    |                                          ^^^^^^^^
+    = help: write (…, holidays: …, weekend: …)
+error: `is_business_day` has 3 or more parameters: name every argument after the first
+  --> main.plumb:201:35
+    |
+201 |       if is_business_day(current, holidays, weekend) {
+    |                                   ^^^^^^^^
+    = help: write (…, holidays: …, weekend: …)
+error: `is_business_day` has 3 or more parameters: name every argument after the first
+  --> main.plumb:215:35
+    |
+215 |       if is_business_day(current, holidays, weekend) {
+    |                                   ^^^^^^^^
+    = help: write (…, holidays: …, weekend: …)
+error: `cmd_between` has 3 or more parameters: name every argument after the first
+  --> main.plumb:275:42
+    |
+275 |       cmd_between(parsed.positionals[0], parsed.positionals[1], holidays, weekend)
+    |                                          ^^^^^^^^^^^^^^^^^^^^^
+    = help: write (…, end_str: …, holidays: …, weekend: …)
+error: `cmd_add` has 3 or more parameters: name every argument after the first
+  --> main.plumb:282:38
+    |
+282 |       cmd_add(parsed.positionals[0], parsed.positionals[1], holidays, weekend)
+    |                                      ^^^^^^^^^^^^^^^^^^^^^
+    = help: write (…, n_str: …, holidays: …, weekend: …)
+11 error(s)

@@ -1,0 +1,6 @@
+# app
+./main.go:12:2: "hash" imported and not used
+./main.go:449:15: assignment mismatch: 1 variable but pbkdf2.Key returns 2 values
+./main.go:449:26: in call to pbkdf2.Key, type []byte of []byte(password) does not match func() Hash (cannot infer Hash)
+./main.go:478:18: assignment mismatch: 1 variable but pbkdf2.Key returns 2 values
+./main.go:478:29: in call to pbkdf2.Key, type []byte of []byte(password) does not match func() Hash (cannot infer Hash)

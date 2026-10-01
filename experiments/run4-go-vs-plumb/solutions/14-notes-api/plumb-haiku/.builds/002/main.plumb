@@ -1,0 +1,205 @@
+import http
+import json
+import db
+import env
+import url
+
+type Note {
+  id: Int
+  title: String
+  body: String
+  tag: String?
+}
+
+type CreateNoteRequest {
+  title: String
+  body: String = ""
+  tag: String? = none
+}
+
+type UpdateNoteRequest {
+  title: String? = none
+  body: String? = none
+  tag: String? = none
+}
+
+type ErrorResponse {
+  error: String
+}
+
+type NotesResponse {
+  notes: List<Note>
+}
+
+fn main() throws {
+  let port = env.get("PORT") ?? throw Failure(message: "PORT environment variable not set")
+  let db_path = env.get("DB_PATH") ?? throw Failure(message: "DB_PATH environment variable not set")
+
+  let port_int = try port.to_int()
+
+  with conn = try db.open(db_path) {
+    try init_db(conn)
+
+    let db_shared = Shared<db.Connection>(conn)
+
+    var router = http.Router()
+    router.post("/notes", req => try create_note(req, db_shared))
+    router.get("/notes", req => try get_notes(req, db_shared))
+    router.get("/notes/:id", req => try get_note(req, db_shared))
+    router.patch("/notes/:id", req => try update_note(req, db_shared))
+    router.delete("/notes/:id", req => try delete_note(req, db_shared))
+    router.any("/notes", req => http.json(405, ErrorResponse(error: "method not allowed")))
+    router.any("/notes/:id", req => http.json(405, ErrorResponse(error: "method not allowed")))
+    router.any("*path", req => http.json(404, ErrorResponse(error: "not found")))
+
+    try http.serve(router, port: port_int)
+  }
+}
+
+fn init_db(conn: db.Connection) throws {
+  try conn.execute(
+    "create table if not exists notes (id integer primary key, title text not null, body text not null, tag text)",
+    []
+  )
+}
+
+fn create_note(req: http.Request, db_shared: Shared<db.Connection>) throws -> http.Response {
+  let body_text = req.text()
+  let input = try json.decode<CreateNoteRequest>(body_text) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  if input.title.is_empty() or input.title.length > 200 {
+    return http.json(400, ErrorResponse(error: "invalid field: title"))
+  }
+
+  with conn = db_shared.lock() {
+    let new_id = try conn.insert(
+      "insert into notes (title, body, tag) values (?, ?, ?)",
+      [input.title, input.body, input.tag]
+    )
+
+    let note = Note(id: new_id, title: input.title, body: input.body, tag: input.tag)
+    return http.json(201, note)
+  }
+}
+
+fn get_notes(req: http.Request, db_shared: Shared<db.Connection>) throws -> http.Response {
+  let q = req.query("q") ?? ""
+  let decoded_q = try url.decode(q)
+
+  with conn = db_shared.read() {
+    let notes = if decoded_q.is_empty() {
+      try conn.query<Note>(
+        "select id, title, body, tag from notes order by id asc",
+        []
+      )
+    } else {
+      let pattern = "%${decoded_q}%"
+      try conn.query<Note>(
+        "select id, title, body, tag from notes where title like ? or body like ? order by id asc",
+        [pattern, pattern]
+      )
+    }
+
+    return http.json(200, NotesResponse(notes: notes))
+  }
+}
+
+fn get_note(req: http.Request, db_shared: Shared<db.Connection>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  with conn = db_shared.read() {
+    let notes = try conn.query<Note>(
+      "select id, title, body, tag from notes where id = ?",
+      [id]
+    )
+
+    if notes.length == 0 {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+
+    return http.json(200, notes[0])
+  }
+}
+
+fn update_note(req: http.Request, db_shared: Shared<db.Connection>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let body_text = req.text()
+  let input = try json.decode<UpdateNoteRequest>(body_text) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  with conn = db_shared.lock() {
+    let notes = try conn.query<Note>(
+      "select id, title, body, tag from notes where id = ?",
+      [id]
+    )
+
+    if notes.length == 0 {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+
+    let note = notes[0]
+
+    let new_title = input.title ?? note.title
+    let new_body = input.body ?? note.body
+    let new_tag = if input.tag is some(_) { input.tag } else { note.tag }
+
+    if new_title.is_empty() or new_title.length > 200 {
+      return http.json(400, ErrorResponse(error: "invalid field: title"))
+    }
+
+    try conn.execute(
+      "update notes set title = ?, body = ?, tag = ? where id = ?",
+      [new_title, new_body, new_tag, id]
+    )
+
+    let updated_note = Note(id: id, title: new_title, body: new_body, tag: new_tag)
+    return http.json(200, updated_note)
+  }
+}
+
+fn delete_note(req: http.Request, db_shared: Shared<db.Connection>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  with conn = db_shared.lock() {
+    let notes = try conn.query<Note>(
+      "select id, title, body, tag from notes where id = ?",
+      [id]
+    )
+
+    if notes.length == 0 {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+
+    try conn.execute(
+      "delete from notes where id = ?",
+      [id]
+    )
+
+    return http.text(204, "")
+  }
+}

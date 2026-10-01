@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ties by word",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "default top 10",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode lowercase",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "min-length counts code points",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "apostrophes",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "digits separate",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "top 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid utf-8 separates",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "several files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --top",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='flag needs an argument: -top\\nusage: app [--top N] [--min-length L] [FILE...]\\n'"
+  },
+  {
+   "name": "usage error --top x",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='invalid value \"x\" for flag -top: parse error\\nusage: app [--top N] [--min-length L] [FILE...]\\n'"
+  },
+  {
+   "name": "usage error --top -1",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-length 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --bogus",
+   "ok": false,
+   "detail": "exit=64 timed_out=False stdout='' stderr='flag provided but not defined: -bogus\\nusage: app [--top N] [--min-length L] [FILE...]\\n'"
+  },
+  {
+   "name": "large input",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='total 0 unique 0\\n' stderr=''"
+  }
+ ]
+}

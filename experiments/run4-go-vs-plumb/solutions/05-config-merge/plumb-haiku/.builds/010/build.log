@@ -1,0 +1,7 @@
+error: `to_string` takes 0 argument(s), but 1 were given
+  --> main.plumb:283:19
+    |
+283 |         let hex = code.to_string(16)
+    |                   ^^^^^^^^^^^^^^^^^^
+    = help: parameters: ()
+1 error(s)

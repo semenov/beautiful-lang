@@ -1,0 +1,437 @@
+import db
+import env
+import process
+import time
+
+type Todo {
+  id: Int
+  title: String
+  done: Bool
+  due_date: String?  // "YYYY-MM-DD" or none
+}
+
+type TodoTag {
+  todo_id: Int
+  tag: String
+}
+
+fn main() throws {
+  let args = process.args()
+
+  // Get TODO_DB environment variable
+  let todo_db = env.get("TODO_DB") ?? ""
+  if todo_db.is_empty() {
+    eprint("error: TODO_DB is not set")
+    process.exit(2)
+  }
+
+  // Open database and initialize schema
+  with conn = try db.open(todo_db) {
+    try conn.execute(
+      "create table if not exists todos (id integer primary key, title text not null, done boolean not null, due_date text)",
+      []
+    )
+    try conn.execute(
+      "create table if not exists tags (todo_id integer, tag text, primary key (todo_id, tag))",
+      []
+    )
+
+    // Parse and handle commands
+    if args.is_empty() {
+      print_usage()
+    } else {
+      let cmd = args[0]
+      match cmd {
+        "add" => try handle_add(conn, args.drop(1))
+        "list" => try handle_list(conn, args.drop(1))
+        "done" => try handle_done(conn, args.drop(1))
+        "rm" => try handle_rm(conn, args.drop(1))
+        "search" => try handle_search(conn, args.drop(1))
+        _ => {
+          eprint("usage: app [add|list|done|rm|search] ...")
+          process.exit(64)
+        }
+      }
+    }
+  }
+}
+
+fn print_usage() -> Never {
+  eprint("usage: app [add|list|done|rm|search] ...")
+  process.exit(64)
+}
+
+type AddOptions {
+  title: String
+  due: String? = none
+  tag: List<String> = []
+}
+
+fn handle_add(conn: db.Connection, args: List<String>) throws {
+  // Parse title and options - title can be in any position
+  var title: String? = none
+  var due_date: String? = none
+  var tags: Set<String> = Set()
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--due" {
+      i += 1
+      if i >= args.length {
+        eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+        process.exit(64)
+      }
+      due_date = args[i]
+      i += 1
+    } else if arg == "--tag" {
+      i += 1
+      if i >= args.length {
+        eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+        process.exit(64)
+      }
+      let tag_val = args[i]
+      if not is_valid_tag(tag_val) {
+        eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+        process.exit(64)
+      }
+      tags.insert(tag_val)
+      i += 1
+    } else if arg.starts_with("--") {
+      eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+      process.exit(64)
+    } else {
+      if title is none {
+        title = arg
+      } else {
+        eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+        process.exit(64)
+      }
+      i += 1
+    }
+  }
+
+  // Validate title
+  if title is none or title.is_empty() {
+    eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+    process.exit(64)
+  }
+
+  let title_str = title ?? ""
+  if title_str.contains("\n") or title_str.contains("\r") {
+    eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+    process.exit(64)
+  }
+
+  // Validate due date if provided
+  if due_date is some(d) {
+    let _ = try time.parse_date(d) catch err {
+      eprint("usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...")
+      process.exit(64)
+    }
+  }
+
+  // Insert todo
+  let id = try conn.insert(
+    "insert into todos (title, done, due_date) values (?, ?, ?)",
+    [title_str, false, due_date ?? ""]
+  )
+
+  // Insert tags
+  for tag in tags {
+    try conn.execute(
+      "insert into tags (todo_id, tag) values (?, ?)",
+      [id, tag]
+    )
+  }
+
+  print("added ${id}")
+}
+
+fn is_valid_tag(tag: String) -> Bool {
+  if tag.is_empty() {
+    return false
+  }
+  for c in tag {
+    let char = "${c}"
+    if not (char.matches("[A-Za-z0-9_-]")) {
+      return false
+    }
+  }
+  return true
+}
+
+type ListOptions {
+  tag: String? = none
+  overdue: Bool = false
+  today: String? = none
+}
+
+fn handle_list(conn: db.Connection, args: List<String>) throws {
+  var tag_filter: String? = none
+  var overdue = false
+  var today_date: String? = none
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--tag" {
+      i += 1
+      if i >= args.length {
+        eprint("usage: app list [--tag TAG] [--overdue --today YYYY-MM-DD]")
+        process.exit(64)
+      }
+      tag_filter = args[i]
+      i += 1
+    } else if arg == "--overdue" {
+      overdue = true
+      i += 1
+    } else if arg == "--today" {
+      i += 1
+      if i >= args.length {
+        eprint("usage: app list [--tag TAG] [--overdue --today YYYY-MM-DD]")
+        process.exit(64)
+      }
+      today_date = args[i]
+      i += 1
+    } else {
+      eprint("usage: app list [--tag TAG] [--overdue --today YYYY-MM-DD]")
+      process.exit(64)
+    }
+  }
+
+  // Validate overdue and today together
+  if (overdue and today_date is none) or (not overdue and today_date is some(_)) {
+    eprint("usage: app list [--tag TAG] [--overdue --today YYYY-MM-DD]")
+    process.exit(64)
+  }
+
+  // Validate today date if provided
+  if today_date is some(d) {
+    let _ = try time.parse_date(d) catch err {
+      eprint("usage: app list [--tag TAG] [--overdue --today YYYY-MM-DD]")
+      process.exit(64)
+    }
+  }
+
+  // Get todos
+  var todos: List<Todo> = try conn.query("select id, title, done, due_date from todos order by id", [])
+
+  // Filter by tag if needed
+  if tag_filter is some(t) {
+    var filtered: List<Todo> = []
+    for todo in todos {
+      let tag_rows: List<TodoTag> = try conn.query(
+        "select todo_id, tag from tags where todo_id = ? and tag = ?",
+        [todo.id, t]
+      )
+      if not tag_rows.is_empty() {
+        filtered.append(todo)
+      }
+    }
+    todos = filtered
+  }
+
+  // Filter by overdue if needed
+  if overdue and today_date is some(d) {
+    var filtered: List<Todo> = []
+    for todo in todos {
+      if not todo.done and todo.due_date is some(due) {
+        if due < d {
+          filtered.append(todo)
+        }
+      }
+    }
+    todos = filtered
+  }
+
+  // Print todos
+  for todo in todos {
+    let done_str = if todo.done { "x" } else { " " }
+    var line = "${todo.id} [${done_str}] ${todo.title}"
+
+    // Add due date if present
+    if todo.due_date is some(due) and not due.is_empty() {
+      line = "${line} (due ${due})"
+    }
+
+    // Add tags if present
+    let tag_rows: List<TodoTag> = try conn.query(
+      "select todo_id, tag from tags where todo_id = ? order by tag",
+      [todo.id]
+    )
+    for tag_row in tag_rows {
+      line = "${line} #${tag_row.tag}"
+    }
+
+    print(line)
+  }
+}
+
+type DoneOptions {
+  id: Int
+}
+
+fn handle_done(conn: db.Connection, args: List<String>) throws {
+  var id_str: String? = none
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg.starts_with("--") {
+      eprint("usage: app done ID")
+      process.exit(64)
+    } else {
+      if id_str is none {
+        id_str = arg
+      } else {
+        eprint("usage: app done ID")
+        process.exit(64)
+      }
+      i += 1
+    }
+  }
+
+  if id_str is none {
+    eprint("usage: app done ID")
+    process.exit(64)
+  }
+
+  let id = try id_str.to_int() catch err {
+    eprint("usage: app done ID")
+    process.exit(64)
+  }
+
+  if id < 1 {
+    eprint("usage: app done ID")
+    process.exit(64)
+  }
+
+  // Check if todo exists
+  let todos: List<Todo> = try conn.query("select id, title, done, due_date from todos where id = ?", [id])
+  if todos.is_empty() {
+    eprint("error: no such todo: ${id}")
+    process.exit(3)
+  }
+
+  // Mark as done
+  try conn.execute("update todos set done = true where id = ?", [id])
+  print("done ${id}")
+}
+
+type RmOptions {
+  id: Int
+}
+
+fn handle_rm(conn: db.Connection, args: List<String>) throws {
+  var id_str: String? = none
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg.starts_with("--") {
+      eprint("usage: app rm ID")
+      process.exit(64)
+    } else {
+      if id_str is none {
+        id_str = arg
+      } else {
+        eprint("usage: app rm ID")
+        process.exit(64)
+      }
+      i += 1
+    }
+  }
+
+  if id_str is none {
+    eprint("usage: app rm ID")
+    process.exit(64)
+  }
+
+  let id = try id_str.to_int() catch err {
+    eprint("usage: app rm ID")
+    process.exit(64)
+  }
+
+  if id < 1 {
+    eprint("usage: app rm ID")
+    process.exit(64)
+  }
+
+  // Check if todo exists
+  let todos: List<Todo> = try conn.query("select id, title, done, due_date from todos where id = ?", [id])
+  if todos.is_empty() {
+    eprint("error: no such todo: ${id}")
+    process.exit(3)
+  }
+
+  // Delete tags first, then todo
+  try conn.execute("delete from tags where todo_id = ?", [id])
+  try conn.execute("delete from todos where id = ?", [id])
+  print("removed ${id}")
+}
+
+type SearchOptions {
+  text: String
+}
+
+fn handle_search(conn: db.Connection, args: List<String>) throws {
+  var search_text: String? = none
+
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg.starts_with("--") {
+      eprint("usage: app search TEXT")
+      process.exit(64)
+    } else {
+      if search_text is none {
+        search_text = arg
+      } else {
+        eprint("usage: app search TEXT")
+        process.exit(64)
+      }
+      i += 1
+    }
+  }
+
+  if search_text is none or search_text.is_empty() {
+    eprint("usage: app search TEXT")
+    process.exit(64)
+  }
+
+  let text = search_text ?? ""
+
+  // Get all todos
+  let all_todos: List<Todo> = try conn.query("select id, title, done, due_date from todos order by id", [])
+
+  // Filter by search text
+  var todos: List<Todo> = []
+  for todo in all_todos {
+    if todo.title.contains(text) {
+      todos.append(todo)
+    }
+  }
+
+  // Print todos
+  for todo in todos {
+    let done_str = if todo.done { "x" } else { " " }
+    var line = "${todo.id} [${done_str}] ${todo.title}"
+
+    // Add due date if present
+    if todo.due_date is some(due) and not due.is_empty() {
+      line = "${line} (due ${due})"
+    }
+
+    // Add tags if present
+    let tag_rows: List<TodoTag> = try conn.query(
+      "select todo_id, tag from tags where todo_id = ? order by tag",
+      [todo.id]
+    )
+    for tag_row in tag_rows {
+      line = "${line} #${tag_row.tag}"
+    }
+
+    print(line)
+  }
+}

@@ -1,0 +1,120 @@
+error: `String` has no method `as_bytes`
+  --> main.plumb:70:21
+   |
+70 |     let code = char.as_bytes()[0]
+   |                     ^^^^^^^^
+error: `String` has no method `to_lower`
+  --> main.plumb:122:33
+    |
+122 |   let username_lower = username.to_lower()
+    |                                 ^^^^^^^^
+    = help: did you mean `is_lower`?
+error: `String` has no method `to_lower`
+  --> main.plumb:166:33
+    |
+166 |   let username_lower = username.to_lower()
+    |                                 ^^^^^^^^
+    = help: did you mean `is_lower`?
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:196:14
+    |
+196 |   let auth = auth_header ?? ""
+    |              ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `slice` takes 2 argument(s), but 1 were given
+  --> main.plumb:202:15
+    |
+202 |   let token = auth.slice(start: prefix.length)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: (from, to)
+error: there is no parameter `start`
+  --> main.plumb:202:26
+    |
+202 |   let token = auth.slice(start: prefix.length)
+    |                          ^^^^^^^^^^^^^^^^^^^^
+    = help: the parameter here is `from`
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:237:14
+    |
+237 |   let auth = auth_header ?? ""
+    |              ^^^^^^^^^^^
+    = help: remove `?? ...`
+error: `slice` takes 2 argument(s), but 1 were given
+  --> main.plumb:243:15
+    |
+243 |   let token = auth.slice(start: prefix.length)
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: parameters: (from, to)
+error: there is no parameter `start`
+  --> main.plumb:243:26
+    |
+243 |   let token = auth.slice(start: prefix.length)
+    |                          ^^^^^^^^^^^^^^^^^^^^
+    = help: the parameter here is `from`
+error: `handle_register` has 3 or more parameters: name every argument after the first
+  --> main.plumb:272:60
+    |
+272 |   router.post("/register", req => try handle_register(req, conn, config))
+    |                                                            ^^^^
+    = help: write (…, conn: …, config: …)
+error: `handle_login` has 3 or more parameters: name every argument after the first
+  --> main.plumb:273:54
+    |
+273 |   router.post("/login", req => try handle_login(req, conn, config))
+    |                                                      ^^^^
+    = help: write (…, conn: …, config: …)
+error: `handle_me` has 3 or more parameters: name every argument after the first
+  --> main.plumb:274:47
+    |
+274 |   router.get("/me", req => try handle_me(req, conn, config))
+    |                                               ^^^^
+    = help: write (…, conn: …, config: …)
+error: `handle_logout` has 3 or more parameters: name every argument after the first
+  --> main.plumb:275:56
+    |
+275 |   router.post("/logout", req => try handle_logout(req, conn, config))
+    |                                                        ^^^^
+    = help: write (…, conn: …, config: …)
+error: nothing here can fail
+  --> main.plumb:285:18
+    |
+285 |   let port_str = try env.get("PORT") catch err { "8080" }
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: this value may be missing
+  --> main.plumb:286:27
+    |
+286 |   let port = try port_str.to_int()
+    |                           ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.to_int(...) }`, or use `??`
+error: nothing here can fail
+  --> main.plumb:288:17
+    |
+288 |   let db_path = try env.get("DB_PATH") catch err { "app.db" }
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: nothing here can fail
+  --> main.plumb:290:17
+    |
+290 |   let ttl_str = try env.get("SESSION_TTL_SECONDS") catch err { "3600" }
+    |                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: remove `try`
+error: this value may be missing
+  --> main.plumb:291:41
+    |
+291 |   let session_ttl_seconds = try ttl_str.to_int()
+    |                                         ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.to_int(...) }`, or use `??`
+error: expected `String`, found `String?`
+  --> main.plumb:293:44
+    |
+293 |   let config = Config(port: port, db_path: db_path, session_ttl_seconds: session_ttl_seconds)
+    |                                            ^^^^^^^
+    = help: the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`
+error: expected `String`, found `String?`
+  --> main.plumb:295:27
+    |
+295 |   with conn = try db.open(db_path) {
+    |                           ^^^^^^^
+    = help: the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`
+20 error(s)

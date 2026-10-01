@@ -1,0 +1,19 @@
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:278:45
+    |
+278 |       if not todo.done and todo.due_date is some(due) and not due.is_empty() {
+    |                                             ^^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `due`
+  --> main.plumb:278:63
+    |
+278 |       if not todo.done and todo.due_date is some(due) and not due.is_empty() {
+    |                                                               ^^^
+    = help: did you mean `d`?
+error: unknown name `due`
+  --> main.plumb:279:12
+    |
+279 |         if due < d {
+    |            ^^^
+    = help: did you mean `d`?
+3 error(s)

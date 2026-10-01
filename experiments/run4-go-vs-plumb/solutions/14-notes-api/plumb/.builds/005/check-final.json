@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "create returns 201 and the note",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "get returns the stored note; defaults applied",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown and malformed ids are 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "validation errors on create",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid JSON is 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "title length counts code points (200 ok, 201 rejected)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode, quotes and SQL-like text stored verbatim",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "patch is partial",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "patch tag null clears it; title/body null rejected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "delete then get is 404, second delete is 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ids are never reused after delete",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "list returns all notes ordered by id",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search is a literal, case-sensitive substring of title or body",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search: plus is a space, empty q lists all",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "405 for wrong method, 404 for unknown path",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel creates all get distinct ids",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "data survives a restart",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

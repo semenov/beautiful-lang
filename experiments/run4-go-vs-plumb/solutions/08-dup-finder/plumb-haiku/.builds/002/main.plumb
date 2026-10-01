@@ -1,0 +1,175 @@
+import files
+import path
+import crypto
+import io
+
+type Options {
+  min_size: Int = 1
+  args: List<String> = []
+}
+
+type FileEntry {
+  rel_path: String
+  full_path: String
+  size: Int
+}
+
+type DuplicateGroup {
+  hash: String
+  size: Int
+  paths: List<String>
+}
+
+fn main() throws {
+  let opts = try cli.decode<Options>()
+
+  // Validate arguments
+  if opts.args.length != 1 {
+    eprint("usage: app [--min-size BYTES] DIR")
+    process.exit(64)
+  }
+
+  let dir = opts.args[0]
+
+  // Validate min-size is non-negative
+  if opts.min_size < 0 {
+    eprint("usage: app [--min-size BYTES] DIR")
+    process.exit(64)
+  }
+
+  // Check if directory exists and is a directory
+  if not files.exists(dir) or not files.is_dir(dir) {
+    eprint("error: not a directory: ${dir}")
+    process.exit(2)
+  }
+
+  // Walk directory and collect files
+  let all_files = try files.walk(dir) catch err {
+    eprint("error: not a directory: ${dir}")
+    process.exit(2)
+  }
+
+  var entries: List<FileEntry> = []
+  var errors: List<String> = []
+
+  for full_path in all_files {
+    // Get relative path for output
+    let rel_path = if full_path.starts_with(dir) {
+      let suffix = full_path.slice(dir.length, full_path.length)
+      if suffix.starts_with("/") {
+        suffix.slice(1, suffix.length)
+      } else {
+        suffix
+      }
+    } else {
+      full_path
+    }
+
+    // Get file info to check if it's a regular file
+    let info = try files.info(full_path) catch err {
+      errors.append(rel_path)
+      continue
+    }
+
+    if not info.is_dir and info.size >= opts.min_size {
+      entries.append(FileEntry(
+        rel_path: rel_path,
+        full_path: full_path,
+        size: info.size
+      ))
+    }
+  }
+
+  // Group files by size
+  var by_size: Map<Int, List<FileEntry>> = {}
+  for entry in entries {
+    if by_size[entry.size] is none {
+      by_size[entry.size] = []
+    }
+    by_size[entry.size].append(entry)
+  }
+
+  // Calculate hashes for files with duplicates
+  var groups: List<DuplicateGroup> = []
+
+  for size_entry in by_size {
+    let size = size_entry.key
+    let entries_of_size = size_entry.value
+
+    // Skip if no duplicates possible
+    if entries_of_size.length < 2 {
+      continue
+    }
+
+    // Calculate hash for each file
+    var by_hash: Map<String, List<String>> = {}
+
+    for entry in entries_of_size {
+      let hash = try calculate_hash(entry.full_path) catch err {
+        errors.append(entry.rel_path)
+      } else {
+        if by_hash[hash] is none {
+          by_hash[hash] = []
+        }
+        by_hash[hash].append(entry.rel_path)
+      }
+    }
+
+    // Add groups with 2+ files
+    for hash_entry in by_hash {
+      let hash = hash_entry.key
+      let paths = hash_entry.value
+
+      if paths.length >= 2 {
+        groups.append(DuplicateGroup(
+          hash: hash,
+          size: size,
+          paths: paths.sorted()
+        ))
+      }
+    }
+  }
+
+  // Sort groups: by size (largest first), then by hash (ascending)
+  groups = groups.sorted_by(g => [-g.size, g.hash])
+
+  // Output groups
+  for group in groups {
+    print("sha256:${group.hash} size ${group.size}")
+    for p in group.paths {
+      print("  ${p}")
+    }
+    print("")
+  }
+
+  // Calculate summary
+  let total_groups = groups.length
+  var total_files = 0
+  var total_wasted = 0
+
+  for group in groups {
+    total_files += group.paths.length
+    total_wasted += group.size * (group.paths.length - 1)
+  }
+
+  print("groups ${total_groups} files ${total_files} wasted ${total_wasted}")
+
+  // Exit with appropriate code
+  if errors.length > 0 {
+    process.exit(1)
+  }
+}
+
+fn calculate_hash(file_path: String) throws -> String {
+  with f = try files.open(file_path) {
+    let mut data: Bytes = Bytes()
+    while true {
+      let chunk = try f.read(max: 65536)
+      if chunk.is_empty() {
+        break
+      }
+      data = data.concat(chunk)
+    }
+    return crypto.sha256(data).hex()
+  }
+}

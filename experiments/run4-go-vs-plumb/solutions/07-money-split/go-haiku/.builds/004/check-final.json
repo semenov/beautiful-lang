@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "leftover cents to first listed; ties by name",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "uneven shares with leftover",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "largest amounts are exact",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "greedy: largest debtor to largest creditor, partial transfers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "everyone settled: zero balances, no transfers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode and case-sensitive names, sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "comments, blank lines, tabs, CRLF",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid amounts rejected with line number",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid splits and fields rejected with line number",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "only the first bad line is reported",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "reads FILE",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error a.txt b.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --verbose",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

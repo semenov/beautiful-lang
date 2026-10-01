@@ -1,0 +1,209 @@
+import crypto
+import files
+import path
+import process
+
+// Files up to this size are hashed in-process; bigger ones by a hashing tool
+// that reads them in a streaming way.
+let in_process_limit = 8_388_608
+
+let usage_text = "usage: app [--min-size BYTES] DIR"
+
+type Options {
+  min_size: Int
+  dir: String
+}
+
+type Group {
+  size: Int
+  hex: String
+  paths: List<String>
+}
+
+type Hasher {
+  program: String
+  args: List<String>
+}
+
+fn usage() -> Never {
+  eprint(usage_text)
+  process.exit(64)
+}
+
+fn all_digits(text: String) -> Bool {
+  if text.is_empty() {
+    return false
+  }
+  for b in text.bytes().to_list() {
+    if b < 48 or b > 57 {
+      return false
+    }
+  }
+  return true
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var min_size = 1
+  var dir: String? = none
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--min-size" {
+      if i + 1 >= args.length {
+        usage()
+      }
+      let value = args[i + 1]
+      if not all_digits(value) {
+        usage()
+      }
+      // digits only, so a failure means "bigger than any file"
+      min_size = try value.to_int() catch err { 9_223_372_036_854_775_807 }
+      i += 2
+    } else if arg.starts_with("-") and arg.length > 1 {
+      usage()
+    } else {
+      if dir is some(_) {
+        usage()
+      }
+      dir = arg
+      i += 1
+    }
+  }
+  if dir is some(d) {
+    return Options(min_size: min_size, dir: d)
+  }
+  usage()
+}
+
+// The names under `dir` ("./a/b" form) that `find` reports for a type.
+fn find_names(dir: String, kind: String) -> List<String> {
+  let out = try process.run_command(process.Command(
+    program: "find",
+    args: ["-H", ".", "-type", kind, "-print0"],
+    dir: dir,
+  )) catch err { return [] }
+  var names: List<String> = []
+  for part in out.stdout.split("\u{0}") {
+    if part.starts_with("./") {
+      names.append(part.slice(2, part.length))
+    }
+  }
+  return names
+}
+
+fn find_hasher() -> Hasher? {
+  if process.find("sha256sum") is some(p) {
+    return Hasher(program: p, args: [])
+  }
+  if process.find("shasum") is some(p) {
+    return Hasher(program: p, args: ["-a", "256"])
+  }
+  return none
+}
+
+// Hex SHA-256 of a file, or none when it can't be read.
+fn hash_file(dir: String, rel: String, size: Int, hasher: Hasher?) -> String? {
+  if size > in_process_limit and hasher is some(h) {
+    let out = try process.run_command(process.Command(
+      program: h.program,
+      args: h.args.concat(["./${rel}"]),
+      dir: dir,
+    )) catch err { return none }
+    if out.status != 0 or out.stdout.length < 64 {
+      return none
+    }
+    return out.stdout.slice(0, 64).lower()
+  }
+  let data = try files.read_bytes(path.join(dir, rel)) catch err { return none }
+  return crypto.sha256(data).hex()
+}
+
+// Whether the file can be opened for reading.
+fn readable(full: String) throws -> Bool {
+  with f = try files.open(full) catch err { return false } {
+    return true
+  }
+}
+
+fn main() throws {
+  let opts = parse_args(process.args())
+  let dir = opts.dir
+  if not files.is_dir(dir) {
+    eprint("error: not a directory: ${dir}")
+    process.exit(2)
+  }
+
+  var failed = false
+  var by_size: Map<Int, List<String>> = {}
+
+  // directories we can't list
+  var unreadable: Set<String> = {}
+  for d in find_names(dir, "d") {
+    let _ = try files.list(path.join(dir, d)) catch err {
+      eprint("error: cannot read ${d}")
+      failed = true
+      unreadable.add(d)
+      []
+    }
+  }
+  let _ = unreadable
+
+  for rel in find_names(dir, "f").sorted() {
+    let full = path.join(dir, rel)
+    let info = try files.info(full) catch err {
+      eprint("error: cannot read ${rel}")
+      failed = true
+      continue
+    }
+    if info.size < opts.min_size {
+      continue
+    }
+    by_size[info.size] = (by_size[info.size] ?? []).concat([rel])
+  }
+
+  let hasher = find_hasher()
+  var groups: List<Group> = []
+  for entry in by_size {
+    let size = entry.key
+    if entry.value.length < 2 {
+      // nothing to compare with, but an unreadable file is still reported
+      let ok = try readable(path.join(dir, entry.value[0])) catch err { false }
+      if not ok {
+        eprint("error: cannot read ${entry.value[0]}")
+        failed = true
+      }
+      continue
+    }
+    var by_hash: Map<String, List<String>> = {}
+    for rel in entry.value {
+      if hash_file(dir, rel: rel, size: size, hasher: hasher) is some(hex) {
+        by_hash[hex] = (by_hash[hex] ?? []).concat([rel])
+      } else {
+        eprint("error: cannot read ${rel}")
+        failed = true
+      }
+    }
+    for h in by_hash {
+      if h.value.length >= 2 {
+        groups.append(Group(size: size, hex: h.key, paths: h.value.sorted()))
+      }
+    }
+  }
+
+  let ordered = groups.sorted_by(g => g.hex).sorted_by(g => 0 - g.size)
+  var file_count = 0
+  var wasted = 0
+  for g in ordered {
+    print("sha256:${g.hex} size ${g.size}")
+    for p in g.paths {
+      print("  ${p}")
+    }
+    print("")
+    file_count += g.paths.length
+    wasted += g.size * (g.paths.length - 1)
+  }
+  print("groups ${ordered.length} files ${file_count} wasted ${wasted}")
+  if failed {
+    process.exit(1)
+  }
+}

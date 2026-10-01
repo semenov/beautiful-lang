@@ -1,0 +1,5 @@
+error: expected `=`, found end of line
+  --> main.plumb:33:27
+   |
+33 |       let opt_name: String
+   |                           ^

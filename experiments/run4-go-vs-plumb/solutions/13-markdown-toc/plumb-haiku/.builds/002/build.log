@@ -1,0 +1,25 @@
+error: `some(x)` is only a pattern
+  --> main.plumb:185:12
+    |
+185 |     return some(FenceInfo(char: first_char, count: count))
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: `some(x)` is only a pattern
+  --> main.plumb:222:12
+    |
+222 |     return some(HeadingInfo(level: hash_count, text: ""))
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: `some(x)` is only a pattern
+  --> main.plumb:234:10
+    |
+234 |   return some(HeadingInfo(level: hash_count, text: final_text))
+    |          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: a plain value is already accepted where `T?` is expected: write `x`
+error: a range can only be used in `for`
+  --> main.plumb:245:13
+    |
+245 |   for i in (0..<trimmed.length).reversed() {
+    |             ^^^^^^^^^^^^^^^^^^
+    = help: write `for i in 0..<n { ... }`
+4 error(s)

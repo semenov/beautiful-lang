@@ -1,0 +1,85 @@
+error: `time` is imported but not used
+  --> main.plumb:4:8
+  |
+4 | import time
+  |        ^^^^
+  = help: remove the import
+error: `handle_metrics` has 3 or more parameters: name every argument after the first
+  --> main.plumb:63:58
+   |
+63 |   router.post("/metrics", req => try handle_metrics(req, state, window_ms))
+   |                                                          ^^^^^
+   = help: write (…, state: …, window_ms: …)
+error: `handle_aggregate` has 3 or more parameters: name every argument after the first
+  --> main.plumb:64:61
+   |
+64 |   router.get("/aggregate", req => try handle_aggregate(req, state, window_ms))
+   |                                                             ^^^^^
+   = help: write (…, state: …, window_ms: …)
+error: `serve` takes 2 argument(s), but 3 were given
+  --> main.plumb:67:7
+   |
+67 |   try http.serve(router, host: "127.0.0.1", port: port)
+   |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   = help: parameters: (router, port)
+error: there is no parameter `host`
+  --> main.plumb:67:26
+   |
+67 |   try http.serve(router, host: "127.0.0.1", port: port)
+   |                          ^^^^^^^^^^^^^^^^^
+   = help: the parameter here is `port`
+error: expected `Int`, found `String`
+  --> main.plumb:67:32
+   |
+67 |   try http.serve(router, host: "127.0.0.1", port: port)
+   |                                ^^^^^^^^^^^
+   = help: parse it: `try text.to_int()`
+error: `process_sample` has 3 or more parameters: name every argument after the first
+  --> main.plumb:82:45
+   |
+82 |     let result = try process_sample(sample, state, window_ms)
+   |                                             ^^^^^
+   = help: write (…, state: …, window_ms: …)
+error: this value may be missing
+  --> main.plumb:133:43
+    |
+133 |     s.samples[sample.name] = samples_list.filter(x => x.ts > cutoff)
+    |                                           ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.filter(...) }`, or use `??`
+error: the type isn't known here yet
+  --> main.plumb:133:57
+    |
+133 |     s.samples[sample.name] = samples_list.filter(x => x.ts > cutoff)
+    |                                                         ^^
+    = help: add a type annotation
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:147:18
+    |
+147 |   let name_str = name ?? ""
+    |                  ^^^^
+    = help: remove `?? ...`
+error: this value may be missing
+  --> main.plumb:163:33
+    |
+163 |     let filtered = samples_list.filter(x => x.ts > cutoff)
+    |                                 ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.filter(...) }`, or use `??`
+error: the type isn't known here yet
+  --> main.plumb:163:47
+    |
+163 |     let filtered = samples_list.filter(x => x.ts > cutoff)
+    |                                               ^^
+    = help: add a type annotation
+error: `s` is already declared
+  --> main.plumb:191:38
+    |
+191 |     let sorted_values = filtered.map(s => s.value).sorted()
+    |                                      ^
+    = help: names can't be redeclared (no shadowing): pick another name, or use `var` and assign
+error: the type isn't known here yet
+  --> main.plumb:191:45
+    |
+191 |     let sorted_values = filtered.map(s => s.value).sorted()
+    |                                             ^^^^^
+    = help: add a type annotation
+14 error(s)

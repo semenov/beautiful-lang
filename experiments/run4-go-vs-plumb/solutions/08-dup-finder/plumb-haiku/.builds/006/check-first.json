@@ -1,0 +1,124 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "trailing slash on DIR",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no duplicates",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "group order and path order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "three files in a group",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty files ignored by default",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "min-size 0 includes empty files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "min-size filters smaller files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "symlinks skipped and not followed",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='sha256:9eb6203435cb3e0033f544e3bf6f1b74b138c765fc489a38a092e8f7adbd9638 size 3\\n  link-to-file\\n  real/a\\n  real/b\\n\\ngroups 1 files 3 wasted 6\\n' stderr=''"
+  },
+  {
+   "name": "hidden files included",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode names sorted by bytes",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "same size, different content",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unreadable file reported, others still grouped",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: not a directory: t11\\n'"
+  },
+  {
+   "name": "unreadable directory reported",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='error: not a directory: t11\\n'"
+  },
+  {
+   "name": "large files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "many files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing DIR",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "DIR is a file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error t14 t14",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-size -1 t14",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --min-size x t14",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: the option --min-size: expected a whole number, found \"x\"\\n'"
+  },
+  {
+   "name": "usage error --bogus t14",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: unknown option --bogus (see --help)\\n'"
+  },
+  {
+   "name": "usage error t14 --min-size",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: a value is missing after --min-size (see --help)\\n'"
+  }
+ ]
+}

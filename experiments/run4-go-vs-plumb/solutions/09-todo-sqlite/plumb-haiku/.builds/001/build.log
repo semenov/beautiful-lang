@@ -1,0 +1,5 @@
+error: expected a pattern, found `not`
+  --> main.plumb:204:54
+    |
+204 |   if (overdue and today_date is none) or (overdue is not true and today_date is some(_)) {
+    |                                                      ^^^

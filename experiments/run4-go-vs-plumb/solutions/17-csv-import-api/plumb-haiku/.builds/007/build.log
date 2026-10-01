@@ -1,0 +1,37 @@
+error: `json` is imported but not used
+  --> main.plumb:2:8
+  |
+2 | import json
+  |        ^^^^
+  = help: remove the import
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:172:35
+    |
+172 |   let email_idx = if email_col is some(v) { v } else { 0 }
+    |                                   ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:172:45
+    |
+172 |   let email_idx = if email_col is some(v) { v } else { 0 }
+    |                                             ^
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:173:33
+    |
+173 |   let name_idx = if name_col is some(v) { v } else { 0 }
+    |                                 ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:173:43
+    |
+173 |   let name_idx = if name_col is some(v) { v } else { 0 }
+    |                                           ^
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:174:31
+    |
+174 |   let age_idx = if age_col is some(v) { v } else { 0 }
+    |                               ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:174:41
+    |
+174 |   let age_idx = if age_col is some(v) { v } else { 0 }
+    |                                         ^
+7 error(s)

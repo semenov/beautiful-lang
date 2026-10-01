@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "leftover cents to first listed; ties by name",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "uneven shares with leftover",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='balances:\\n  q -0.01\\n  r +0.00\\n  s +0.00\\n  x -3.34\\n  y -6.66\\n  z +10.01\\ntransfers:\\n  y -> z 6.66\\n  x -> z 3.34\\n  q -> z 0.01\\n' stderr=''"
+  },
+  {
+   "name": "largest amounts are exact",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "greedy: largest debtor to largest creditor, partial transfers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "everyone settled: zero balances, no transfers",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='balances:\\n  a +0.00\\n  b +0.00\\n  solo +0.00\\ntransfers:\\n' stderr=''"
+  },
+  {
+   "name": "unicode and case-sensitive names, sorted by code point",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "comments, blank lines, tabs, CRLF",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid amounts rejected with line number",
+   "ok": false,
+   "detail": "[('1.234', exit=0 timed_out=False stdout='balances:\\n  a +1.11\\n  b -1.11\\ntransfers:\\n  b -> a 1.11\\n' stderr=''), ('.5', exit=0 timed_out=False stdout='balances:\\n  a +0.75\\n  b -0.75\\ntransfers:\\n  b -> a 0.75\\n' stderr=''), ('5.', exit=0 timed_out=False stdout='balances:\\n  a +3.00\\n  b -3.00\\ntransfers:\\n  b -> a 3.00\\n' stderr=''), ('+3', exit=0 timed_out=False stdout='balances:\\n  a +2.00\\n  b -2.00\\ntransfers:\\n  b -> a 2.00\\n' stderr='')]"
+  },
+  {
+   "name": "invalid splits and fields rejected with line number",
+   "ok": false,
+   "detail": "[('a 1 b c', exit=0 timed_out=False stdout='balances:\\n  a +1.00\\n  b -1.00\\n  ok +0.00\\ntransfers:\\n  b -> a 1.00\\n' stderr='')]"
+  },
+  {
+   "name": "only the first bad line is reported",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "reads FILE",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error a.txt b.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --verbose",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

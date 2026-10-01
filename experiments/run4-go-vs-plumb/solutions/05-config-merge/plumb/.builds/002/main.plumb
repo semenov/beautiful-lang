@@ -1,0 +1,477 @@
+import files
+import json
+import env
+import process
+
+// Config-merge: layered JSON files + APP_ environment overrides, validated
+// and printed with sorted keys.
+//
+// The standard json.parse refuses a key written twice in one object; the spec
+// only asks for RFC 8259 (which allows it, the last one wins), so this file
+// has its own small parser over code points.
+
+type Parser {
+  cps: List<Int>
+  pos: Int = 0
+
+  // the code point at the position, or -1 at the end
+  fn peek(self) -> Int {
+    if self.pos < self.cps.length {
+      return self.cps[self.pos]
+    }
+    return -1
+  }
+
+  mutating fn skip_space() {
+    while self.pos < self.cps.length {
+      let c = self.cps[self.pos]
+      if c == 32 or c == 9 or c == 10 or c == 13 {
+        self.pos += 1
+      } else {
+        return
+      }
+    }
+  }
+
+  // consumes the word if it is next
+  mutating fn word(text: String) -> Bool {
+    let cs = text.code_points()
+    if self.pos + cs.length > self.cps.length {
+      return false
+    }
+    for i in 0..<cs.length {
+      if self.cps[self.pos + i] != cs[i] {
+        return false
+      }
+    }
+    self.pos += cs.length
+    return true
+  }
+
+  mutating fn digits() -> Int {
+    var n = 0
+    while self.peek() >= 48 and self.peek() <= 57 {
+      self.pos += 1
+      n += 1
+    }
+    return n
+  }
+
+  mutating fn number() throws -> json.Value {
+    let start = self.pos
+    if self.peek() == 45 {
+      self.pos += 1
+    }
+    if self.peek() == 48 {
+      self.pos += 1
+    } else if self.peek() >= 49 and self.peek() <= 57 {
+      let _ = self.digits()
+    } else {
+      throw Failure(message: "bad number")
+    }
+    if self.peek() == 46 {
+      self.pos += 1
+      if self.digits() == 0 {
+        throw Failure(message: "bad fraction")
+      }
+    }
+    if self.peek() == 101 or self.peek() == 69 {
+      self.pos += 1
+      if self.peek() == 43 or self.peek() == 45 {
+        self.pos += 1
+      }
+      if self.digits() == 0 {
+        throw Failure(message: "bad exponent")
+      }
+    }
+    let text = slice_text_of(self.cps, from: start, to: self.pos)
+    return json.Value.Number(value: json.Number(text: text))
+  }
+
+  mutating fn hex4() throws -> Int {
+    if self.pos + 4 > self.cps.length {
+      throw Failure(message: "bad escape")
+    }
+    var n = 0
+    for i in 0..<4 {
+      let c = self.cps[self.pos + i]
+      var d = -1
+      if c >= 48 and c <= 57 {
+        d = c - 48
+      } else if c >= 97 and c <= 102 {
+        d = c - 87
+      } else if c >= 65 and c <= 70 {
+        d = c - 55
+      }
+      if d < 0 {
+        throw Failure(message: "bad escape")
+      }
+      n = n * 16 + d
+    }
+    self.pos += 4
+    return n
+  }
+
+  // after the opening quote; consumes the closing one
+  mutating fn string() throws -> String {
+    var out: List<String> = []
+    while true {
+      if self.pos >= self.cps.length {
+        throw Failure(message: "unterminated string")
+      }
+      let c = self.cps[self.pos]
+      self.pos += 1
+      if c == 34 {
+        return out.join("")
+      }
+      if c < 32 {
+        throw Failure(message: "control character")
+      }
+      if c != 92 {
+        out.append(c.character())
+        continue
+      }
+      if self.pos >= self.cps.length {
+        throw Failure(message: "unterminated string")
+      }
+      let e = self.cps[self.pos]
+      self.pos += 1
+      if e == 34 {
+        out.append("\"")
+      } else if e == 92 {
+        out.append("\\")
+      } else if e == 47 {
+        out.append("/")
+      } else if e == 98 {
+        out.append(8.character())
+      } else if e == 102 {
+        out.append(12.character())
+      } else if e == 110 {
+        out.append(10.character())
+      } else if e == 114 {
+        out.append(13.character())
+      } else if e == 116 {
+        out.append(9.character())
+      } else if e == 117 {
+        let u = try self.hex4()
+        if u >= 0xD800 and u <= 0xDBFF and self.peek() == 92 and self.pos + 1 < self.cps.length and self.cps[self.pos + 1] == 117 {
+          let save = self.pos
+          self.pos += 2
+          let lo = try self.hex4()
+          if lo >= 0xDC00 and lo <= 0xDFFF {
+            out.append((0x10000 + (u - 0xD800) * 1024 + (lo - 0xDC00)).character())
+          } else {
+            // a lone high surrogate; the next escape is read again
+            out.append(0xFFFD.character())
+            self.pos = save
+          }
+        } else {
+          out.append(u.character())
+        }
+      } else {
+        throw Failure(message: "bad escape")
+      }
+    }
+    return ""
+  }
+
+  mutating fn value(depth: Int) throws -> json.Value {
+    if depth > 5000 {
+      throw Failure(message: "too deep")
+    }
+    self.skip_space()
+    let c = self.peek()
+    if c == 123 {
+      self.pos += 1
+      var fields: Map<String, json.Value> = {}
+      self.skip_space()
+      if self.peek() == 125 {
+        self.pos += 1
+        return json.Value.Object(fields: fields)
+      }
+      while true {
+        self.skip_space()
+        if self.peek() != 34 {
+          throw Failure(message: "expected key")
+        }
+        self.pos += 1
+        let key = try self.string()
+        self.skip_space()
+        if self.peek() != 58 {
+          throw Failure(message: "expected colon")
+        }
+        self.pos += 1
+        let v = try self.value(depth + 1)
+        fields[key] = v
+        self.skip_space()
+        let d = self.peek()
+        self.pos += 1
+        if d == 125 {
+          return json.Value.Object(fields: fields)
+        }
+        if d != 44 {
+          throw Failure(message: "expected comma")
+        }
+      }
+    }
+    if c == 91 {
+      self.pos += 1
+      var items: List<json.Value> = []
+      self.skip_space()
+      if self.peek() == 93 {
+        self.pos += 1
+        return json.Value.Array(items: items)
+      }
+      while true {
+        let v = try self.value(depth + 1)
+        items.append(v)
+        self.skip_space()
+        let d = self.peek()
+        self.pos += 1
+        if d == 93 {
+          return json.Value.Array(items: items)
+        }
+        if d != 44 {
+          throw Failure(message: "expected comma")
+        }
+      }
+    }
+    if c == 34 {
+      self.pos += 1
+      return json.Value.String(value: try self.string())
+    }
+    if c == 45 or (c >= 48 and c <= 57) {
+      return try self.number()
+    }
+    if self.word("true") {
+      return json.Value.Bool(value: true)
+    }
+    if self.word("false") {
+      return json.Value.Bool(value: false)
+    }
+    if self.word("null") {
+      return json.Value.Null
+    }
+    throw Failure(message: "unexpected input")
+  }
+}
+
+fn slice_text_of(cps: List<Int>, from: Int, to: Int) -> String {
+  var parts: List<String> = []
+  for i in from..<to {
+    parts.append(cps[i].character())
+  }
+  return parts.join("")
+}
+
+// A whole text as one JSON value; fails on anything else around it.
+fn parse_all(text: String) throws -> json.Value {
+  var p = Parser(cps: text.code_points())
+  let v = try p.value(0)
+  p.skip_space()
+  if p.pos != p.cps.length {
+    throw Failure(message: "trailing input")
+  }
+  return v
+}
+
+fn merge(a: Map<String, json.Value>, b: Map<String, json.Value>) -> Map<String, json.Value> {
+  var out = a
+  for e in b {
+    var merged = false
+    if e.value is json.Value.Object(bf) {
+      if out[e.key] is some(json.Value.Object(af)) {
+        out[e.key] = json.Value.Object(fields: merge(af, b: bf))
+        merged = true
+      }
+    }
+    if not merged {
+      out[e.key] = e.value
+    }
+  }
+  return out
+}
+
+fn set_path(m: Map<String, json.Value>, path: List<String>, at: Int, value: json.Value) -> Map<String, json.Value> {
+  var out = m
+  let key = path[at]
+  if at == path.length - 1 {
+    out[key] = value
+    return out
+  }
+  var child: Map<String, json.Value> = {}
+  if out[key] is some(json.Value.Object(f)) {
+    child = f
+  }
+  out[key] = json.Value.Object(fields: set_path(child, path: path, at: at + 1, value: value))
+  return out
+}
+
+fn ascii_lower(s: String) -> String {
+  var parts: List<String> = []
+  for c in s.code_points() {
+    if c >= 65 and c <= 90 {
+      parts.append((c + 32).character())
+    } else {
+      parts.append(c.character())
+    }
+  }
+  return parts.join("")
+}
+
+fn apply_env(config: Map<String, json.Value>, vars: Map<String, String>) -> Map<String, json.Value> {
+  var out = config
+  for name in vars.keys().sorted() {
+    if not name.starts_with("APP_") {
+      continue
+    }
+    let rest = name.slice(4, to: name.length)
+    let path = rest.split("__").map(k => ascii_lower(k))
+    if path.any(k => k.is_empty()) {
+      continue
+    }
+    let text = vars[name] ?? ""
+    let value = try parse_all(text) catch _ {
+      json.Value.String(value: text)
+    }
+    out = set_path(out, path: path, at: 0, value: value)
+  }
+  return out
+}
+
+fn lookup(config: Map<String, json.Value>, path: List<String>) -> json.Value? {
+  var cur = config
+  for i in 0..<path.length {
+    let v = cur[path[i]] ?? json.Value.Null
+    if i == path.length - 1 {
+      return v
+    }
+    if v is json.Value.Object(f) {
+      cur = f
+    } else {
+      return none
+    }
+  }
+  return none
+}
+
+fn valid_text(v: json.Value?) -> Bool {
+  if v is some(json.Value.String(s)) {
+    return not s.is_empty()
+  }
+  return false
+}
+
+fn valid_port(v: json.Value?) -> Bool {
+  if v is some(json.Value.Number(n)) {
+    if not n.text.is_digit() or n.text.length > 5 {
+      return false
+    }
+    let port = try n.to_int() catch _ {
+      0
+    }
+    return port >= 1 and port <= 65535
+  }
+  return false
+}
+
+fn invalid_keys(config: Map<String, json.Value>) -> List<String> {
+  var bad: List<String> = []
+  if not valid_text(lookup(config, path: ["service", "name"])) {
+    bad.append("service.name")
+  }
+  if not valid_text(lookup(config, path: ["db", "host"])) {
+    bad.append("db.host")
+  }
+  if not valid_port(lookup(config, path: ["db", "port"])) {
+    bad.append("db.port")
+  }
+  return bad
+}
+
+fn hexdigit(n: Int) -> String {
+  return "0123456789abcdef".slice(n, to: n + 1)
+}
+
+fn quote(s: String) -> String {
+  var parts: List<String> = ["\""]
+  for c in s.code_points() {
+    if c == 34 {
+      parts.append("\\\"")
+    } else if c == 92 {
+      parts.append("\\\\")
+    } else if c == 8 {
+      parts.append("\\b")
+    } else if c == 9 {
+      parts.append("\\t")
+    } else if c == 10 {
+      parts.append("\\n")
+    } else if c == 12 {
+      parts.append("\\f")
+    } else if c == 13 {
+      parts.append("\\r")
+    } else if c < 32 {
+      parts.append("\\u00${hexdigit(c.div(16))}${hexdigit(c % 16)}")
+    } else {
+      parts.append(c.character())
+    }
+  }
+  parts.append("\"")
+  return parts.join("")
+}
+
+fn render(v: json.Value, level: Int) -> String {
+  let inner = "  ".repeat(level + 1)
+  let outer = "  ".repeat(level)
+  return match v {
+    json.Value.Null => "null"
+    json.Value.Bool(b) => if b { "true" } else { "false" }
+    json.Value.Number(n) => n.text
+    json.Value.String(s) => quote(s)
+    json.Value.Array(items) => if items.is_empty() {
+      "[]"
+    } else {
+      "[\n${items.map(i => "${inner}${render(i, level: level + 1)}").join(",\n")}\n${outer}]"
+    }
+    json.Value.Object(fields) => if fields.is_empty() {
+      "{}"
+    } else {
+      "{\n${fields.keys().sorted().map(k => "${inner}${quote(k)}: ${render(fields[k] ?? json.Value.Null, level: level + 1)}").join(",\n")}\n${outer}}"
+    }
+  }
+}
+
+fn fail(code: Int, message: String) -> Never {
+  eprint(message)
+  process.exit(code)
+}
+
+fn main() {
+  let args = process.args()
+  if args.is_empty() or args.any(a => a.starts_with("-")) {
+    fail(64, "usage: app FILE...")
+  }
+  var config: Map<String, json.Value> = {}
+  for file in args {
+    let text = try files.read(file) catch _ {
+      fail(2, "error: cannot read ${file}")
+    }
+    let parsed = try parse_all(text) catch _ {
+      fail(2, "error: invalid JSON in ${file}")
+    }
+    if parsed is json.Value.Object(fields) {
+      config = merge(config, b: fields)
+    } else {
+      fail(2, "error: ${file} is not an object")
+    }
+  }
+  config = apply_env(config, vars: env.all())
+  let bad = invalid_keys(config)
+  if not bad.is_empty() {
+    for k in bad {
+      eprint("error: invalid ${k}")
+    }
+    process.exit(1)
+  }
+  print(render(json.Value.Object(fields: config), level: 0))
+}

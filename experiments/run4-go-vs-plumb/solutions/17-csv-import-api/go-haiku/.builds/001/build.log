@@ -1,0 +1,5 @@
+# app
+./main.go:13:2: "sort" imported and not used
+./main.go:193:7: declared and not used: prevRow
+./main.go:350:6: declared and not used: size
+./main.go:363:31: undefined: records

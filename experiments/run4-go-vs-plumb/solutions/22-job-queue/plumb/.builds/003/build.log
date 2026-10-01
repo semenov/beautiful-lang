@@ -1,0 +1,5 @@
+error: expected an expression, found `with`
+  --> main.plumb:248:19
+    |
+248 |     let running = with s = state.read() { count_status(s, status: "running") }
+    |                   ^^^^

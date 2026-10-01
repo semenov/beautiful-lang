@@ -1,0 +1,4 @@
+# app
+./main.go:9:2: "regexp" imported and not used
+./main.go:319:17: undefined: unicode.Category
+./main.go:326:17: undefined: unicode.Category

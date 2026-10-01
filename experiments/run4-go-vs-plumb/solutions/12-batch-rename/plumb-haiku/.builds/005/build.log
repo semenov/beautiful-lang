@@ -1,0 +1,5 @@
+error: expected a name, found `match`
+  --> main.plumb:131:7
+    |
+131 |   let match = re.find(filename) ?? return none
+    |       ^^^^^

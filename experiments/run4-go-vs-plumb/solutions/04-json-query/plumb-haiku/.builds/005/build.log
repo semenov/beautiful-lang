@@ -1,0 +1,102 @@
+error: unknown name `process`
+  --> main.plumb:15:14
+   |
+15 |   let args = process.args()
+   |              ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `pos`
+  --> main.plumb:31:40
+   |
+31 |         let path = clause.substring(0, pos)
+   |                                        ^^^
+error: unknown name `pos`
+  --> main.plumb:32:38
+   |
+32 |         let value = clause.substring(pos + 1, clause.length)
+   |                                      ^^^
+error: `usage` returns `Never`, so it must not finish
+  --> main.plumb:81:32
+   |
+81 | fn usage(msg: String) -> Never {
+   |                                ^
+   = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:83:3
+   |
+83 |   process.exit(64)
+   |   ^^^^^^^
+   = help: add `import process` at the top of the file
+error: `some(...)` can't match a `Value`: it's never missing
+  --> main.plumb:110:13
+    |
+110 |   if val is some(v) {
+    |             ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:111:11
+    |
+111 |     match v {
+    |           ^
+error: unknown name `s`
+  --> main.plumb:113:16
+    |
+113 |         return s == target
+    |                ^
+error: unknown name `n`
+  --> main.plumb:116:16
+    |
+116 |         return n.text == target
+    |                ^
+error: unknown name `b`
+  --> main.plumb:119:19
+    |
+119 |         return if b { "true" } else { "false" } == target
+    |                   ^
+error: `encode_value` must return a `String` at the end
+  --> main.plumb:133:44
+    |
+133 | fn encode_value(val: json.Value) -> String {
+    |                                            ^
+    = help: add `return ...` as the last line
+error: the result (`String`) is not used
+  --> main.plumb:136:34
+    |
+136 |     json.Value.Bool(b) => if b { "true" } else { "false" }
+    |                                  ^^^^^^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+error: can't change `pairs`: it's declared with `let`
+  --> main.plumb:146:9
+    |
+146 |         pairs.append("\"${entry.key}\":${encode_value(entry.value)}")
+    |         ^^^^^
+    = help: declare it with `var pairs = ...`
+error: can't loop over `String` directly
+  --> main.plumb:155:15
+    |
+155 |   for char in s {
+    |               ^
+    = help: use `text.chars()`, `text.words()` or `text.lines()`
+error: there is no `+` on text
+  --> main.plumb:174:5
+    |
+174 |     result += escaped
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:176:3
+    |
+176 |   result += "\""
+    |   ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: fields of `Object` are passed by name
+  --> main.plumb:201:28
+    |
+201 |   return json.Value.Object(result)
+    |                            ^^^^^^
+    = help: write `fields: …`
+error: unknown name `process`
+  --> main.plumb:236:5
+    |
+236 |     process.exit(1)
+    |     ^^^^^^^
+    = help: add `import process` at the top of the file
+18 error(s)

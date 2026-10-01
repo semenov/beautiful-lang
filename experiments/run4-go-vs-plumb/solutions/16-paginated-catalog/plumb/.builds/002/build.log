@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:139:24
+    |
+139 |   return text.to_int() catch err {
+    |                        ^^^^^
+    = help: write `try f(x) catch err { ... }`

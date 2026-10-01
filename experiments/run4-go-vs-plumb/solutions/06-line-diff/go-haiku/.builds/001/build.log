@@ -1,0 +1,2 @@
+# app
+./main.go:244:6: declared and not used: hunkIdx

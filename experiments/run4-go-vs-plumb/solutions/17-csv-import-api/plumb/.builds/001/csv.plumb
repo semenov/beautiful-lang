@@ -1,0 +1,117 @@
+// A strict CSV parser over UTF-8 bytes. Gives the records, or fails.
+
+pub type BadCsv implements Error {
+  fn message(self) -> String {
+    return "invalid csv"
+  }
+}
+
+let quote = 34
+let comma = 44
+let lf = 10
+let cr = 13
+
+fn field_text(b: Bytes) throws -> String {
+  return try b.text() catch err {
+    throw BadCsv()
+  }
+}
+
+pub fn parse(body: Bytes) throws -> List<List<String>> {
+  if body.is_empty() {
+    throw BadCsv()
+  }
+  // the whole body must be UTF-8
+  let _ = try body.text() catch err {
+    throw BadCsv()
+  }
+  let n = body.length
+  var records: List<List<String>> = []
+  var i = 0
+  while i < n {
+    var fields: List<String> = []
+    var done = false
+    while not done {
+      var f = Bytes()
+      if i < n and body[i] == quote {
+        i += 1
+        var closed = false
+        while not closed {
+          if i >= n {
+            throw BadCsv()
+          }
+          let c = body[i]
+          if c == quote {
+            if i + 1 < n and body[i + 1] == quote {
+              f.append(quote)
+              i += 2
+            } else {
+              closed = true
+              i += 1
+            }
+          } else {
+            f.append(c)
+            i += 1
+          }
+        }
+        fields.append(try field_text(f))
+        // after a closing quote: a separator, a line break or the end
+        if i >= n {
+          done = true
+        } else if body[i] == comma {
+          i += 1
+        } else if body[i] == lf {
+          i += 1
+          done = true
+        } else if body[i] == cr and i + 1 < n and body[i + 1] == lf {
+          i += 2
+          done = true
+        } else {
+          throw BadCsv()
+        }
+      } else {
+        var ended = false
+        while not ended {
+          if i >= n {
+            ended = true
+            done = true
+          } else {
+            let c = body[i]
+            if c == comma {
+              i += 1
+              ended = true
+            } else if c == lf {
+              i += 1
+              ended = true
+              done = true
+            } else if c == cr and i + 1 < n and body[i + 1] == lf {
+              i += 2
+              ended = true
+              done = true
+            } else if c == quote {
+              throw BadCsv()
+            } else {
+              f.append(c)
+              i += 1
+            }
+          }
+        }
+        fields.append(try field_text(f))
+      }
+    }
+    records.append(fields)
+  }
+  return records
+}
+
+test "plain and quoted" {
+  let r = try parse("a,b\r\n\"x, \"\"y\"\"\nz\",\n".bytes())
+  expect r == [["a", "b"], ["x, \"y\"\nz", ""]]
+}
+
+test "errors" {
+  expect (parse("a,\"b".bytes()) catch err { [] }) == []
+  expect (parse("a,b\"c".bytes()) catch err { [] }) == []
+  expect (parse("\"a\"b".bytes()) catch err { [] }) == []
+  expect (parse("".bytes()) catch err { [] }) == []
+}

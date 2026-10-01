@@ -1,0 +1,220 @@
+import crypto
+import db
+import encoding
+import env
+import http
+import json
+import random
+import sql
+import time
+
+type UserRow {
+  username: String
+  password_hash: String
+}
+
+type SessionRow {
+  username: String
+}
+
+type Message {
+  error: String
+}
+
+type Named {
+  username: String
+}
+
+type Token {
+  token: String
+}
+
+// What the handlers need: the database, how long a session lives, and a
+// password hash to check against when the user is unknown, so that "no such
+// user" takes as long as "wrong password".
+type Service {
+  conn: db.Connection
+  ttl_seconds: Int
+  dummy_hash: String
+}
+
+fn error_response(status: Int, message: String) -> http.Response {
+  return http.json(status, Message(error: message))
+}
+
+// ASCII letters, digits and `_`.
+fn is_name_char(code: Int) -> Bool {
+  return code == 95 or (code >= 48 and code <= 57) or (code >= 65 and code <= 90) or (code >= 97 and code <= 122)
+}
+
+fn valid_username(name: String) -> Bool {
+  if name.length < 3 or name.length > 32 {
+    return false
+  }
+  for code in name.code_points() {
+    if not is_name_char(code) {
+      return false
+    }
+  }
+  return true
+}
+
+fn valid_password(password: String) -> Bool {
+  return password.length >= 8 and password.length <= 128
+}
+
+// A string field of a JSON object: none if it is missing or not a string.
+fn string_field(fields: Map<String, json.Value>, name: String) -> String? {
+  if fields[name] is some(v) {
+    if v is json.Value.String(s) {
+      return s
+    }
+  }
+  return none
+}
+
+// The body as a JSON object; none if it is anything else.
+fn body_object(req: http.Request) -> Map<String, json.Value>? {
+  let value = try json.parse(req.text()) catch err {
+    return none
+  }
+  if value is json.Value.Object(fields) {
+    return fields
+  }
+  return none
+}
+
+// The database keeps only a hash of the token, so a copy of the file
+// can't be used to log in.
+fn token_hash(token: String) -> String {
+  return crypto.sha256(token.bytes()).hex()
+}
+
+fn register(req: http.Request, svc: Service) throws -> http.Response {
+  if body_object(req) is some(fields) {
+    let username = string_field(fields, name: "username")
+    if username is none or not valid_username(username) {
+      return error_response(400, "invalid username")
+    }
+    let password = string_field(fields, name: "password")
+    if password is none or not valid_password(password) {
+      return error_response(400, "invalid password")
+    }
+    let hash = crypto.hash_password(password)
+    try svc.conn.insert("insert into users (username, username_lower, password_hash) values (?, ?, ?)", [username, username.lower(), hash]) catch err {
+      if err is sql.UniqueViolation {
+        return error_response(409, "username taken")
+      }
+      throw err
+    }
+    return http.json(201, Named(username: username))
+  }
+  return error_response(400, "invalid JSON")
+}
+
+fn login(req: http.Request, svc: Service) throws -> http.Response {
+  if body_object(req) is some(fields) {
+    let username = string_field(fields, name: "username")
+    if username is none {
+      return error_response(400, "invalid username")
+    }
+    let password = string_field(fields, name: "password")
+    if password is none {
+      return error_response(400, "invalid password")
+    }
+    let rows = try svc.conn.query<UserRow>("select username, password_hash from users where username_lower = ?", [username.lower()])
+    if rows.is_empty() {
+      let _ = crypto.verify_password(password, svc.dummy_hash)
+      return error_response(401, "invalid credentials")
+    }
+    if not crypto.verify_password(password, rows[0].password_hash) {
+      return error_response(401, "invalid credentials")
+    }
+    let token = random.token(32)
+    let now = time.unix_millis()
+    let expires = now + svc.ttl_seconds * 1000
+    try svc.conn.execute("delete from sessions where expires_at <= ?", [now])
+    try svc.conn.execute("insert into sessions (token_hash, username_lower, expires_at) values (?, ?, ?)", [token_hash(token), username.lower(), expires])
+    return http.json(200, Token(token: token))
+  }
+  return error_response(400, "invalid JSON")
+}
+
+// The token of an "Authorization: Bearer <token>" header.
+fn bearer_token(req: http.Request) -> String? {
+  if req.header("authorization") is some(value) {
+    if value.starts_with("Bearer ") {
+      let token = value.slice(from: 7, to: value.length)
+      if not token.is_empty() {
+        return token
+      }
+    }
+  }
+  return none
+}
+
+fn me(req: http.Request, svc: Service) throws -> http.Response {
+  if bearer_token(req) is some(token) {
+    let rows = try svc.conn.query<SessionRow>("select u.username as username from sessions s join users u on u.username_lower = s.username_lower where s.token_hash = ? and s.expires_at > ?", [token_hash(token), time.unix_millis()])
+    if not rows.is_empty() {
+      return http.json(200, Named(username: rows[0].username))
+    }
+  }
+  return error_response(401, "unauthorized")
+}
+
+fn logout(req: http.Request, svc: Service) throws -> http.Response {
+  if bearer_token(req) is some(token) {
+    let changed = try svc.conn.execute_counting("delete from sessions where token_hash = ? and expires_at > ?", [token_hash(token), time.unix_millis()])
+    if changed > 0 {
+      return http.Response(status: 204, body: Bytes())
+    }
+  }
+  return error_response(401, "unauthorized")
+}
+
+// Routing is done by hand so that 404 and 405 have the JSON bodies.
+fn route(req: http.Request, svc: Service) throws -> http.Response {
+  let wanted = match req.path {
+    "/register" => "POST"
+    "/login" => "POST"
+    "/me" => "GET"
+    "/logout" => "POST"
+    _ => ""
+  }
+  if wanted.is_empty() {
+    return error_response(404, "not found")
+  }
+  if req.method != wanted {
+    return error_response(405, "method not allowed").with_header("allow", wanted)
+  }
+  return match req.path {
+    "/register" => try register(req, svc)
+    "/login" => try login(req, svc)
+    "/me" => try me(req, svc)
+    _ => try logout(req, svc)
+  }
+}
+
+fn make_router(svc: Service) -> http.Router {
+  var router = http.Router()
+  router.any("/*rest", req => try route(req, svc))
+  router.any("/", req => try route(req, svc))
+  return router
+}
+
+fn setup(conn: db.Connection) throws {
+  try conn.execute("create table if not exists users (id integer primary key, username text not null, username_lower text not null unique, password_hash text not null)", [])
+  try conn.execute("create table if not exists sessions (token_hash text primary key, username_lower text not null, expires_at integer not null)", [])
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int()
+  let path = env.get("DB_PATH") ?? "auth.db"
+  let ttl = try (env.get("SESSION_TTL_SECONDS") ?? "3600").to_int()
+  with conn = try db.open(path) {
+    try setup(conn)
+    let svc = Service(conn: conn, ttl_seconds: ttl, dummy_hash: crypto.hash_password("dummy-password"))
+    try http.serve_with(make_router(svc), options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  }
+}

@@ -1,0 +1,5 @@
+error: expected `=`, found `result`
+  --> main.plumb:54:11
+   |
+54 |   let mut result = ""
+   |           ^^^^^^

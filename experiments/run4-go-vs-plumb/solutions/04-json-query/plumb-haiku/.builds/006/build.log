@@ -1,0 +1,96 @@
+error: `String` has no method `find`
+  --> main.plumb:30:27
+   |
+30 |       let eq_pos = clause.find("=")
+   |                           ^^^^
+error: `String` has no method `substring`
+  --> main.plumb:32:27
+   |
+32 |         let path = clause.substring(0, pos)
+   |                           ^^^^^^^^^
+error: unknown name `pos`
+  --> main.plumb:32:40
+   |
+32 |         let path = clause.substring(0, pos)
+   |                                        ^^^
+error: `String` has no method `substring`
+  --> main.plumb:33:28
+   |
+33 |         let value = clause.substring(pos + 1, clause.length)
+   |                            ^^^^^^^^^
+error: unknown name `pos`
+  --> main.plumb:33:38
+   |
+33 |         let value = clause.substring(pos + 1, clause.length)
+   |                                      ^^^
+error: `some(...)` can't match a `Value`: it's never missing
+  --> main.plumb:115:13
+    |
+115 |   if val is some(v) {
+    |             ^^^^^^^
+error: unknown name `v`
+  --> main.plumb:116:8
+    |
+116 |     if v is json.Value.String(s) {
+    |        ^
+error: unknown name `s`
+  --> main.plumb:117:14
+    |
+117 |       return s == target
+    |              ^
+error: unknown name `v`
+  --> main.plumb:118:15
+    |
+118 |     } else if v is json.Value.Number(n) {
+    |               ^
+error: unknown name `n`
+  --> main.plumb:119:14
+    |
+119 |       return n.text == target
+    |              ^
+error: unknown name `v`
+  --> main.plumb:120:15
+    |
+120 |     } else if v is json.Value.Bool(b) {
+    |               ^
+error: unknown name `b`
+  --> main.plumb:121:17
+    |
+121 |       return if b { "true" } else { "false" } == target
+    |                 ^
+error: unknown name `v`
+  --> main.plumb:122:15
+    |
+122 |     } else if v is json.Value.Null {
+    |               ^
+error: can't change `pairs`: it's declared with `let`
+  --> main.plumb:145:7
+    |
+145 |       pairs.append("\"${entry.key}\":${encode_value(entry.value)}")
+    |       ^^^^^
+    = help: declare it with `var pairs = ...`
+error: can't loop over `String` directly
+  --> main.plumb:155:15
+    |
+155 |   for char in s {
+    |               ^
+    = help: use `text.chars()`, `text.words()` or `text.lines()`
+error: there is no `+` on text
+  --> main.plumb:174:5
+    |
+174 |     result += escaped
+    |     ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:176:3
+    |
+176 |   result += "\""
+    |   ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: fields of `Object` are passed by name
+  --> main.plumb:205:28
+    |
+205 |   return json.Value.Object(result)
+    |                            ^^^^^^
+    = help: write `fields: …`
+18 error(s)

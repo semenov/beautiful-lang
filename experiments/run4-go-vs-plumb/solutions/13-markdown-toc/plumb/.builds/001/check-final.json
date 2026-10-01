@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all levels by default",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "level range; slugs count headings outside it",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "lines that are not headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "closing hashes and empty headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "fenced code blocks",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unclosed fence runs to the end",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "four-space indented fence is not a fence",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "slug punctuation and spacing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode slugs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "duplicate slugs numbered",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CRLF line endings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "last line without newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "20000 duplicate headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

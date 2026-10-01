@@ -1,0 +1,6 @@
+# This is a comment
+alice 50 alice,bob
+
+# Another comment
+bob 30 bob,carol
+

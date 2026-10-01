@@ -1,0 +1,18 @@
+#!/usr/bin/env python3
+"""prompt <task> <lang>: the writer prompt (WRITER_PROMPT.md filled in)."""
+import sys
+from pathlib import Path
+E = Path(__file__).resolve().parent.parent
+task, lang = sys.argv[1], sys.argv[2]
+b = "go" if lang.startswith("go") else "plumb"
+files = {
+    "go": "Use `package main`; the entry point is `main.go` (more files are fine). `go.mod` is ready. You may use the standard library and `github.com/mattn/go-sqlite3` (already required in go.mod and available offline). When you run `go test` or `go run` yourself, set `GOPROXY=off GOFLAGS=-mod=mod`.",
+    "plumb": "The entry point is `main.plumb` (more files are fine). Use the standard library only.",
+}[b]
+docs = {
+    "go": "",
+    "plumb": "\nPlumb is a new language that you haven't seen before. Its compiler is\n`/Users/semenov/Dev/plumb/compiler/target/release/plumb`. Read the guide\n`/Users/semenov/Dev/plumb/AGENTS.md` first; look up the library with\n`plumb doc <module>` / `plumb doc --search <word>` (also in\n`/Users/semenov/Dev/plumb/STDLIB.md`). You may run `plumb check` and\n`plumb test` yourself; build the program only through `bin/build`.\n",
+}[b]
+t = (E / "WRITER_PROMPT.md").read_text()
+print(t.replace("{LANG_NAME}", {"go": "Go", "plumb": "Plumb"}[b]).replace("{E}", str(E))
+      .replace("{TASK}", task).replace("{LANG}", lang).replace("{LANG_FILES}", files).replace("{LANG_DOCS}", docs))

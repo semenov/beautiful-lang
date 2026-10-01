@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "database file created at TODO_DB",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "ids never reused",
+   "ok": false,
+   "detail": "step ['add', 'd']: expected exit=0 stdout='added 4\\n'; got exit=0 timed_out=False stdout='added 3\\n' stderr=''"
+  },
+  {
+   "name": "tags sorted, deduplicated, filtered exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "overdue: open, due strictly before today",
+   "ok": false,
+   "detail": "step ['list', '--today', '2026-02-01', '--overdue']: expected exit=0 stdout='1 [ ] past (due 2026-01-31)\\n6 [ ] long ago (due 1999-12-31) #x\\n'; got exit=0 timed_out=False stdout='1 [ ] past (due 2026-01-31)\\n4 [ ] nodue\\n6 [ ] long ago (due 1999-12-31) #x\\n' stderr=''"
+  },
+  {
+   "name": "SQL-like title stored verbatim",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search: % and _ are literal",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "search is case-sensitive substring",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "quotes, backslashes and unicode",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "done is idempotent",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown ids exit 3",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "leap day accepted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid dates rejected, nothing stored",
+   "ok": false,
+   "detail": "([exit=0 timed_out=False stdout='added 1\\n' stderr='', exit=0 timed_out=False stdout='added 2\\n' stderr='', exit=64 timed_out=False stdout='' stderr='usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...\\n', exit=64 timed_out=False stdout='' stderr='usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...\\n', exit=0 timed_out=False stdout='added 3\\n' stderr='', exit=64 timed_out=False stdout='' stderr='usage: app add TITLE [--due YYYY-MM-DD] [--tag TAG]...\\n', exit=0 timed_out=False stdout='1 [ ] x (due 2025-02-30)\\n2 [ ] x (due 2023-02-29)\\n' stderr=''], exit=0 timed_out=False stdout='1 [ ] x (due 2025-02-30)\\n2 [ ] x (due 2023-02-29)\\n3 [ ] x (due 2026-04-31)\\n' stderr='')"
+  },
+  {
+   "name": "TODO_DB empty",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "150 todos",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+error: there are no tuples
+  --> main.plumb:235:11
+    |
+235 |   match (a, b) {
+    |           ^
+    = help: use a record with named fields

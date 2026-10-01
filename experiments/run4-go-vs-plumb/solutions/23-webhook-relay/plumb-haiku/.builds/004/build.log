@@ -1,0 +1,12 @@
+error: `Set<String>` has no method `insert`
+  --> main.plumb:105:24
+    |
+105 |       s.active_sources.insert(source)
+    |                        ^^^^^^
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:202:14
+    |
+202 |     let id = event_id ?? 0
+    |              ^^^^^^^^
+    = help: remove `?? ...`
+2 error(s)

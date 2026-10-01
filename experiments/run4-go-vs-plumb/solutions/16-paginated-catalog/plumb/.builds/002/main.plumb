@@ -1,0 +1,286 @@
+import env
+import encoding
+import http
+import json
+
+// One product, as in the catalog file and in the responses.
+type Product {
+  id: String
+  name: String
+  category: String
+  price_cents: Int
+  in_stock: Bool
+}
+
+type ErrorBody {
+  error: String
+}
+
+type Page {
+  items: List<Product>
+  next_cursor: String?
+}
+
+// What a cursor holds: the filters it was made for (`scope`) and the sort
+// position of the last item of the page (`key`, then `id`).
+type Cursor {
+  scope: String
+  key: String
+  id: String
+}
+
+type Filter {
+  category: String?
+  min_price: Int?
+  max_price: Int?
+  in_stock: Bool?
+  sort: String
+  limit: Int
+  cursor: Cursor?
+}
+
+// Every product in each of the four sort orders, and by id.
+type Catalog {
+  by_id: Map<String, Product>
+  orders: Map<String, List<Product>>
+}
+
+let int_max = 9223372036854775807
+
+fn fail(message: String) -> Never {
+  eprint("error: ${message}")
+  process.exit(1)
+}
+
+fn valid_id(id: String) -> Bool {
+  if id.is_empty() {
+    return false
+  }
+  for c in id.chars() {
+    let ok = (c >= "a" and c <= "z") or (c >= "A" and c <= "Z") or (c >= "0" and c <= "9") or c == "-" or c == "_"
+    if not ok {
+      return false
+    }
+  }
+  return true
+}
+
+fn pad(n: Int) -> String {
+  let s = "${n}"
+  return "0".repeat(20 - s.length) + s
+}
+
+// The first part of a product's sort position; the id is the second.
+fn sort_key(p: Product, sort: String) -> String {
+  return match sort {
+    "price_asc" => pad(p.price_cents)
+    "price_desc" => pad(int_max - p.price_cents)
+    "name" => p.name
+    _ => ""
+  }
+}
+
+fn position(p: Product, sort: String) -> List<String> {
+  return [sort_key(p, sort), p.id]
+}
+
+fn load_catalog(path: String) throws -> Catalog {
+  let text = try files.read(path) catch err {
+    fail("can't read ${path}: ${err.message()}")
+  }
+  let products = try json.decode<List<Product>>(text) catch err {
+    fail("invalid catalog: ${err.message()}")
+  }
+  var by_id: Map<String, Product> = {}
+  for p in products {
+    if not valid_id(p.id) {
+      fail("invalid product id: ${p.id}")
+    }
+    if p.price_cents < 0 {
+      fail("negative price for ${p.id}")
+    }
+    if by_id[p.id] is some(_) {
+      fail("duplicate id: ${p.id}")
+    }
+    by_id[p.id] = p
+  }
+  var orders: Map<String, List<Product>> = {}
+  for sort in ["id", "price_asc", "price_desc", "name"] {
+    orders[sort] = products.sorted_by(p => position(p, sort))
+  }
+  return Catalog(by_id: by_id, orders: orders)
+}
+
+fn is_digits(s: String) -> Bool {
+  if s.is_empty() {
+    return false
+  }
+  for c in s.chars() {
+    if c < "0" or c > "9" {
+      return false
+    }
+  }
+  return true
+}
+
+type BadParam implements Error {
+  name: String
+
+  fn message(self) -> String {
+    return "invalid parameter: ${self.name}"
+  }
+}
+
+// A whole number >= 0 written with digits only; too big for an Int becomes the biggest.
+fn parse_amount(text: String, name: String) throws -> Int {
+  if not is_digits(text) {
+    throw BadParam(name: name)
+  }
+  return text.to_int() catch err {
+    int_max
+  }
+}
+
+fn scope_of(f: Filter) -> String {
+  let c = f.category ?? ""
+  let has_c = if f.category is some(_) { "1" } else { "0" }
+  let lo = if f.min_price is some(n) { "${n}" } else { "-" }
+  let hi = if f.max_price is some(n) { "${n}" } else { "-" }
+  let st = if f.in_stock is some(b) { "${b}" } else { "-" }
+  return "${has_c}|${lo}|${hi}|${st}|${f.sort}|${c}"
+}
+
+fn parse_filter(req: http.Request) throws -> Filter {
+  let category = req.query("category")
+  var min_price: Int? = none
+  if req.query("min_price") is some(t) {
+    min_price = try parse_amount(t, name: "min_price")
+  }
+  var max_price: Int? = none
+  if req.query("max_price") is some(t) {
+    max_price = try parse_amount(t, name: "max_price")
+  }
+  if min_price is some(lo) and max_price is some(hi) and lo > hi {
+    throw BadParam(name: "max_price")
+  }
+  var in_stock: Bool? = none
+  if req.query("in_stock") is some(t) {
+    in_stock = match t {
+      "true" => true
+      "false" => false
+      _ => throw BadParam(name: "in_stock")
+    }
+  }
+  let sort = req.query("sort") ?? "id"
+  if not (sort == "id" or sort == "price_asc" or sort == "price_desc" or sort == "name") {
+    throw BadParam(name: "sort")
+  }
+  var limit = 20
+  if req.query("limit") is some(t) {
+    limit = try parse_amount(t, name: "limit")
+    if limit < 1 or limit > 100 {
+      throw BadParam(name: "limit")
+    }
+  }
+  var f = Filter(category: category, min_price: min_price, max_price: max_price, in_stock: in_stock, sort: sort, limit: limit, cursor: none)
+  if req.query("cursor") is some(t) {
+    let bad = BadParam(name: "cursor")
+    let raw = try encoding.from_base64(t) catch err {
+      throw bad
+    }
+    let c = try json.decode<Cursor>(try raw.text() catch err { throw bad }) catch err {
+      throw bad
+    }
+    if c.scope != scope_of(f) {
+      throw bad
+    }
+    f.cursor = c
+  }
+  return f
+}
+
+fn matches(p: Product, f: Filter) -> Bool {
+  if f.category is some(c) and p.category != c {
+    return false
+  }
+  if f.min_price is some(lo) and p.price_cents < lo {
+    return false
+  }
+  if f.max_price is some(hi) and p.price_cents > hi {
+    return false
+  }
+  if f.in_stock is some(b) and p.in_stock != b {
+    return false
+  }
+  return true
+}
+
+fn error_response(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+fn list_products(req: http.Request, catalog: Catalog) throws -> http.Response {
+  let f = try parse_filter(req) catch err {
+    return error_response(400, err.message())
+  }
+  let ordered = catalog.orders[f.sort] ?? []
+  var items: List<Product> = []
+  var more = false
+  for p in ordered {
+    if f.cursor is some(c) {
+      if not (position(p, f.sort) > [c.key, c.id]) {
+        continue
+      }
+    }
+    if not matches(p, f) {
+      continue
+    }
+    if items.length == f.limit {
+      more = true
+      break
+    }
+    items.append(p)
+  }
+  var next: String? = none
+  if more and items.last() is some(last) {
+    let c = Cursor(scope: scope_of(f), key: sort_key(last, f.sort), id: last.id)
+    next = encoding.base64_url(json.encode(c).bytes())
+  }
+  return http.json(200, Page(items: items, next_cursor: next))
+}
+
+fn get_product(req: http.Request, catalog: Catalog) -> http.Response {
+  let id = req.param("id") ?? ""
+  if catalog.by_id[id] is some(p) {
+    return http.json(200, p)
+  }
+  return error_response(404, "not found")
+}
+
+fn make_router(catalog: Catalog) -> http.Router {
+  var router = http.Router()
+  router.any("/products", req => {
+    if req.method != "GET" {
+      error_response(405, "method not allowed")
+    } else {
+      try list_products(req, catalog)
+    }
+  })
+  router.any("/products/:id", req => {
+    if req.method != "GET" {
+      error_response(405, "method not allowed")
+    } else {
+      get_product(req, catalog)
+    }
+  })
+  router.any("/*rest", req => error_response(404, "not found"))
+  return router
+}
+
+fn main() throws {
+  let path = env.get("CATALOG_PATH") ?? fail("CATALOG_PATH is not set")
+  let port = (try (env.get("PORT") ?? "").to_int() catch err { fail("PORT is not a number") })
+  let catalog = try load_catalog(path)
+  var router = make_router(catalog)
+  try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}

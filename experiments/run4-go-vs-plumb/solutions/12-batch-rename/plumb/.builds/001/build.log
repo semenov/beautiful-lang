@@ -1,0 +1,61 @@
+error: there is no `+` on text
+  --> main.plumb:141:9
+    |
+141 |         lit += "{"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:147:11
+    |
+147 |           digits += cs[j]
+    |           ^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:168:9
+    |
+168 |         lit += "}"
+    |         ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:174:7
+    |
+174 |       lit += c
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:196:7
+    |
+196 |       out += group_text(groups, n)
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: there is no `+` on text
+  --> main.plumb:198:7
+    |
+198 |       out += p.text
+    |       ^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+error: `??` needs a value that may be missing, but this is a `List<Piece>`
+  --> main.plumb:279:14
+    |
+279 |     pieces = parsed ?? []
+    |              ^^^^^^
+    = help: remove `?? ...`
+error: this changes `hashes`, but `hashes` is never read: the change is lost
+  --> main.plumb:292:9
+    |
+292 |         hashes += 1
+    |         ^^^^^^
+    = help: if `hashes` is a copy of a value in a list or map, change it there (`list[i].field = ...`, `m[key].field = ...`); if nothing needs it, remove it
+error: `??` needs a value that may be missing, but this is a `List<String?>`
+  --> main.plumb:333:33
+    |
+333 |       new_name = render(pieces, groups ?? [])
+    |                                 ^^^^^^
+    = help: remove `?? ...`
+error: there is no `+` on text
+  --> main.plumb:343:18
+    |
+343 |       new_name = cs.take(run_start).join("") + num.pad_start(width, fill: "0") + cs.drop(run_end).join("")
+    |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: use interpolation: `"${a}${b}"`, or `parts.join("")`
+10 error(s)

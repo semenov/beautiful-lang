@@ -1,0 +1,238 @@
+import files
+import io
+import process
+
+let usage_text = "usage: app [--min-count N] [FILE...]"
+
+// One valid log line, reduced to what the statistics need.
+type Request {
+  endpoint: String
+  status: Int
+  latency: Int
+}
+
+// Everything collected for one endpoint.
+type Endpoint {
+  name: String
+  count: Int
+  errors: Int
+  latencies: List<Int>
+}
+
+fn all_chars(text: String, test: fn(Int) -> Bool) -> Bool {
+  return not text.is_empty() and text.code_points().all(test)
+}
+
+fn is_digits(text: String) -> Bool {
+  return all_chars(text, c => c >= 48 and c <= 57)
+}
+
+// The value of a non-empty string of ASCII digits; leading zeros are fine.
+fn digits_value(text: String) -> Int {
+  return text.code_points().fold(0, (acc, c) => acc * 10 + (c - 48))
+}
+
+fn is_method(text: String) -> Bool {
+  return all_chars(text, c => c >= 65 and c <= 90)
+}
+
+fn is_protocol(text: String) -> Bool {
+  if not text.starts_with("HTTP/") {
+    return false
+  }
+  return all_chars(text.slice(from: 5, to: text.length), c => c == 46 or (c >= 48 and c <= 57))
+}
+
+// CLIENT IDENT USER [TIME] "METHOD TARGET PROTOCOL" STATUS BYTES LATENCY
+fn parse_line(line: String) -> Request? {
+  let words = line.split(" ")
+  if words.length < 10 {
+    return none
+  }
+  for i in 0..<3 {
+    if words[i].is_empty() {
+      return none
+    }
+  }
+  let rest = words.drop(3).join(" ")
+  if not rest.starts_with("[") {
+    return none
+  }
+  // TIME runs to the first `]`
+  if rest.index_of("]") is none {
+    return none
+  }
+  let close = rest.index_of("]") ?? 0
+  let after_time = rest.slice(from: close + 1, to: rest.length)
+  if not after_time.starts_with(" \"") {
+    return none
+  }
+  let quoted = after_time.slice(from: 2, to: after_time.length)
+  // METHOD, TARGET and PROTOCOL hold no `"`: the first one ends the request
+  if quoted.index_of("\"") is none {
+    return none
+  }
+  let quote_end = quoted.index_of("\"") ?? 0
+  let request = quoted.slice(from: 0, to: quote_end).split(" ")
+  if request.length != 3 {
+    return none
+  }
+  let method = request[0]
+  let target = request[1]
+  if not is_method(method) or target.is_empty() or not is_protocol(request[2]) {
+    return none
+  }
+  let tail = quoted.slice(from: quote_end + 1, to: quoted.length)
+  if not tail.starts_with(" ") {
+    return none
+  }
+  let fields = tail.slice(from: 1, to: tail.length).split(" ")
+  if fields.length != 3 {
+    return none
+  }
+  let status_text = fields[0]
+  let bytes_text = fields[1]
+  let latency_text = fields[2]
+  if status_text.length != 3 or not is_digits(status_text) {
+    return none
+  }
+  let status = digits_value(status_text)
+  if status < 100 or status > 599 {
+    return none
+  }
+  if bytes_text != "-" and not is_digits(bytes_text) {
+    return none
+  }
+  if not is_digits(latency_text) {
+    return none
+  }
+  var shown = target
+  if target.index_of("?") is some(q) {
+    shown = target.slice(from: 0, to: q)
+  }
+  return Request(endpoint: "${method} ${shown}", status: status, latency: digits_value(latency_text))
+}
+
+// 100 * errors / count rounded half up to 0.01, as "12.34%".
+fn error_rate(errors: Int, count: Int) -> String {
+  let hundredths = (20000 * errors + count).div(2 * count)
+  let cents = hundredths % 100
+  return "${hundredths.div(100)}.${cents.to_string().pad_start(2, fill: "0")}%"
+}
+
+// Nearest-rank percentile of an ascending list.
+fn percentile(sorted: List<Int>, p: Int) -> Int {
+  let rank = (p * sorted.length + 99).div(100)
+  return sorted[rank - 1]
+}
+
+fn usage_error(message: String) -> Never {
+  eprint("usage: ${message}")
+  eprint(usage_text)
+  process.exit(64)
+}
+
+type Options {
+  min_count: Int
+  files: List<String>
+}
+
+fn parse_args(args: List<String>) -> Options {
+  var min_count = 1
+  var names: List<String> = []
+  var i = 0
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--min-count" {
+      if i + 1 >= args.length {
+        usage_error("--min-count needs a value")
+      }
+      let value = args[i + 1]
+      if not is_digits(value) {
+        usage_error("--min-count must be a whole number of at least 1")
+      }
+      // leading zeros dropped; more than 18 digits is bigger than any count
+      var start = 0
+      while start < value.length - 1 and value.slice(from: start, to: start + 1) == "0" {
+        start += 1
+      }
+      let significant = value.slice(from: start, to: value.length)
+      var n = 9_000_000_000_000_000_000
+      if significant.length <= 18 {
+        n = digits_value(significant)
+      }
+      if n < 1 {
+        usage_error("--min-count must be a whole number of at least 1")
+      }
+      min_count = n
+      i += 2
+    } else if arg.starts_with("-") and arg != "-" {
+      usage_error("unknown option ${arg}")
+    } else {
+      names.append(arg)
+      i += 1
+    }
+  }
+  return Options(min_count: min_count, files: names)
+}
+
+fn main() {
+  let options = parse_args(process.args())
+
+  // Read everything first: a bad file means no output at all.
+  var texts: List<String> = []
+  if options.files.is_empty() {
+    let data = try io.read_all() catch err {
+      eprint("error: cannot read standard input")
+      process.exit(2)
+    }
+    texts.append(data.text_lossy())
+  } else {
+    for name in options.files {
+      let text = try files.read(name) catch err {
+        eprint("error: cannot read ${name}")
+        process.exit(2)
+      }
+      texts.append(text)
+    }
+  }
+
+  var endpoints: Map<String, Endpoint> = {}
+  var total = 0
+  var malformed = 0
+  for text in texts {
+    for raw in text.split("\n") {
+      var line = raw
+      if line.ends_with("\r") {
+        line = line.slice(from: 0, to: line.length - 1)
+      }
+      if line.is_empty() {
+        continue
+      }
+      if parse_line(line) is some(req) {
+        total += 1
+        if endpoints[req.endpoint] is none {
+          endpoints[req.endpoint] = Endpoint(name: req.endpoint, count: 0, errors: 0, latencies: [])
+        }
+        endpoints[req.endpoint].count += 1
+        if req.status >= 500 {
+          endpoints[req.endpoint].errors += 1
+        }
+        endpoints[req.endpoint].latencies.append(req.latency)
+      } else {
+        malformed += 1
+      }
+    }
+  }
+
+  // by name, then (stable) by count, most first
+  let ordered = endpoints.entries().map(e => e.value).sorted_by(e => e.name).sorted_by(e => 0 - e.count)
+  for e in ordered {
+    if e.count < options.min_count {
+      continue
+    }
+    let sorted = e.latencies.sorted()
+    print("${e.name} count=${e.count} error_rate=${error_rate(e.errors, e.count)} p50=${percentile(sorted, p: 50)} p95=${percentile(sorted, p: 95)} max=${sorted[sorted.length - 1]}")
+  }
+  print("total=${total} malformed=${malformed}")
+}

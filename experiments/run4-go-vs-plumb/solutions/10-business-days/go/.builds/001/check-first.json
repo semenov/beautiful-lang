@@ -1,0 +1,89 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "between, default weekend",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "between, END before START is negative",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "between across leap day and year end",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "long range",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "add forwards and backwards",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "add 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "leap days",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "add a large N",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "custom weekend fri,sat",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no weekend",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "holidays file: comments, blanks, whitespace, weekend holiday",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "a month of holidays",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid dates rejected",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad holidays line",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing holidays file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

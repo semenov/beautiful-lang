@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "dry run changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "pattern must match the whole name",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "directories, their contents and links untouched",
+   "ok": false,
+   "detail": "(exit=0 timed_out=False stdout='link.txt -> link.md\\nx.txt -> x.md\\nrenamed 2\\n' stderr='', {'sub.txt': 'dir:inner.txt', 'link.md': 'link', 'x.md': 'content of x.txt'})"
+  },
+  {
+   "name": "optional group and literal braces",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unchanged names left out",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "{0} prefix rename",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "conflict refuses the whole batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "existing target refuses the whole batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "target renamed away in the same batch still counts as existing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "existing directory counts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "names leaving DIR are refused",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "counter: order, start, longer numbers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "counter with --match and start 0",
+   "ok": false,
+   "detail": "(exit=64 timed_out=False stdout='' stderr='usage: unknown option --match\\n', {'z.jpg': 'content of z.jpg', 'y.png': 'content of y.png', 'x.jpg': 'content of x.jpg', 'w.gif': 'content of w.gif'})"
+  },
+  {
+   "name": "unicode names",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "500 files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing DIR",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors, nothing renamed",
+   "ok": false,
+   "detail": "[(['d17', '--counter', 'plain'], exit=1 timed_out=False stdout='' stderr='error: usage: template must contain # characters\\n'), (['d17', '--counter', '#-#'], exit=1 timed_out=False stdout='' stderr='error: usage: template must contain exactly one run of #\\n'), (['d17', '--regex', 'a(\\\\d)', '--to', '{2}'], exit=1 timed_out=False stdout='' stderr='error: usage: group 2 out of range\\n'), (['d17', '--regex', 'a(\\\\d)', '--to', 'x{'], exit=1 timed_out=False stdout='' stderr='error: usage: unclosed brace in template\\n'), (['d17', '--regex', 'a(\\\\d)', '--to', 'x}'], exit=1 timed_out=False stdout='' stderr='error: usage: unmatched } in template\\n'), (['d17', '--regex', 'a(\\\\d)', '--to', '{x}'], exit=1 timed_out=False stdout='' stderr='error: usage: unclosed brace in template\\n'), (['d17', '--regex', '(abc', '--to', 'x'], exit=1 timed_out=False stdout='' stderr='error: regex: parentheses not balanced in \"(abc\"\\n'), (['d17', '--regex', 'a1', '--to', 'b', '--counter', '#'], exit=0 timed_out=False stdout='a1 -> 1\\nrenamed 1\\n' stderr='')]"
+  }
+ ]
+}

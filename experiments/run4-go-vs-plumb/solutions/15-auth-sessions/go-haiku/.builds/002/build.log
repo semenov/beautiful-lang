@@ -1,0 +1,6 @@
+# app
+./main.go:165:3: multiple-value result.LastInsertId() (value of type (int64, error)) in single-value context
+./main.go:442:10: assignment mismatch: 1 variable but pbkdf2.Key returns 2 values
+./main.go:442:21: in call to pbkdf2.Key, type []byte of []byte(password) does not match func() Hash (cannot infer Hash)
+./main.go:471:14: assignment mismatch: 1 variable but pbkdf2.Key returns 2 values
+./main.go:471:25: in call to pbkdf2.Key, type []byte of []byte(password) does not match func() Hash (cannot infer Hash)

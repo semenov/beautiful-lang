@@ -1,0 +1,5 @@
+error: expected an expression, found `with`
+  --> main.plumb:56:20
+   |
+56 |   let should_run = with s = state.lock() {
+   |                    ^^^^

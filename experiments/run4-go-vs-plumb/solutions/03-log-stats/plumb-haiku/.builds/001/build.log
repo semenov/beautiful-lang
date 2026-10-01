@@ -1,0 +1,5 @@
+error: expected `)` to close the call, found `total_valid`
+  --> main.plumb:39:72
+   |
+39 |     try read_and_process_stream(io.stdin(), opts.min_count, stats, mut total_valid, mut total_malformed)
+   |                                                                        ^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: unknown escape; known: \n \t \r \0 \" \\ \$ \u{1F600}
+  --> main.plumb:158:8
+    |
+158 |       "\x08" => result += "\\b"
+    |        ^

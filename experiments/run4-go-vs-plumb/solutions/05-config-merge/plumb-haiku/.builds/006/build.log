@@ -1,0 +1,6 @@
+error: patterns bind fields by position
+  --> main.plumb:177:31
+    |
+177 |   if val is json.Value.String(value: s) {
+    |                               ^^^^^
+    = help: write `Circle(r)`, not `Circle(radius: r)`

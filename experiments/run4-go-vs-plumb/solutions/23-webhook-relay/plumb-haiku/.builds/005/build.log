@@ -1,0 +1,21 @@
+error: `some(...)` can't match a `Int`: it's never missing
+  --> main.plumb:202:29
+    |
+202 |     let id = if event_id is some(eid) { eid } else { 0 }
+    |                             ^^^^^^^^^
+error: unknown name `eid`
+  --> main.plumb:202:41
+    |
+202 |     let id = if event_id is some(eid) { eid } else { 0 }
+    |                                         ^^^
+error: `some(...)` can't match a `Bytes`: it's never missing
+  --> main.plumb:203:39
+    |
+203 |     let payload = if payload_bytes is some(pb) { pb } else { Bytes() }
+    |                                       ^^^^^^^^
+error: unknown name `pb`
+  --> main.plumb:203:50
+    |
+203 |     let payload = if payload_bytes is some(pb) { pb } else { Bytes() }
+    |                                                  ^^
+4 error(s)

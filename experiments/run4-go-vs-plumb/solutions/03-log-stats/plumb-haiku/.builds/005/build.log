@@ -1,0 +1,13 @@
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:216:20
+    |
+216 |   let status_val = status ?? 0
+    |                    ^^^^^^
+    = help: remove `?? ...`
+error: `??` needs a value that may be missing, but this is a `Int`
+  --> main.plumb:226:21
+    |
+226 |   let latency_val = latency ?? 0
+    |                     ^^^^^^^
+    = help: remove `?? ...`
+2 error(s)

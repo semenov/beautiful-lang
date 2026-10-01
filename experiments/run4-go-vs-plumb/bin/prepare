@@ -1,0 +1,9 @@
+#!/bin/sh
+# prepare <task> <lang>: create an empty solution directory and log the start.
+set -e
+E=$(cd "$(dirname "$0")/.." && pwd)
+d="$E/solutions/$1/$2"
+mkdir -p "$d"
+cp -n "$E/templates/$2/"* "$d/" 2>/dev/null || true
+python3 "$E/bin/harness.py" start "$1" "$2"
+echo "$d"

@@ -1,0 +1,5 @@
+error: text uses double quotes only
+  --> main.plumb:28:26
+   |
+28 |     let is_valid = (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or
+   |                          ^

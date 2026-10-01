@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "put then get a string verbatim",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode key and value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "integers stay integers",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "overwrite and delete",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing key is 404",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr creates, adds and subtracts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr on a non-integer is 409 and changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad by is 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "incr overflow is 409 and changes nothing",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 117, in _\n    put(\"small\", -MAX - 1)\n    ~~~^^^^^^^^^^^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 27, in put\n    return s.req(\"PUT\", \"/kv/\" + quote(k, safe=\"\"), {\"value\": v})\n           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nhttp.client.RemoteDisconnected: Remote end closed connection without response\n"
+  },
+  {
+   "name": "invalid values are 400",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 128, in _\n    rs = [s.req(\"PUT\", \"/kv/bad\", b, headers={\"Content-Type\": \"application/json\"}) for b in bodies]\n          ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 15, in _close_req\n    return _req(self, method, path, body, h, timeout)\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "cas succeeds only on an equal value",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 134, in _\n    put(\"c\", 10)\n    ~~~^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 27, in put\n    return s.req(\"PUT\", \"/kv/\" + quote(k, safe=\"\"), {\"value\": v})\n           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "cas with expected null",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 146, in _\n    a = cas(\"fresh\", {\"expected\": None, \"value\": \"first\"})\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 39, in cas\n    return s.post(\"/cas/\" + quote(k, safe=\"\"), body)\n           ~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "large value round trip",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 160, in _\n    a, b = put(\"large\", v), get(\"large\")\n           ~~~^^^^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 27, in put\n    return s.req(\"PUT\", \"/kv/\" + quote(k, safe=\"\"), {\"value\": v})\n           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "empty key, unknown path, wrong method",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 166, in _\n    a = s.req(\"PUT\", \"/kv/\", {\"value\": 1})\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 15, in _close_req\n    return _req(self, method, path, body, h, timeout)\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "parallel increments are exact",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 181, in _\n    rs = parallel(lambda kb: incr(kb[0], str(kb[1])).status, jobs)\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 44, in parallel\n    return list(ex.map(fn, items))\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "parallel cas: exactly one winner",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 188, in _\n    put(\"lock\", 0)\n    ~~~^^^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 27, in put\n    return s.req(\"PUT\", \"/kv/\" + quote(k, safe=\"\"), {\"value\": v})\n           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "parallel cas loops lose no update",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 196, in _\n    put(\"ctr\", 0)\n    ~~~^^^^^^^^^^\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 27, in put\n    return s.req(\"PUT\", \"/kv/\" + quote(k, safe=\"\"), {\"value\": v})\n           ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  },
+  {
+   "name": "snapshot has every key",
+   "ok": false,
+   "detail": "Traceback (most recent call last):\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 127, in deco\n    r = fn()\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/check.py\", line 210, in _\n    r = s.get(\"/snapshot\")\n  File \"/Users/semenov/Dev/plumb/experiments/run4-go-vs-plumb/tasks/21-kv-counter/../_lib/checklib.py\", line 79, in get\n    return self.req(\"GET\", path, **kw)\n           ~~~~~~~~^^^^^^^^^^^^^^^^^^^\nConnectionRefusedError: [Errno 61] Connection refused\n"
+  }
+ ]
+}

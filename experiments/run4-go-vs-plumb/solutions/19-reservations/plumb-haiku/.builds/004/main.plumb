@@ -1,0 +1,304 @@
+import json
+import http
+import db
+import env
+
+type Event {
+  id: Int
+  name: String
+  capacity: Int
+  remaining: Int
+}
+
+type CreateEventRequest {
+  name: String
+  capacity: Int
+}
+
+type Reservation {
+  id: Int
+  event_id: Int
+  seats: Int
+  status: String
+}
+
+type CreateReservationRequest {
+  seats: Int
+}
+
+type ErrorResponse {
+  error: String
+}
+
+type AppState {
+  conn: db.Connection
+  idempotency_keys: Map<String, IdempotencyRecord>
+  next_event_id: Int
+  next_reservation_id: Int
+}
+
+type IdempotencyRecord {
+  event_id: Int
+  seats: Int
+  reservation_id: Int
+  status: Int
+}
+
+type Config {
+  port: Int = 8080
+  db_path: String
+}
+
+fn handle_create_event(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let body_text = req.text()
+  let event_request = try json.decode<CreateEventRequest>(body_text) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  if event_request.name.is_empty() {
+    return http.json(400, ErrorResponse(error: "invalid name"))
+  }
+
+  if event_request.capacity < 1 or event_request.capacity > 100000 {
+    return http.json(400, ErrorResponse(error: "invalid capacity"))
+  }
+
+  with s = state.lock() {
+    let event_id = s.next_event_id
+    s.next_event_id += 1
+    try s.conn.execute(
+      "insert into events (id, name, capacity, remaining) values (?, ?, ?, ?)",
+      [event_id, event_request.name, event_request.capacity, event_request.capacity]
+    )
+    let event = Event(
+      id: event_id,
+      name: event_request.name,
+      capacity: event_request.capacity,
+      remaining: event_request.capacity
+    )
+    return http.json(201, event)
+  }
+}
+
+fn handle_get_event(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let event_id = try id_str.to_int() catch _ {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if event_id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  with s = state.lock() {
+    let events = try s.conn.query<Event>(
+      "select id, name, capacity, remaining from events where id = ?",
+      [event_id]
+    )
+    if events.is_empty() {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+    return http.json(200, events[0])
+  }
+}
+
+fn handle_create_reservation(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let event_id = try id_str.to_int() catch err {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if event_id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let body_text = req.text()
+  let res_request = try json.decode<CreateReservationRequest>(body_text) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  if res_request.seats < 1 {
+    return http.json(400, ErrorResponse(error: "invalid seats"))
+  }
+
+  let idempotency_key = req.header("idempotency-key")
+
+  with s = state.lock() {
+    if idempotency_key is some(key) {
+      if s.idempotency_keys[key] is some(record) {
+        if record.event_id != event_id or record.seats != res_request.seats {
+          return http.json(422, ErrorResponse(error: "idempotency key reused"))
+        }
+        let reservations = try s.conn.query<Reservation>(
+          "select id, event_id, seats, status from reservations where id = ?",
+          [record.reservation_id]
+        )
+        if reservations.is_empty() {
+          return http.json(404, ErrorResponse(error: "not found"))
+        }
+        return http.json(201, reservations[0])
+      }
+    }
+
+    let events = try s.conn.query<Event>(
+      "select id, name, capacity, remaining from events where id = ?",
+      [event_id]
+    )
+    if events.is_empty() {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+
+    let event = events[0]
+    if event.remaining < res_request.seats {
+      return http.json(409, ErrorResponse(error: "not enough seats"))
+    }
+
+    let reservation_id = s.next_reservation_id
+    s.next_reservation_id += 1
+
+    try s.conn.execute(
+      "insert into reservations (id, event_id, seats, status) values (?, ?, ?, ?)",
+      [reservation_id, event_id, res_request.seats, "active"]
+    )
+
+    try s.conn.execute(
+      "update events set remaining = remaining - ? where id = ?",
+      [res_request.seats, event_id]
+    )
+
+    if idempotency_key is some(key) {
+      s.idempotency_keys[key] = IdempotencyRecord(
+        event_id: event_id,
+        seats: res_request.seats,
+        reservation_id: reservation_id,
+        status: 201
+      )
+    }
+
+    let reservation = Reservation(
+      id: reservation_id,
+      event_id: event_id,
+      seats: res_request.seats,
+      status: "active"
+    )
+    return http.json(201, reservation)
+  }
+}
+
+fn handle_get_reservation(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let reservation_id = try id_str.to_int() catch _ {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if reservation_id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  with s = state.lock() {
+    let reservations = try s.conn.query<Reservation>(
+      "select id, event_id, seats, status from reservations where id = ?",
+      [reservation_id]
+    )
+    if reservations.is_empty() {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+    return http.json(200, reservations[0])
+  }
+}
+
+fn handle_delete_reservation(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let reservation_id = try id_str.to_int() catch _ {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  if reservation_id <= 0 {
+    return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  with s = state.lock() {
+    let reservations = try s.conn.query<Reservation>(
+      "select id, event_id, seats, status from reservations where id = ?",
+      [reservation_id]
+    )
+    if reservations.is_empty() {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+
+    let reservation = reservations[0]
+    if reservation.status == "cancelled" {
+      return http.json(409, ErrorResponse(error: "already cancelled"))
+    }
+
+    try s.conn.execute(
+      "update reservations set status = ? where id = ?",
+      ["cancelled", reservation_id]
+    )
+
+    try s.conn.execute(
+      "update events set remaining = remaining + ? where id = ?",
+      [reservation.seats, reservation.event_id]
+    )
+
+    let updated = Reservation(
+      id: reservation.id,
+      event_id: reservation.event_id,
+      seats: reservation.seats,
+      status: "cancelled"
+    )
+    return http.json(200, updated)
+  }
+}
+
+fn main() throws {
+  let config = try env.decode<Config>()
+
+  with conn = try db.open(config.db_path) {
+    try conn.execute(
+      "create table if not exists events (id integer primary key, name text, capacity integer, remaining integer)",
+      []
+    )
+    try conn.execute(
+      "create table if not exists reservations (id integer primary key, event_id integer, seats integer, status text)",
+      []
+    )
+
+    let state = Shared<AppState>(AppState(
+      conn: conn,
+      idempotency_keys: {},
+      next_event_id: 1,
+      next_reservation_id: 1
+    ))
+
+    with s = state.lock() {
+      let events = try s.conn.query<Event>(
+        "select id, name, capacity, remaining from events",
+        []
+      )
+      let reservations = try s.conn.query<Reservation>(
+        "select id, event_id, seats, status from reservations",
+        []
+      )
+
+      if not events.is_empty() {
+        let max_event_id = events.sorted_by(e => e.id).reversed()[0].id
+        s.next_event_id = max_event_id + 1
+      }
+
+      if not reservations.is_empty() {
+        let max_res_id = reservations.sorted_by(r => r.id).reversed()[0].id
+        s.next_reservation_id = max_res_id + 1
+      }
+    }
+
+    var router = http.Router()
+    router.post("/events", req => try handle_create_event(req, state))
+    router.get("/events/:id", req => try handle_get_event(req, state))
+    router.post("/events/:id/reservations", req => try handle_create_reservation(req, state))
+    router.get("/reservations/:id", req => try handle_get_reservation(req, state))
+    router.delete("/reservations/:id", req => try handle_delete_reservation(req, state))
+
+    try http.serve(router, port: config.port)
+  }
+}

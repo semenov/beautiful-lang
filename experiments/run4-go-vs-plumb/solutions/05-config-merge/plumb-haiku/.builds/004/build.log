@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:117:6
+    |
+117 |   if let ok = try json.parse(text) catch _ { none } is some(v) {
+    |      ^^^

@@ -1,0 +1,313 @@
+import io
+import files
+import process
+
+let usage = "usage: app [FILE]"
+let max_cents = 100_000_000_000
+
+type Part {
+  name: String
+  shares: Int
+}
+
+type Expense {
+  payer: String
+  cents: Int
+  parts: List<Part>
+}
+
+type BadLine implements Error {
+  reason: String
+
+  fn message(self) -> String {
+    return self.reason
+  }
+}
+
+// Splits on runs of spaces and tabs; no empty pieces.
+fn split_blanks(line: String) -> List<String> {
+  var out: List<String> = []
+  var current = ""
+  for c in line.chars() {
+    if c == " " or c == "\t" {
+      if not current.is_empty() {
+        out.append(current)
+        current = ""
+      }
+    } else {
+      current = "${current}${c}"
+    }
+  }
+  if not current.is_empty() {
+    out.append(current)
+  }
+  return out
+}
+
+fn valid_name(name: String) -> Bool {
+  if name.is_empty() {
+    return false
+  }
+  for c in name.chars() {
+    if c == " " or c == "\t" or c == "," or c == ":" or c == "#" {
+      return false
+    }
+  }
+  return true
+}
+
+fn strip_zeros(digits: String) -> String {
+  var i = 0
+  while i < digits.length - 1 and digits.slice(from: i, to: i + 1) == "0" {
+    i += 1
+  }
+  return digits.slice(from: i, to: digits.length)
+}
+
+// "12", "12.5", "12.34" -> cents; none when not an amount in range.
+fn parse_amount(text: String) throws -> Int {
+  let parts = text.split(".")
+  if parts.length > 2 {
+    throw BadLine(reason: "bad amount '${text}'")
+  }
+  let whole = parts[0]
+  var frac = ""
+  if parts.length == 2 {
+    frac = parts[1]
+  }
+  if not whole.is_digit() or (parts.length == 2 and (not frac.is_digit() or frac.length > 2)) {
+    throw BadLine(reason: "bad amount '${text}'")
+  }
+  let w = strip_zeros(whole)
+  if w.length > 11 {
+    throw BadLine(reason: "amount '${text}' is too large")
+  }
+  let frac2 = frac.pad_end(2, fill: "0")
+  let cents = try w.to_int() * 100 + (try frac2.to_int())
+  if cents <= 0 {
+    throw BadLine(reason: "amount must be more than 0")
+  }
+  if cents > max_cents {
+    throw BadLine(reason: "amount '${text}' is too large")
+  }
+  return cents
+}
+
+fn parse_part(text: String) throws -> Part {
+  let pieces = text.split(":")
+  if pieces.length > 2 {
+    throw BadLine(reason: "bad participant '${text}'")
+  }
+  let name = pieces[0]
+  if not valid_name(name) {
+    throw BadLine(reason: "bad participant name in '${text}'")
+  }
+  if pieces.length == 1 {
+    return Part(name: name, shares: 1)
+  }
+  let digits = pieces[1]
+  if not digits.is_digit() or strip_zeros(digits).length > 4 {
+    throw BadLine(reason: "bad shares in '${text}'")
+  }
+  let shares = try digits.to_int()
+  if shares < 1 or shares > 1000 {
+    throw BadLine(reason: "shares must be from 1 to 1000 in '${text}'")
+  }
+  return Part(name: name, shares: shares)
+}
+
+// none for an ignored line.
+fn parse_line(line: String) throws -> Expense? {
+  let fields = split_blanks(line)
+  if fields.is_empty() or fields[0].starts_with("#") {
+    return none
+  }
+  if fields.length != 3 {
+    throw BadLine(reason: "expected 3 fields (PAYER AMOUNT SPLIT), found ${fields.length}")
+  }
+  if not valid_name(fields[0]) {
+    throw BadLine(reason: "bad payer name '${fields[0]}'")
+  }
+  let cents = try parse_amount(fields[1])
+  var parts: List<Part> = []
+  var seen: Set<String> = {}
+  for piece in fields[2].split(",") {
+    let part = try parse_part(piece)
+    if seen.contains(part.name) {
+      throw BadLine(reason: "'${part.name}' appears twice in the split")
+    }
+    seen.add(part.name)
+    parts.append(part)
+  }
+  return Expense(payer: fields[0], cents: cents, parts: parts)
+}
+
+fn parse_all(text: String) throws -> List<Expense> {
+  var out: List<Expense> = []
+  var n = 0
+  for raw in text.split("\n") {
+    n += 1
+    var line = raw
+    if line.ends_with("\r") {
+      line = line.slice(from: 0, to: line.length - 1)
+    }
+    let e = try parse_line(line) catch err {
+      throw BadLine(reason: "line ${n}: ${err.message()}")
+    }
+    if e is some(x) {
+      out.append(x)
+    }
+  }
+  return out
+}
+
+fn add_to(balances: Map<String, Int>, name: String, delta: Int) -> Map<String, Int> {
+  var b = balances
+  b[name] = (b[name] ?? 0) + delta
+  return b
+}
+
+fn compute_balances(expenses: List<Expense>) -> Map<String, Int> {
+  var balances: Map<String, Int> = {}
+  for e in expenses {
+    balances = add_to(balances, name: e.payer, delta: e.cents)
+    var total_shares = 0
+    for p in e.parts {
+      total_shares += p.shares
+    }
+    var charges: List<Int> = []
+    var charged = 0
+    for p in e.parts {
+      let c = (e.cents * p.shares).div(total_shares)
+      charges.append(c)
+      charged += c
+    }
+    var left = e.cents - charged
+    for i in 0..<e.parts.length {
+      var c = charges[i]
+      if left > 0 {
+        c += 1
+        left -= 1
+      }
+      balances = add_to(balances, name: e.parts[i].name, delta: -c)
+    }
+  }
+  return balances
+}
+
+fn sorted_names(balances: Map<String, Int>) -> List<String> {
+  return balances.keys().sorted_by(n => n.code_points())
+}
+
+type Transfer {
+  from: String
+  to: String
+  cents: Int
+}
+
+fn settle(balances: Map<String, Int>) -> List<Transfer> {
+  var b = balances
+  let names = sorted_names(b)
+  var out: List<Transfer> = []
+  while true {
+    var debtor = ""
+    var creditor = ""
+    var low = 0
+    var high = 0
+    for n in names {
+      let v = b[n] ?? 0
+      if v < low {
+        low = v
+        debtor = n
+      }
+      if v > high {
+        high = v
+        creditor = n
+      }
+    }
+    if low == 0 or high == 0 {
+      break
+    }
+    let amount = if high < -low { high } else { -low }
+    out.append(Transfer(from: debtor, to: creditor, cents: amount))
+    b[debtor] = low + amount
+    b[creditor] = high - amount
+  }
+  return out
+}
+
+fn money(cents: Int) -> String {
+  let whole = cents.div(100)
+  let frac = (cents % 100).to_string().pad_start(2, fill: "0")
+  return "${whole}.${frac}"
+}
+
+fn signed(cents: Int) -> String {
+  if cents > 0 {
+    return "+${money(cents)}"
+  }
+  if cents < 0 {
+    return "-${money(-cents)}"
+  }
+  return "0.00"
+}
+
+fn render(expenses: List<Expense>) -> String {
+  let balances = compute_balances(expenses)
+  var lines: List<String> = ["balances:"]
+  for n in sorted_names(balances) {
+    lines.append("  ${n} ${signed(balances[n] ?? 0)}")
+  }
+  lines.append("transfers:")
+  for t in settle(balances) {
+    lines.append("  ${t.from} -> ${t.to} ${money(t.cents)}")
+  }
+  lines.append("")
+  return lines.join("\n")
+}
+
+fn fail(message: String, status: Int) -> Never {
+  eprint(message)
+  process.exit(status)
+}
+
+fn main() {
+  let args = process.args()
+  if args.length > 1 or (args.length == 1 and args[0].starts_with("-")) {
+    fail(usage, status: 64)
+  }
+  var text = ""
+  if args.length == 1 {
+    text = try files.read(args[0]) catch err {
+      fail("error: cannot read ${args[0]}", status: 2)
+    }
+  } else {
+    let data = try io.read_all() catch err {
+      fail("error: cannot read standard input", status: 2)
+    }
+    text = data.text_lossy()
+  }
+  let expenses = try parse_all(text) catch err {
+    fail("error: ${err.message()}", status: 1)
+  }
+  io.write(render(expenses))
+}
+
+test "example" {
+  let e = try parse_all("alice 90.00 alice,bob,carol\nbob 30 alice:2,bob\n")
+  expect render(e) == "balances:\n  alice +40.00\n  bob -10.00\n  carol -30.00\ntransfers:\n  carol -> alice 30.00\n  bob -> alice 10.00\n"
+}
+
+test "leftover cents go to the first participants" {
+  let e = try parse_all("a 0.10 x,y,z\n")
+  expect compute_balances(e)["x"] == -4
+  expect compute_balances(e)["z"] == -3
+}
+
+test "errors name the line" {
+  let r = try parse_all("# c\n\nbob 0 a\n") catch err {
+    expect err.message() == "line 3: amount must be more than 0"
+    return
+  }
+  expect r.length == 0
+}

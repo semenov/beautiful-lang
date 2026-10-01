@@ -1,0 +1,31 @@
+error: `usage_fail` returns `Never`, so it must not finish
+  --> main.plumb:11:26
+   |
+11 | fn usage_fail() -> Never {
+   |                          ^
+   = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:13:3
+   |
+13 |   process.exit(64)
+   |   ^^^^^^^
+   = help: add `import process` at the top of the file
+error: `fail` returns `Never`, so it must not finish
+  --> main.plumb:16:35
+   |
+16 | fn fail(message: String) -> Never {
+   |                                   ^
+   = help: end it with `process.exit(...)`, `panic(...)`, `throw`, or a loop that never ends
+error: unknown name `process`
+  --> main.plumb:18:3
+   |
+18 |   process.exit(2)
+   |   ^^^^^^^
+   = help: add `import process` at the top of the file
+error: unknown name `process`
+  --> main.plumb:190:14
+    |
+190 |   let args = process.args()
+    |              ^^^^^^^
+    = help: add `import process` at the top of the file
+5 error(s)

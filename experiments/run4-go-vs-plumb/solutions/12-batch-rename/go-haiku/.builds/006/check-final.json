@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "dry run changes nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "pattern must match the whole name",
+   "ok": false,
+   "detail": "(exit=1 timed_out=False stdout='' stderr='error: conflict: n-123\\n', {'ab': 'content of ab', 'a': 'content of a', '123b': 'content of 123b', 'a123': 'content of a123', '123': 'content of 123'})"
+  },
+  {
+   "name": "directories, their contents and links untouched",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "optional group and literal braces",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unchanged names left out",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "{0} prefix rename",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "conflict refuses the whole batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "existing target refuses the whole batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "target renamed away in the same batch still counts as existing",
+   "ok": false,
+   "detail": "(exit=0 timed_out=False stdout='f1 -> f2\\nf2 -> f3\\nf3 -> f4\\nrenamed 3\\n' stderr='', {'f4': 'content of f1'})"
+  },
+  {
+   "name": "existing directory counts",
+   "ok": false,
+   "detail": "(exit=1 timed_out=False stdout='data.csv -> report.csv\\n' stderr='error: failed to rename data.csv: rename d11/data.csv d11/report.csv: file exists\\n', {'report.csv': 'dir:inner.txt', 'data.csv': 'content of data.csv'})"
+  },
+  {
+   "name": "names leaving DIR are refused",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "counter: order, start, longer numbers",
+   "ok": false,
+   "detail": "(exit=2 timed_out=False stdout='' stderr='panic: strings: negative Repeat count\\n\\ngoroutine 1 [running]:\\nstrings.Repeat({0x102112f22?, 0x16ddaf5fd?}, 0x10211d6c0?)\\n\\t/opt/homebrew/Cellar/go/1.27.1/libexec/src/strings/strings.go:609 +0x4a0\\nmain.processCounterMode({0x17190c9a2100, 0xc, 0x198001000228c108?}, {0x16ddaf5fd, 0x7}, {0x0, 0x0}, 0x8)\\n', {'i': 'content of i', 'g': 'content of g', 'Z': 'content of Z', 'a': 'content of a', 'f': 'content of f', 'h': 'content of h', 'j': 'content of j', 'c': 'content of c', 'd': 'content of d', 'e': 'content of e', 'b': 'content of b', 'k': 'content of k'})"
+  },
+  {
+   "name": "counter with --match and start 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode names",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "500 files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing DIR",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors, nothing renamed",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

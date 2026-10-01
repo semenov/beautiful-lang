@@ -1,0 +1,5 @@
+error: expected a type, found `{`
+  --> main.plumb:49:22
+   |
+49 |   var app_vars: List<{key: String, value: String}> = []
+   |                      ^

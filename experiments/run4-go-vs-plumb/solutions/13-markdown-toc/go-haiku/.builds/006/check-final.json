@@ -1,0 +1,94 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [Gr\u00f6\u00dfe & Ma\u00dfe](#gr\u00f6\u00dfe--ma\u00dfe)\\n  - [Setup](#setup)\\n  - [Setup](#setup-1)\\n- [not a heading](#not-a-heading)\\n' stderr=''"
+  },
+  {
+   "name": "all levels by default",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "level range; slugs count headings outside it",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "lines that are not headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "closing hashes and empty headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "fenced code blocks",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [Before](#before)\\n- [comment](#comment)\\n- [code](#code)\\n  - [After tilde](#after-tilde)\\n    - [After indented](#after-indented)\\n  - [End](#end)\\n' stderr=''"
+  },
+  {
+   "name": "unclosed fence runs to the end",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "four-space indented fence is not a fence",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "slug punctuation and spacing",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [Hello, World!](#hello-world)\\n- [a  b](#a--b)\\n- [snake_case and kebab-case](#snake_case-and-kebab-case)\\n- [100% (sure)?](#100-sure)\\n- [see [docs](http://x.y/z)](#see-docshttpxyz)\\n- [Tab\\there](#tab-here)\\n' stderr=''"
+  },
+  {
+   "name": "unicode slugs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "duplicate slugs numbered",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='- [A](#a)\\n- [a](#a-1)\\n  - [A!](#a-2)\\n- [B](#b)\\n- [A](#a-3)\\n' stderr=''"
+  },
+  {
+   "name": "CRLF line endings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "no headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "last line without newline",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "20000 duplicate headings",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage errors",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

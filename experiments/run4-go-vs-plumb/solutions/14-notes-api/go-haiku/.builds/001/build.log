@@ -1,0 +1,4 @@
+# app
+./main.go:6:2: "errors" imported and not used
+./main.go:9:2: "net" imported and not used
+./main.go:16:2: "unicode/utf8" imported and not used

@@ -1,0 +1,5 @@
+error: expected the end of the line, found `{`
+  --> main.plumb:40:8
+   |
+40 |   loop {
+   |        ^

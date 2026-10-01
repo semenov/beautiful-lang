@@ -1,0 +1,124 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "equal files: exit 0, no output",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "two empty files are equal",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty old file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty new file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "tie-break: earliest lines kept, removals first",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "tie-break: swapped lines",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "replaced block: removals before additions",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "moved block, minimal diff",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "-U 0: zero counts use the line before",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='--- old.txt\\n+++ new.txt\\n@@ -0,0 +4 @@\\n+N\\n@@ -6 +0,0 @@\\n-f\\n' stderr=''"
+  },
+  {
+   "name": "gap of exactly 2N kept lines joins hunks",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "gap of 2N+1 kept lines splits hunks",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "context clipped at both ends, -U 2",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing final newline differs",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing final newline on a kept line",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CR is part of the line",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode lines, names as given",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='--- sub/\u00e4.txt\\n+++ ./b.txt\\n@@ -1,3 +1,3 @@\\n-h\u00c3\u00a9llo\\n+hello\\n \u00e6\\x97\u00a5\u00e6\\x9c\u00ac\\n ok\\n' stderr=''"
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error old.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error old.txt new.txt x.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error -U x old.txt new.txt",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='invalid value \"x\" for flag -U: parse error\\nUsage of /tmp/r4c/bin/subject-06-go-haiku-first:\\n  -U int\\n    \\tnumber of context lines (default 3)\\n'"
+  },
+  {
+   "name": "usage error -U -1 old.txt new.txt",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error -q old.txt new.txt",
+   "ok": false,
+   "detail": "exit=2 timed_out=False stdout='' stderr='flag provided but not defined: -q\\nUsage of /tmp/r4c/bin/subject-06-go-haiku-first:\\n  -U int\\n    \\tnumber of context lines (default 3)\\n'"
+  },
+  {
+   "name": "large files",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

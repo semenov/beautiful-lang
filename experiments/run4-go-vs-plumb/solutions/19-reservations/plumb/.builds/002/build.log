@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:45:25
+   |
+45 |   let n = text.to_int() catch _ {
+   |                         ^^^^^
+   = help: write `try f(x) catch err { ... }`

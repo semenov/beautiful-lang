@@ -1,0 +1,114 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "deep merge over three files",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "env values: JSON when valid, else string",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "env paths: nesting, lowercase, single underscore, replacing non-objects",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "env applied in name order; empty keys ignored",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "keys sorted by code point, unicode and escapes",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "numbers keep their text",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "port bounds 1 and 65535 accepted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "all required keys missing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: empty name, numeric host",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port 0",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port 65536",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port with fraction",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: port as string",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid: null replaces required value",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid JSON",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "NaN is not JSON",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "top level not an object",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --verbose good.json",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "many large files",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

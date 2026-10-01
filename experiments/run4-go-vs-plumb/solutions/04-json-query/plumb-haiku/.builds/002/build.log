@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:29:10
+   |
+29 |       if let eq_pos = clause.find("=") {
+   |          ^^^

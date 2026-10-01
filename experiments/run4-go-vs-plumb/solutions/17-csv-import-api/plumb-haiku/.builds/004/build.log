@@ -1,0 +1,5 @@
+error: expected an expression, found `fn`
+  --> main.plumb:229:32
+    |
+229 |   let _ = try conn.transaction(fn() throws -> () {
+    |                                ^^

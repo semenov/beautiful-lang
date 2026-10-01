@@ -1,0 +1,5 @@
+error: expected an expression, found `type`
+  --> main.plumb:73:3
+   |
+73 |   type Request {
+   |   ^^^^

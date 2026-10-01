@@ -1,0 +1,13 @@
+error: this value may be missing
+  --> main.plumb:68:54
+   |
+68 |   let max_count = entries.max_by(e => e.value.count).map(e => e.value.count) ?? 0
+   |                                                      ^^^
+   = help: unwrap it first: `if x is some(v) { v.map(...) }`, or use `??`
+error: the type isn't known here yet
+  --> main.plumb:68:65
+   |
+68 |   let max_count = entries.max_by(e => e.value.count).map(e => e.value.count) ?? 0
+   |                                                                 ^^^^^
+   = help: add a type annotation
+2 error(s)

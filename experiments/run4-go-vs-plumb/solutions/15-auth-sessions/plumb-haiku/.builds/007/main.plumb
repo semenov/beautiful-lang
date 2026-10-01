@@ -1,0 +1,282 @@
+import json
+import http
+import env
+import db
+import crypto
+import random
+import time
+
+type Config {
+  port: Int
+  db_path: String
+  session_ttl_seconds: Int
+}
+
+type User {
+  id: Int
+  username: String
+  password_hash: String
+}
+
+type Session {
+  id: Int
+  user_id: Int
+  token: String
+  created_at: Int
+  expires_at: Int
+}
+
+type UserRow {
+  id: Int
+  username: String
+  password_hash: String
+}
+
+type SessionRow {
+  id: Int
+  user_id: Int
+  token: String
+  created_at: Int
+  expires_at: Int
+}
+
+type RegisterRequest {
+  username: String?
+  password: String?
+}
+
+type LoginRequest {
+  username: String?
+  password: String?
+}
+
+type ErrorResponse {
+  error: String
+}
+
+type SuccessResponse {
+  username: String
+}
+
+type LoginResponse {
+  token: String
+}
+
+fn validate_username(username: String) -> String? {
+  if username.length < 3 or username.length > 32 {
+    return "invalid username"
+  }
+  for code in username.code_points() {
+    let is_letter_or_digit = (code >= 65 and code <= 90) or (code >= 97 and code <= 122) or (code >= 48 and code <= 57)
+    let is_underscore = code == 95
+    if not (is_letter_or_digit or is_underscore) {
+      return "invalid username"
+    }
+  }
+  return none
+}
+
+fn validate_password(password: String) -> String? {
+  if password.length < 8 or password.length > 128 {
+    return "invalid password"
+  }
+  return none
+}
+
+fn init_db(conn: db.Connection) throws {
+  try conn.execute(
+    "create table if not exists users (id integer primary key, username text unique, username_lower text unique, password_hash text)",
+    []
+  )
+  try conn.execute(
+    "create table if not exists sessions (id integer primary key, user_id integer, token text unique, created_at integer, expires_at integer)",
+    []
+  )
+}
+
+fn handle_register(req: http.Request, conn: db.Connection, config: Config) throws -> http.Response {
+  let body = req.text()
+  let input = try json.decode<RegisterRequest>(body) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  if input.username is none {
+    return http.json(400, ErrorResponse(error: "invalid username"))
+  }
+  if input.password is none {
+    return http.json(400, ErrorResponse(error: "invalid password"))
+  }
+
+  let username = input.username ?? ""
+  let password = input.password ?? ""
+
+  if validate_username(username) is some(err_msg) {
+    return http.json(400, ErrorResponse(error: err_msg))
+  }
+
+  if validate_password(password) is some(err_msg) {
+    return http.json(400, ErrorResponse(error: err_msg))
+  }
+
+  let username_lower = username.lower()
+  let password_hash = crypto.hash_password(password)
+
+  let username_taken = try conn.query<UserRow>(
+    "select id, username, password_hash from users where username_lower = ?",
+    [username_lower]
+  )
+
+  if username_taken.length > 0 {
+    return http.json(409, ErrorResponse(error: "username taken"))
+  }
+
+  let _ = try conn.insert(
+    "insert into users (username, username_lower, password_hash) values (?, ?, ?)",
+    [username, username_lower, password_hash]
+  )
+
+  return http.json(201, SuccessResponse(username: username))
+}
+
+fn handle_login(req: http.Request, conn: db.Connection, config: Config) throws -> http.Response {
+  let body = req.text()
+  let input = try json.decode<LoginRequest>(body) catch err {
+    return http.json(400, ErrorResponse(error: "invalid JSON"))
+  }
+
+  if input.username is none {
+    return http.json(400, ErrorResponse(error: "invalid username"))
+  }
+  if input.password is none {
+    return http.json(400, ErrorResponse(error: "invalid password"))
+  }
+
+  let username = input.username ?? ""
+  let password = input.password ?? ""
+
+  if username.length == 0 {
+    return http.json(400, ErrorResponse(error: "invalid username"))
+  }
+
+  if password.length == 0 {
+    return http.json(400, ErrorResponse(error: "invalid password"))
+  }
+
+  let username_lower = username.lower()
+
+  let users = try conn.query<UserRow>(
+    "select id, username, password_hash from users where username_lower = ?",
+    [username_lower]
+  )
+
+  if users.length == 0 or not crypto.verify_password(password, users[0].password_hash) {
+    return http.json(401, ErrorResponse(error: "invalid credentials"))
+  }
+
+  let user = users[0]
+  let token = random.token(32)
+  let now = time.unix_now()
+  let expires_at = now + config.session_ttl_seconds
+
+  let _ = try conn.insert(
+    "insert into sessions (user_id, token, created_at, expires_at) values (?, ?, ?, ?)",
+    [user.id, token, now, expires_at]
+  )
+
+  return http.json(200, LoginResponse(token: token))
+}
+
+fn handle_me(req: http.Request, conn: db.Connection, config: Config) throws -> http.Response {
+  if req.header("authorization") is some(auth_header) {
+    if auth_header.starts_with("Bearer ") {
+      let token = auth_header.slice(from: 7, to: auth_header.length)
+
+      let sessions = try conn.query<SessionRow>(
+        "select id, user_id, token, created_at, expires_at from sessions where token = ?",
+        [token]
+      )
+
+      if sessions.length > 0 {
+        let session = sessions[0]
+        let now = time.unix_now()
+        if now <= session.expires_at {
+          let users = try conn.query<UserRow>(
+            "select id, username, password_hash from users where id = ?",
+            [session.user_id]
+          )
+
+          if users.length > 0 {
+            return http.json(200, SuccessResponse(username: users[0].username))
+          }
+        }
+      }
+    }
+  }
+
+  return http.json(401, ErrorResponse(error: "unauthorized"))
+}
+
+fn handle_logout(req: http.Request, conn: db.Connection, config: Config) throws -> http.Response {
+  if req.header("authorization") is some(auth_header) {
+    if auth_header.starts_with("Bearer ") {
+      let token = auth_header.slice(from: 7, to: auth_header.length)
+
+      let sessions = try conn.query<SessionRow>(
+        "select id, user_id, token, created_at, expires_at from sessions where token = ?",
+        [token]
+      )
+
+      if sessions.length > 0 {
+        let session = sessions[0]
+        let now = time.unix_now()
+        if now <= session.expires_at {
+          let _ = try conn.execute(
+            "delete from sessions where id = ?",
+            [session.id]
+          )
+
+          return http.text(204, "")
+        }
+      }
+    }
+  }
+
+  return http.json(401, ErrorResponse(error: "unauthorized"))
+}
+
+fn error_handler_middleware(req: http.Request, next: fn(http.Request) throws -> http.Response) throws -> http.Response {
+  let res = try next(req)
+  if (res.status == 404 or res.status == 405) {
+    let error_msg = if res.status == 404 { "not found" } else { "method not allowed" }
+    let json_res = http.json(res.status, ErrorResponse(error: error_msg))
+    return json_res
+  }
+  return res
+}
+
+fn make_router(conn: db.Connection, config: Config) -> http.Router {
+  var router = http.Router()
+
+  router.use(error_handler_middleware)
+
+  router.post("/register", req => try handle_register(req, conn: conn, config: config))
+  router.post("/login", req => try handle_login(req, conn: conn, config: config))
+  router.get("/me", req => try handle_me(req, conn: conn, config: config))
+  router.post("/logout", req => try handle_logout(req, conn: conn, config: config))
+
+  return router
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int() catch err { 8080 }
+  let db_path = env.get("DB_PATH") ?? "app.db"
+  let session_ttl_seconds = try (env.get("SESSION_TTL_SECONDS") ?? "3600").to_int() catch err { 3600 }
+
+  let config = Config(port: port, db_path: db_path, session_ttl_seconds: session_ttl_seconds)
+
+  with conn = try db.open(db_path) {
+    try init_db(conn)
+    let router = make_router(conn, config)
+    try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1"))
+  }
+}

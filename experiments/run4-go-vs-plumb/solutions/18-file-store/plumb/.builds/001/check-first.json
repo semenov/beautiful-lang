@@ -1,0 +1,74 @@
+{
+ "cases": [
+  {
+   "name": "PUT new file: 201, metadata, stored on disk as given",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "PUT existing file replaces it with 200",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "binary content round-trips exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty file and a file of exactly MAX_BYTES are accepted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "over MAX_BYTES: 413 and nothing stored or changed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid names are 400 for every method and touch nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "encoded path traversal is refused",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "GET and DELETE of unknown names are 404; delete works",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "listing: all files, sizes, sha256, ordered by name; pre-existing included, dot files not",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "pre-existing file is served; dot file is not",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel uploads of different files all succeed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent PUTs to one name: readers see whole contents, one body wins",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "404 for other paths, 405 for other methods",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "files survive a restart",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

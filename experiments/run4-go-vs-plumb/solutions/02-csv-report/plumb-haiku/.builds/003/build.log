@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:45:6
+   |
+45 |   if let c = char_at(text, pos: pos) {
+   |      ^^^

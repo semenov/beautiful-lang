@@ -1,0 +1,13 @@
+error: `is_valid_calendar_date` has 3 or more parameters: name every argument after the first
+  --> main.plumb:127:46
+    |
+127 |     if not is_valid_calendar_date(date.year, date.month, date.day) {
+    |                                              ^^^^^^^^^^
+    = help: write (…, month: …, day: …)
+error: `is_valid_calendar_date` has 3 or more parameters: name every argument after the first
+  --> main.plumb:250:46
+    |
+250 |     if not is_valid_calendar_date(date.year, date.month, date.day) {
+    |                                              ^^^^^^^^^^
+    = help: write (…, month: …, day: …)
+2 error(s)

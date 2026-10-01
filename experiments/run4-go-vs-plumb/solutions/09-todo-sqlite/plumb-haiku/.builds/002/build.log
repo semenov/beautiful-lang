@@ -1,0 +1,29 @@
+error: `Set<String>` has no method `insert`
+  --> main.plumb:98:12
+   |
+98 |       tags.insert(tag_val)
+   |            ^^^^^^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:120:19
+    |
+120 |   let title_str = title ?? ""
+    |                   ^^^^^
+    = help: remove `?? ...`
+error: can't loop over `String` directly
+  --> main.plumb:155:12
+    |
+155 |   for c in tag {
+    |            ^^^
+    = help: use `text.chars()`, `text.words()` or `text.lines()`
+error: `String` has no method `matches`
+  --> main.plumb:157:18
+    |
+157 |     if not (char.matches("[A-Za-z0-9_-]")) {
+    |                  ^^^^^^^
+error: `??` needs a value that may be missing, but this is a `String`
+  --> main.plumb:403:14
+    |
+403 |   let text = search_text ?? ""
+    |              ^^^^^^^^^^^
+    = help: remove `?? ...`
+5 error(s)

@@ -1,0 +1,5 @@
+error: expected a name, found `(`
+  --> main.plumb:33:11
+   |
+33 |       let (opt_name, opt_value) = if eq_pos is some(pos) {
+   |           ^

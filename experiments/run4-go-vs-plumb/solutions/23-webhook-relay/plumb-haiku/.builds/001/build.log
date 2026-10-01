@@ -1,0 +1,5 @@
+error: expected a name for the error: `catch err { ... }`, found `{`
+  --> main.plumb:104:38
+    |
+104 |   let id = try id_str.to_int() catch {
+    |                                      ^

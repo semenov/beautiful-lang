@@ -1,0 +1,13 @@
+error: `encoding` is imported but not used
+  --> main.plumb:3:8
+  |
+3 | import encoding
+  |        ^^^^^^^^
+  = help: remove the import
+error: the result (`Int`) is not used
+  --> main.plumb:104:5
+    |
+104 |     try svc.conn.insert("insert into users (username, username_lower, password_hash) values (?, ?, ?)", [username, username.lower(), hash]) catch err {
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = help: use the result, or write `let _ = ...` if you really don't need it
+2 error(s)

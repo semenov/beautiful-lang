@@ -1,0 +1,119 @@
+{
+ "cases": [
+  {
+   "name": "example",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='region,total\\nNorth,10.60\\nSouth,3.25\\n\\n' stderr=''"
+  },
+  {
+   "name": "stdin, columns in any order",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='product,total\\na,2.00\\nb,4.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "exact cents, no float error",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\nx,1.00\\ny,90071992547409.95\\nz,0.30\\n\\n' stderr=''"
+  },
+  {
+   "name": "negatives and zero",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\na,-0.50\\nb,0.00\\nc,-0.50\\n\\n' stderr=''"
+  },
+  {
+   "name": "quoted fields: commas, quotes, newlines; output quoted",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='name,total\\n\"Smith, J\",5.00\\n\"say \"\"hi\"\"\",2.00\\n\"two\\nlines\",3.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "CRLF and no final newline",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\na,4.00\\nb,2.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "empty lines skipped, empty value is a group",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\n,5.00\\na,1.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "unicode values sorted by code point",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='city,total\\nZagreb,2.00\\nZ\u00fcrich,1.00\\nzug,4.00\\n\u00c5rhus,3.00\\n\u6771\u4eac,5.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "header only",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\n\\n' stderr=''"
+  },
+  {
+   "name": "bad records skipped with line numbers, exit 1",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,3.00\\n\\n' stderr='line 3: invalid amount\\nline 4: invalid amount\\nline 5: invalid amount\\nline 6: invalid amount\\nline 7: invalid amount\\nline 8: invalid amount\\nline 9: invalid amount\\nline 10: wrong number of fields\\nline 11: wrong number of fields\\n'"
+  },
+  {
+   "name": "line numbers count line breaks inside quotes",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='k,total\\na,1.00\\ne,2.00\\n\\n' stderr='line 3: invalid amount\\nline 4: invalid amount\\n'"
+  },
+  {
+   "name": "text after closing quote is a bad record",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: line 2: unterminated quote\\n'"
+  },
+  {
+   "name": "unterminated quote ends input",
+   "ok": false,
+   "detail": "exit=1 timed_out=False stdout='' stderr='error: line 3: unterminated quote\\n'"
+  },
+  {
+   "name": "quote inside unquoted field is ordinary",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='k,total\\n\"5\"\" disk\",1.00\\n\\n' stderr=''"
+  },
+  {
+   "name": "missing amount column",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing by column (case-sensitive)",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty input",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "missing file",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error ",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by k --bogus",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "usage error --by k a.csv b.csv",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large input",
+   "ok": false,
+   "detail": "exit=0 timed_out=False stdout='shop,total\\ns0,14285285.42\\ns1,14285857.14\\ns2,14286428.86\\ns3,14286000.58\\ns4,14285571.29\\ns5,14285143.00\\ns6,14284713.71\\n\\n' stderr=''"
+  }
+ ]
+}

@@ -1,0 +1,5 @@
+error: expected an expression, found `or`
+  --> main.plumb:48:5
+   |
+48 |     or (c >= 0x2000 and c <= 0x200A) or c == 0x2028 or c == 0x2029 or c == 0x202F
+   |     ^^

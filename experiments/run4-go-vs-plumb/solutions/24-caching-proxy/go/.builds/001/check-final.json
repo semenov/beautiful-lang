@@ -1,0 +1,79 @@
+{
+ "cases": [
+  {
+   "name": "miss then hit",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "query string is part of the key",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "path and query are forwarded exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "content type and unicode body pass through",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "binary body is byte-exact",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "4xx passes through and is not cached",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "5xx becomes 502 and is not cached",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "upstream timeout is 504",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel identical requests are coalesced",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "coalesced errors are shared, then retried",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "entries expire after the TTL",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "least recently used entry is evicted",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "other methods are 405 and not forwarded",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unreachable upstream is 502",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel load: one upstream request per key",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

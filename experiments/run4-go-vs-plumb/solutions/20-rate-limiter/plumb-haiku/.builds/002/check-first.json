@@ -1,0 +1,74 @@
+{
+ "cases": [
+  {
+   "name": "first checks count down remaining",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "empty bucket is denied with Retry-After",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "denied check takes no token",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "keys are independent and case-sensitive",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode and quote keys",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stats after sequential checks",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad requests are 400 and not counted",
+   "ok": false,
+   "detail": "([HTTP 500 'internal server error', HTTP 500 'internal server error', HTTP 500 'internal server error', HTTP 500 'internal server error', HTTP 400 '{\"error\":\"key is missing or empty\"}', HTTP 500 'internal server error'], {'allowed': 14, 'denied': 2, 'keys': 7})"
+  },
+  {
+   "name": "wrong method and unknown path",
+   "ok": false,
+   "detail": "(HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}', HTTP 404 '{\"error\":\"not found\"}')"
+  },
+  {
+   "name": "parallel burst on one key: exactly capacity allowed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel checks on many keys are independent",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stats add up exactly after parallel load",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "tokens refill over time",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "refill never exceeds capacity",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid configuration exits with code 2",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

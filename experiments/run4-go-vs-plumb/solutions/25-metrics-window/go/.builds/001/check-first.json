@@ -1,0 +1,84 @@
+{
+ "cases": [
+  {
+   "name": "aggregates of a small batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "nearest-rank percentiles of 1..100",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "nearest-rank percentiles of small sets",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "negative and fractional values",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unknown name has empty aggregates",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "unicode names, compared exactly",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "invalid samples reject the whole request",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "bad paths and methods",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "parallel ingestion keeps exact counts",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stats totals",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large batch",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "samples leave the window as time advances",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "late samples are dropped at the boundary",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "one clock for all names",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "a batch is processed in order",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stats count dropped samples",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

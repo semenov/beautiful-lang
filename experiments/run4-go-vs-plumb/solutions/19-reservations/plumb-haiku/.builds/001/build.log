@@ -1,0 +1,5 @@
+error: expected an expression, found `let`
+  --> main.plumb:122:8
+    |
+122 |     if let some(key) = idempotency_key {
+    |        ^^^

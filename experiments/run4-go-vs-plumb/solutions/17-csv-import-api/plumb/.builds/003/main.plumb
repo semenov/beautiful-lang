@@ -1,0 +1,219 @@
+import csv
+import db
+import env
+import http
+import sql
+
+type ImportError {
+  row: Int
+  field: String
+  message: String
+}
+
+type Imported {
+  imported: Int
+}
+
+type Failed {
+  imported: Int
+  errors: List<ImportError>
+}
+
+type User {
+  email: String
+  name: String
+  age: Int
+}
+
+type Users {
+  users: List<User>
+}
+
+type ErrorBody {
+  error: String
+}
+
+type Count {
+  c: Int
+}
+
+type Row {
+  email: String
+  name: String
+  age: Int
+}
+
+fn is_space_point(c: Int) -> Bool {
+  return (c >= 9 and c <= 13) or c == 32 or c == 0x85 or c == 0xA0 or c == 0x1680 or
+    (c >= 0x2000 and c <= 0x200A) or c == 0x2028 or c == 0x2029 or c == 0x202F or
+    c == 0x205F or c == 0x3000
+}
+
+fn valid_email(email: String) -> Bool {
+  let points = email.code_points()
+  if points.length > 254 {
+    return false
+  }
+  for p in points {
+    if is_space_point(p) {
+      return false
+    }
+  }
+  let parts = email.split("@")
+  if parts.length != 2 {
+    return false
+  }
+  let local = parts[0]
+  let domain = parts[1]
+  if local.is_empty() {
+    return false
+  }
+  let n = domain.length
+  if n < 3 {
+    return false
+  }
+  return domain.slice(from: 1, to: n - 1).contains(".")
+}
+
+fn valid_age(text: String) -> Bool {
+  if not text.is_digit() {
+    return false
+  }
+  let age = try text.to_int() catch err {
+    return false
+  }
+  return age >= 13 and age <= 120
+}
+
+fn stored(conn: db.Connection, email: String) throws -> Bool {
+  let rows = try conn.query<Count>("select count(*) as c from users where email = ?", [email])
+  return rows[0].c > 0
+}
+
+// Checks every data row. Returns the errors, in order.
+fn validate(conn: db.Connection, records: List<List<String>>) throws -> List<ImportError> {
+  var errors: List<ImportError> = []
+  var seen: Set<String> = {}
+  var number = 0
+  for rec in records.drop(1) {
+    number += 1
+    if rec.length != 3 {
+      errors.append(ImportError(row: number, field: "row", message: "wrong number of fields"))
+      continue
+    }
+    let r = rec
+    // columns were reordered by the caller: email, name, age
+    let email = r[0]
+    if not valid_email(email) {
+      errors.append(ImportError(row: number, field: "email", message: "invalid email"))
+    } else {
+      let key = email.lower()
+      if try stored(conn, key) {
+        errors.append(ImportError(row: number, field: "email", message: "email already exists"))
+      } else if seen.contains(key) {
+        errors.append(ImportError(row: number, field: "email", message: "duplicate email in file"))
+      }
+      seen.add(key)
+    }
+    let name_length = r[1].code_points().length
+    if name_length < 1 or name_length > 100 {
+      errors.append(ImportError(row: number, field: "name", message: "invalid name"))
+    }
+    if not valid_age(r[2]) {
+      errors.append(ImportError(row: number, field: "age", message: "invalid age"))
+    }
+  }
+  return errors
+}
+
+fn bad_csv() -> http.Response {
+  return error_json(400, "invalid csv")
+}
+
+fn error_json(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+// Reorders every record to email, name, age by the header. Fails on a bad header.
+fn arrange(records: List<List<String>>) throws -> List<List<String>> {
+  let header = records[0]
+  if header.length != 3 {
+    throw csv.BadCsv()
+  }
+  let e = header.index_of("email")
+  let nm = header.index_of("name")
+  let a = header.index_of("age")
+  if e is none or nm is none or a is none {
+    throw csv.BadCsv()
+  }
+  var out: List<List<String>> = [["email", "name", "age"]]
+  for rec in records.drop(1) {
+    if rec.length == 3 {
+      out.append([rec[e], rec[nm], rec[a]])
+    } else {
+      out.append(rec)
+    }
+  }
+  return out
+}
+
+fn import_csv(req: http.Request, conn: db.Connection, gate: Shared<Int>) throws -> http.Response {
+  let parsed = try csv.parse(req.body) catch err {
+    return bad_csv()
+  }
+  let records = try arrange(parsed) catch err {
+    return bad_csv()
+  }
+  // imports run one after another
+  with g = gate.lock() {
+    g += 1
+    let errors = try validate(conn, records)
+    if not errors.is_empty() {
+      return http.json(422, Failed(imported: 0, errors: errors))
+    }
+    let rows = records.drop(1)
+    let _ = try conn.transaction(() => {
+      for r in rows {
+        try conn.execute("insert into users (email, name, age) values (?, ?, ?)", [r[0].lower(), r[1], r[2].to_int()])
+      }
+    })
+    return http.json(201, Imported(imported: rows.length))
+  }
+}
+
+fn list_users(conn: db.Connection) throws -> http.Response {
+  let rows = try conn.query<Row>("select email, name, age from users order by email", [])
+  var users: List<User> = []
+  for r in rows {
+    users.append(User(email: r.email, name: r.name, age: r.age))
+  }
+  return http.json(200, Users(users: users))
+}
+
+fn route(req: http.Request, conn: db.Connection, gate: Shared<Int>) throws -> http.Response {
+  if req.path == "/import" {
+    if req.method != "POST" {
+      return error_json(405, "method not allowed")
+    }
+    return try import_csv(req, conn, gate)
+  }
+  if req.path == "/users" {
+    if req.method != "GET" {
+      return error_json(405, "method not allowed")
+    }
+    return try list_users(conn)
+  }
+  return error_json(404, "not found")
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int()
+  let path = env.get("DB_PATH") ?? "users.db"
+  with conn = try db.open(path) {
+    try conn.execute("create table if not exists users (email text not null primary key, name text not null, age integer not null)", [])
+    let gate = Shared<Int>(0)
+    var router = http.Router()
+    router.use((req, next) => try route(req, conn, gate))
+    try http.serve_with(router, options: http.ServerOptions(port: port, host: "127.0.0.1", max_body: 1_000_000_000))
+  }
+}

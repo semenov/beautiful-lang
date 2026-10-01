@@ -1,0 +1,74 @@
+{
+ "cases": [
+  {
+   "name": "happy path: quoting, unicode, verbatim names, lowercased emails",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "CRLF, no final newline, columns in another order, spaces kept",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "header only imports nothing",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "per-row errors in the stated shape and order; nothing stored",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "stored email repeated in file: already exists on every row",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "email rule",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "name and age bounds",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "malformed CSV is 400",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "one bad row among many: nothing stored",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "large import of 5000 rows",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent imports sharing an email: exactly one succeeds",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "concurrent imports of different emails all succeed",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "users ordered by email and survive a restart",
+   "ok": true,
+   "detail": ""
+  },
+  {
+   "name": "404 and 405",
+   "ok": true,
+   "detail": ""
+  }
+ ]
+}

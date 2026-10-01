@@ -1,0 +1,339 @@
+import csv
+
+type ParseError implements Error {
+  message_text: String
+
+  fn message(self) -> String {
+    return self.message_text
+  }
+}
+
+type ParsedField {
+  value: String
+  end_pos: Int
+}
+
+// Parse a CSV field starting at position pos in the text
+// Returns the field value and the position after the field
+fn parse_field(text: String, pos: Int) -> ParsedField? {
+  if pos >= text.length {
+    return none
+  }
+
+  if text[pos] == '"' {
+    // Quoted field
+    var field = ""
+    var i = pos + 1
+    while i < text.length {
+      if text[i] == '"' {
+        i += 1
+        if i >= text.length or text[i] == ',' or text[i] == '\n' or text[i] == '\r' {
+          return ParsedField(value: field, end_pos: i)
+        } else {
+          // Invalid: quote not followed by comma or newline
+          return none
+        }
+      } else {
+        field += String(text[i])
+        i += 1
+      }
+    }
+    // Unterminated quote
+    return none
+  } else {
+    // Unquoted field
+    var field = ""
+    var i = pos
+    while i < text.length {
+      let c = text[i]
+      if c == ',' or c == '\n' or c == '\r' {
+        return ParsedField(value: field, end_pos: i)
+      } else {
+        field += String(c)
+        i += 1
+      }
+    }
+    // End of text
+    return ParsedField(value: field, end_pos: i)
+  }
+}
+
+// Parse a single CSV record starting at position pos
+// Returns the fields and the position after the record
+fn parse_record(text: String, pos: Int) -> {fields: List<String>, end_pos: Int}? {
+  var fields: List<String> = []
+  var i = pos
+
+  while i < text.length {
+    if let field_result = parse_field(text, i: i) {
+      fields.append(field_result.value)
+      i = field_result.end_pos
+
+      if i >= text.length {
+        break
+      }
+
+      let c = text[i]
+      if c == ',' {
+        i += 1
+      } else if c == '\r' {
+        i += 1
+        if i < text.length and text[i] == '\n' {
+          i += 1
+        }
+        break
+      } else if c == '\n' {
+        i += 1
+        break
+      }
+    } else {
+      return none
+    }
+  }
+
+  return (fields: fields, end_pos: i)
+}
+
+fn parse_csv(text: String) throws -> {records: List<List<String>>, line_count: Int} {
+  var records: List<List<String>> = []
+  var pos = 0
+  var line = 1
+
+  while pos < text.length {
+    // Skip empty lines
+    if text[pos] == '\n' {
+      line += 1
+      pos += 1
+      continue
+    }
+    if text[pos] == '\r' {
+      if pos + 1 < text.length and text[pos + 1] == '\n' {
+        line += 1
+        pos += 2
+      } else {
+        line += 1
+        pos += 1
+      }
+      continue
+    }
+
+    if let record_result = parse_record(text, pos: pos) {
+      if record_result.fields.length > 0 {
+        records.append(record_result.fields)
+      }
+      pos = record_result.end_pos
+      line += 1
+    } else {
+      throw ParseError(message_text: "line ${line}: unterminated quote")
+    }
+  }
+
+  return (records: records, line_count: line)
+}
+
+fn parse_amount(text: String) -> Decimal? {
+  let trimmed = text.trim()
+  if trimmed.is_empty() {
+    return none
+  }
+
+  // Check format: optional minus, digits, optional dot and 1-2 digits
+  var i = 0
+  if trimmed[0] == '-' {
+    i += 1
+  }
+
+  if i >= trimmed.length or (trimmed[i] < '0' or trimmed[i] > '9') {
+    return none
+  }
+
+  // Read digits before decimal
+  while i < trimmed.length and trimmed[i] >= '0' and trimmed[i] <= '9' {
+    i += 1
+  }
+
+  // Check for decimal point
+  if i < trimmed.length and trimmed[i] == '.' {
+    i += 1
+    if i >= trimmed.length or (trimmed[i] < '0' or trimmed[i] > '9') {
+      return none
+    }
+
+    let decimal_start = i
+    while i < trimmed.length and trimmed[i] >= '0' and trimmed[i] <= '9' {
+      i += 1
+    }
+
+    let decimal_digits = i - decimal_start
+    if decimal_digits > 2 {
+      return none
+    }
+  }
+
+  // Must be at end of string
+  if i != trimmed.length {
+    return none
+  }
+
+  // Parse using Decimal
+  if let value = try trimmed.to_float().to_decimal() {
+    return value
+  }
+  return none
+}
+
+fn format_amount(amount: Decimal) -> String {
+  if amount == 0 {
+    return "0.00"
+  }
+  return amount.format(places: 2)
+}
+
+fn quote_csv_field(field: String) -> String {
+  if field.contains(",") or field.contains("\"") or field.contains("\n") or field.contains("\r") {
+    let quoted = field.replace("\"", with: "\"\"")
+    return "\"${quoted}\""
+  }
+  return field
+}
+
+fn main() throws {
+  let args = process.args()
+
+  // Parse command-line arguments
+  var by_column: String? = none
+  var file: String? = none
+  var i = 0
+
+  while i < args.length {
+    let arg = args[i]
+    if arg == "--by" {
+      i += 1
+      if i >= args.length {
+        eprint("usage: app --by COLUMN [FILE]")
+        process.exit(64)
+      }
+      by_column = args[i]
+      i += 1
+    } else if arg.starts_with("--") {
+      eprint("usage: app --by COLUMN [FILE]")
+      process.exit(64)
+    } else {
+      if file is some(_) {
+        eprint("usage: app --by COLUMN [FILE]")
+        process.exit(64)
+      }
+      file = arg
+      i += 1
+    }
+  }
+
+  if by_column is none {
+    eprint("usage: app --by COLUMN [FILE]")
+    process.exit(64)
+  }
+
+  let group_by = by_column ?? ""
+
+  // Read input
+  let input_text = if let f = file {
+    try files.read(f) catch err {
+      if err is files.NotFound {
+        eprint("error: cannot read ${f}")
+      } else {
+        eprint("error: cannot read ${f}")
+      }
+      process.exit(2)
+    }
+  } else {
+    // Read from stdin
+    var lines: List<String> = []
+    while let line = try stdin.read_line() {
+      lines.append(line)
+      lines.append("\n")
+    }
+    lines.join("")
+  }
+
+  if input_text.is_empty() {
+    eprint("error: empty input")
+    process.exit(2)
+  }
+
+  // Parse CSV
+  let parse_result = try parse_csv(input_text)
+  let records = parse_result.records
+
+  if records.length == 0 {
+    eprint("error: empty input")
+    process.exit(2)
+  }
+
+  let header = records[0]
+
+  // Find column indices
+  var amount_index: Int? = none
+  var group_index: Int? = none
+
+  for item in header.indexed() {
+    if item.value == "amount" {
+      amount_index = item.index
+    }
+    if item.value == group_by {
+      group_index = item.index
+    }
+  }
+
+  if amount_index is none {
+    eprint("error: missing column amount")
+    process.exit(2)
+  }
+
+  if group_index is none {
+    eprint("error: missing column ${group_by}")
+    process.exit(2)
+  }
+
+  let amount_col = amount_index ?? 0
+  let group_col = group_index ?? 0
+
+  // Group and sum amounts
+  var groups: Map<String, Decimal> = {}
+  var has_bad_record = false
+
+  for i in 1..<records.length {
+    let record = records[i]
+
+    // Check field count
+    if record.length != header.length {
+      eprint("line ${i + 1}: wrong number of fields")
+      has_bad_record = true
+      continue
+    }
+
+    // Parse amount
+    if let amount = parse_amount(record[amount_col]) {
+      let group_value = record[group_col]
+      let current = groups[group_value] ?? 0
+      groups[group_value] = current + amount
+    } else {
+      eprint("line ${i + 1}: invalid amount")
+      has_bad_record = true
+    }
+  }
+
+  // Sort and output
+  var output: List<List<String>> = []
+  output.append([group_by, "total"])
+
+  let sorted_groups = groups.entries().sorted_by(e => e.key)
+  for entry in sorted_groups {
+    output.append([entry.key, format_amount(entry.value)])
+  }
+
+  print(csv.encode(output))
+
+  if has_bad_record {
+    process.exit(1)
+  }
+}

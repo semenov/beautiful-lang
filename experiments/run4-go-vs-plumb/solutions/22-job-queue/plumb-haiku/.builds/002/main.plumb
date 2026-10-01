@@ -1,0 +1,212 @@
+import http
+import json
+import time
+import env
+
+type JobRequest {
+  ms: Int
+  input: String
+}
+
+enum JobStatus {
+  Queued
+  Running
+  Done
+  Cancelled
+}
+
+type Job {
+  id: Int
+  ms: Int
+  input: String
+  status: JobStatus
+  result: String? = none
+}
+
+type JobResponse {
+  id: Int
+  status: String
+  result: String? = none
+}
+
+type JobStatsResponse {
+  queued: Int
+  running: Int
+  done: Int
+  cancelled: Int
+}
+
+type AppState {
+  jobs: Map<Int, Job> = {}
+  next_id: Int = 1
+  workers_busy: Int = 0
+  last_started: Int = 0
+  shutdown: Bool = false
+}
+
+fn reverse_string(s: String) -> String {
+  // Reverse by Unicode code point (using characters)
+  let chars = s.chars()
+  let reversed = chars.reversed()
+  return reversed.join("")
+}
+
+fn run_job(job: Job, state: Shared<AppState>) throws {
+  // Wait for the job's turn to start
+  let should_run = with s = state.lock() {
+    if s.shutdown {
+      return none
+    }
+    let can_start = s.workers_busy < 2 and s.last_started + 1 >= job.id
+    if can_start {
+      s.workers_busy += 1
+      s.last_started = job.id
+    }
+    can_start
+  }
+
+  if should_run is none or not should_run {
+    return
+  }
+
+  // Sleep for the job's duration
+  if job.ms > 0 {
+    try time.sleep(time.milliseconds(job.ms))
+  }
+
+  // Update job with result
+  with s = state.lock() {
+    if s.jobs[job.id] is some(j) {
+      let mut updated_job = j
+      updated_job.result = reverse_string(job.input)
+      updated_job.status = Done
+      s.jobs[job.id] = updated_job
+    }
+    s.workers_busy -= 1
+  }
+}
+
+fn handle_post_jobs(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  with s = state.lock() {
+    if s.shutdown {
+      return http.text(503, "{\"error\": \"Service shutting down\"}")
+    }
+  }
+
+  let body_text = req.text()
+  let job_req = try json.decode<JobRequest>(body_text) catch err {
+    return http.json(400, {"error": "Invalid job request"})
+  }
+
+  // Validate input
+  if job_req.ms < 0 or job_req.ms > 60000 {
+    return http.json(400, {"error": "ms must be between 0 and 60000"})
+  }
+
+  let new_id = with s = state.lock() {
+    if s.shutdown {
+      return http.text(503, "{\"error\": \"Service shutting down\"}")
+    }
+    let id = s.next_id
+    s.next_id += 1
+    let new_job = Job(id: id, ms: job_req.ms, input: job_req.input, status: Queued)
+    s.jobs[id] = new_job
+    id
+  }
+
+  return http.json(202, {"id": new_id})
+}
+
+fn handle_get_job(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch _ {
+    return http.json(404, {"error": "Job not found"})
+  }
+
+  with s = state.read() {
+    if s.jobs[id] is some(job) {
+      return http.json(200, JobResponse(
+        id: job.id,
+        status: match job.status {
+          Queued => "queued"
+          Running => "running"
+          Done => "done"
+          Cancelled => "cancelled"
+        },
+        result: job.result
+      ))
+    }
+  }
+
+  return http.json(404, {"error": "Job not found"})
+}
+
+fn handle_cancel_job(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  let id_str = req.param("id") ?? ""
+  let id = try id_str.to_int() catch _ {
+    return http.json(404, {"error": "Job not found"})
+  }
+
+  with s = state.lock() {
+    if s.jobs[id] is some(job) {
+      if job.status is Done or job.status is Cancelled {
+        return http.json(409, {"error": "Cannot cancel job"})
+      }
+      let mut updated_job = job
+      updated_job.status = Cancelled
+      s.jobs[id] = updated_job
+      return http.json(200, JobResponse(
+        id: job.id,
+        status: "cancelled",
+        result: none
+      ))
+    }
+  }
+
+  return http.json(404, {"error": "Job not found"})
+}
+
+fn handle_stats(req: http.Request, state: Shared<AppState>) throws -> http.Response {
+  with s = state.read() {
+    var queued_count = 0
+    var running_count = 0
+    var done_count = 0
+    var cancelled_count = 0
+
+    for entry in s.jobs {
+      match entry.value.status {
+        Queued => { queued_count += 1 }
+        Running => { running_count += 1 }
+        Done => { done_count += 1 }
+        Cancelled => { cancelled_count += 1 }
+      }
+    }
+
+    return http.json(200, JobStatsResponse(
+      queued: queued_count,
+      running: running_count,
+      done: done_count,
+      cancelled: cancelled_count
+    ))
+  }
+}
+
+fn main() throws {
+  let port = try env.get("PORT") ?? "8080"
+  let workers_str = try env.get("WORKERS") ?? "2"
+  let grace_ms_str = try env.get("SHUTDOWN_GRACE_MS") ?? "5000"
+
+  let port_num = try port.to_int()
+  let workers_num = try workers_str.to_int()
+  let grace_ms_num = try grace_ms_str.to_int()
+
+  let state = Shared<AppState>(AppState())
+
+  var router = http.Router()
+  router.post("/jobs", req => try handle_post_jobs(req, state))
+  router.get("/jobs/:id", req => try handle_get_job(req, state))
+  router.post("/jobs/:id/cancel", req => try handle_cancel_job(req, state))
+  router.get("/stats", req => try handle_stats(req, state))
+
+  try http.serve(router, port: port_num)
+}

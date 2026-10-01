@@ -1,0 +1,301 @@
+import http
+import json
+import url
+import env
+import process
+
+type Store {
+  data: Map<String, json.Value> = {}
+}
+
+type GetResponse {
+  key: String
+  value: json.Value
+}
+
+type IncResponse {
+  key: String
+  value: Int
+}
+
+type SnapshotResponse {
+  count: Int
+  items: Map<String, json.Value>
+}
+
+type ErrorResponse {
+  error: String
+  value: json.Value? = none
+}
+
+type PutRequest {
+  value: json.Value
+}
+
+type CasRequest {
+  expected: json.Value?
+  value: json.Value
+}
+
+fn extract_key(path: String, prefix: String) -> String? {
+  if path.starts_with(prefix) {
+    return path.slice(from: prefix.length, to: path.length)
+  }
+  return none
+}
+
+fn get_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let raw_key = match extract_key(req.path, "/kv/") {
+    some(k) => k
+    none => return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let key = try url.decode(raw_key) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid key"))
+  }
+
+  if key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is empty"))
+  }
+
+  with s = store.read() {
+    if s.data[key] is some(value) {
+      return http.json(200, GetResponse(key: key, value: value))
+    } else {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+  }
+}
+
+fn put_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let raw_key = match extract_key(req.path, "/kv/") {
+    some(k) => k
+    none => return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let key = try url.decode(raw_key) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid key"))
+  }
+
+  if key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is empty"))
+  }
+
+  let body_obj = try json.decode<PutRequest>(req.text()) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid request"))
+  }
+
+  let value = body_obj.value
+
+  // Validate that value is a string or integer
+  match value {
+    json.Value.String(_) => {}
+    json.Value.Number(n) => {
+      let _ = try n.to_int() catch _ {
+        return http.json(400, ErrorResponse(error: "value must be a string or integer"))
+      }
+    }
+    _ => return http.json(400, ErrorResponse(error: "value must be a string or integer"))
+  }
+
+  with s = store.lock() {
+    s.data[key] = value
+  }
+
+  return http.json(200, GetResponse(key: key, value: value))
+}
+
+fn delete_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let raw_key = match extract_key(req.path, "/kv/") {
+    some(k) => k
+    none => return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let key = try url.decode(raw_key) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid key"))
+  }
+
+  if key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is empty"))
+  }
+
+  with s = store.lock() {
+    if s.data[key] is some(_) {
+      s.data.remove(key)
+      return http.Response(status: 204, body: Bytes())
+    } else {
+      return http.json(404, ErrorResponse(error: "not found"))
+    }
+  }
+}
+
+fn incr_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let raw_key = match extract_key(req.path, "/incr/") {
+    some(k) => k
+    none => return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let key = try url.decode(raw_key) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid key"))
+  }
+
+  if key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is empty"))
+  }
+
+  let by_str = req.query("by") ?? "1"
+  let by = try by_str.to_int() catch _ {
+    return http.json(400, ErrorResponse(error: "by must be an integer"))
+  }
+
+  with s = store.lock() {
+    let current_value = match s.data[key] {
+      some(v) => v
+      none => json.integer(0)
+    }
+
+    // Check that current value is an integer
+    let current_int = match current_value {
+      json.Value.Number(n) => {
+        try n.to_int() catch _ {
+          return http.json(409, ErrorResponse(error: "value is not an integer", value: current_value))
+        }
+      }
+      _ => return http.json(409, ErrorResponse(error: "value is not an integer", value: current_value))
+    }
+
+    // Check for overflow
+    let new_value = current_int + by
+
+    s.data[key] = json.integer(new_value)
+    return http.json(200, IncResponse(key: key, value: new_value))
+  }
+}
+
+fn cas_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  let raw_key = match extract_key(req.path, "/cas/") {
+    some(k) => k
+    none => return http.json(404, ErrorResponse(error: "not found"))
+  }
+
+  let key = try url.decode(raw_key) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid key"))
+  }
+
+  if key.is_empty() {
+    return http.json(400, ErrorResponse(error: "key is empty"))
+  }
+
+  let body_obj = try json.decode<CasRequest>(req.text()) catch _ {
+    return http.json(400, ErrorResponse(error: "invalid request"))
+  }
+
+  let expected = body_obj.expected
+  let new_value = body_obj.value
+
+  // Validate that new_value is a string or integer
+  match new_value {
+    json.Value.String(_) => {}
+    json.Value.Number(n) => {
+      let _ = try n.to_int() catch _ {
+        return http.json(400, ErrorResponse(error: "value must be a string or integer"))
+      }
+    }
+    _ => return http.json(400, ErrorResponse(error: "value must be a string or integer"))
+  }
+
+  with s = store.lock() {
+    let current = s.data[key]
+
+    let matches = if current is some(c) {
+      if expected is some(e) {
+        values_equal(c, e)
+      } else {
+        false
+      }
+    } else {
+      if expected is none {
+        true
+      } else {
+        false
+      }
+    }
+
+    if matches {
+      s.data[key] = new_value
+      return http.json(200, GetResponse(key: key, value: new_value))
+    } else {
+      let current_for_error = current ?? json.Value.Null
+      return http.json(409, ErrorResponse(error: "cas failed", value: current_for_error))
+    }
+  }
+}
+
+fn values_equal(a: json.Value, b: json.Value) -> Bool {
+  return match a {
+    json.Value.Null => {
+      match b {
+        json.Value.Null => true
+        _ => false
+      }
+    }
+    json.Value.Bool(va) => {
+      match b {
+        json.Value.Bool(vb) => va == vb
+        _ => false
+      }
+    }
+    json.Value.String(sa) => {
+      match b {
+        json.Value.String(sb) => sa == sb
+        _ => false
+      }
+    }
+    json.Value.Number(na) => {
+      match b {
+        json.Value.Number(nb) => {
+          let a_int = try na.to_int() catch _ { return false }
+          let b_int = try nb.to_int() catch _ { return false }
+          a_int == b_int
+        }
+        _ => false
+      }
+    }
+    _ => false
+  }
+}
+
+fn snapshot_handler(req: http.Request, store: Shared<Store>) throws -> http.Response {
+  with s = store.read() {
+    let response = SnapshotResponse(
+      count: s.data.entries().length,
+      items: s.data
+    )
+    return http.json(200, response)
+  }
+}
+
+fn make_router(store: Shared<Store>) -> http.Router {
+  var router = http.Router()
+
+  router.get("/kv/*key", req => try get_handler(req, store))
+  router.put("/kv/*key", req => try put_handler(req, store))
+  router.delete("/kv/*key", req => try delete_handler(req, store))
+  router.post("/incr/*key", req => try incr_handler(req, store))
+  router.post("/cas/*key", req => try cas_handler(req, store))
+  router.get("/snapshot", req => try snapshot_handler(req, store))
+
+  router.any("*path", _ => http.json(404, ErrorResponse(error: "not found")))
+
+  return router
+}
+
+fn main() throws {
+  let port = try (env.get("PORT") ?? "8080").to_int() catch _ {
+    print("PORT must be an integer")
+    process.exit(1)
+  }
+
+  let store = Shared<Store>(Store())
+  try http.serve(make_router(store), port: port)
+}

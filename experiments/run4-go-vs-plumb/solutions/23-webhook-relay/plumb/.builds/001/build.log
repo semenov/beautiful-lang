@@ -1,0 +1,6 @@
+error: `catch` needs `try` before the call it handles
+  --> main.plumb:54:31
+   |
+54 |   let n = raw.trim().to_int() catch err {
+   |                               ^^^^^
+   = help: write `try f(x) catch err { ... }`

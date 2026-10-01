@@ -1,0 +1,19 @@
+error: `log` is imported but not used
+  --> main.plumb:3:8
+  |
+3 | import log
+  |        ^^^
+  = help: remove the import
+error: `handle` has 3 or more parameters: name every argument after the first
+  --> main.plumb:136:42
+    |
+136 |   router.any("/", req => try handle(req, cfg, state))
+    |                                          ^^^
+    = help: write (…, cfg: …, state: …)
+error: `handle` has 3 or more parameters: name every argument after the first
+  --> main.plumb:137:47
+    |
+137 |   router.any("/*rest", req => try handle(req, cfg, state))
+    |                                               ^^^
+    = help: write (…, cfg: …, state: …)
+3 error(s)

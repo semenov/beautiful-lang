@@ -1,0 +1,30 @@
+error: this value may be missing
+  --> main.plumb:119:33
+    |
+119 |         if s.samples[item.name].length >= 4096 and s.samples[item.name].length % 4096 == 0 {
+    |                                 ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.length }`, or give a fallback with `??`
+error: this value may be missing
+  --> main.plumb:119:73
+    |
+119 |         if s.samples[item.name].length >= 4096 and s.samples[item.name].length % 4096 == 0 {
+    |                                                                         ^^^^^^
+    = help: unwrap it first: `if x is some(v) { v.length }`, or give a fallback with `??`
+error: expected `List<Sample>`, found `List<Sample>?`
+  --> main.plumb:120:44
+    |
+120 |           s.samples[item.name] = in_window(s.samples[item.name], now: now, window_ms: s.window_ms)
+    |                                            ^^^^^^^^^^^^^^^^^^^^
+    = help: the value may be missing: use `x ?? fallback`, or `if x is some(v) { ... }`
+error: a name bound by `is` works only in an `if` condition, alone or joined with `and`
+  --> main.plumb:139:50
+    |
+139 |     if s.now is some(now) and s.samples[name] is some(list) {
+    |                                                  ^^^^^^^^^^
+    = help: with `or` (or outside `if`) the name may not be set: test without a name, `x is some(_)`, or write `if x is some(v) { ... }`
+error: unknown name `list`
+  --> main.plumb:141:21
+    |
+141 |       for sample in list {
+    |                     ^^^^
+5 error(s)

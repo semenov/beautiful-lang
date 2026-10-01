@@ -1,0 +1,221 @@
+import env
+import http
+import json
+
+type Sample {
+  ts: Int
+  value: Float
+}
+
+type Store {
+  window_ms: Int
+  now: Int? = none
+  accepted: Int = 0
+  dropped: Int = 0
+  since_prune: Int = 0
+  samples: Map<String, List<Sample>> = {}
+}
+
+type Incoming {
+  name: String
+  value: Float
+  ts: Int
+}
+
+type Counts {
+  accepted: Int
+  dropped: Int
+}
+
+type Aggregate {
+  name: String
+  count: Int
+  sum: Float
+  min: Float?
+  max: Float?
+  p50: Float?
+  p99: Float?
+}
+
+type Stats {
+  accepted: Int
+  dropped: Int
+  now: Int?
+}
+
+type ErrorBody {
+  error: String
+}
+
+fn fail(status: Int, message: String) -> http.Response {
+  return http.json(status, ErrorBody(error: message))
+}
+
+// One sample from its JSON form, or an error saying what is wrong with it.
+fn parse_sample(v: json.Value) throws -> Incoming {
+  let fields = match v {
+    json.Value.Object(f) => f
+    _ => throw Failure(message: "a sample must be an object")
+  }
+  let name = match fields["name"] {
+    some(json.Value.String(s)) => s
+    _ => throw Failure(message: "name must be a string")
+  }
+  if name.is_empty() {
+    throw Failure(message: "name must not be empty")
+  }
+  let value = match fields["value"] {
+    some(json.Value.Number(n)) => try n.to_float()
+    _ => throw Failure(message: "value must be a number")
+  }
+  let ts = match fields["ts"] {
+    some(json.Value.Number(n)) => try n.to_int() catch err {
+      throw Failure(message: "ts must be an integer")
+    }
+    _ => throw Failure(message: "ts must be an integer")
+  }
+  if ts < 0 {
+    throw Failure(message: "ts must not be negative")
+  }
+  return Incoming(name: name, value: value, ts: ts)
+}
+
+fn parse_body(text: String) throws -> List<Incoming> {
+  let v = try json.parse(text) catch err {
+    throw Failure(message: "body is not valid JSON")
+  }
+  if v is json.Value.Array(items) {
+    var out: List<Incoming> = []
+    for item in items {
+      out.append(try parse_sample(item))
+    }
+    return out
+  }
+  return [try parse_sample(v)]
+}
+
+// Keeps only the samples still in the window.
+fn in_window(samples: List<Sample>, now: Int, window_ms: Int) -> List<Sample> {
+  let low = now - window_ms
+  return samples.filter(s => s.ts > low)
+}
+
+fn ingest(store: Shared<Store>, items: List<Incoming>) -> Counts {
+  with s = store.lock() {
+    var accepted = 0
+    var dropped = 0
+    for item in items {
+      let now = max(s.now ?? item.ts, item.ts)
+      s.now = now
+      if item.ts <= now - s.window_ms {
+        dropped += 1
+      } else {
+        accepted += 1
+        if s.samples[item.name] is none {
+          s.samples[item.name] = []
+        }
+        s.samples[item.name].append(Sample(ts: item.ts, value: item.value))
+        s.since_prune += 1
+        // Now and then, drop expired samples, so a long-running service
+        // does not hold everything it was ever sent.
+        if s.since_prune >= 10000 {
+          s.since_prune = 0
+          let names = s.samples.keys()
+          for n in names {
+            s.samples[n] = in_window(s.samples[n] ?? [], now: now, window_ms: s.window_ms)
+          }
+        }
+      }
+    }
+    s.accepted += accepted
+    s.dropped += dropped
+    return Counts(accepted: accepted, dropped: dropped)
+  }
+}
+
+// The p-th percentile by nearest rank: the value at position ceil(p * n / 100).
+fn nearest_rank(sorted: List<Float>, p: Int) -> Float {
+  let rank = (p * sorted.length + 99).div(100)
+  return sorted[rank - 1]
+}
+
+fn aggregate(store: Shared<Store>, name: String) -> Aggregate {
+  with s = store.read() {
+    var values: List<Float> = []
+    if s.now is some(now) {
+      let low = now - s.window_ms
+      for sample in s.samples[name] ?? [] {
+        if sample.ts > low {
+          values.append(sample.value)
+        }
+      }
+    }
+    if values.is_empty() {
+      return Aggregate(name: name, count: 0, sum: 0.0, min: none, max: none, p50: none, p99: none)
+    }
+    var sum = 0.0
+    for v in values {
+      sum += v
+    }
+    let sorted = values.sorted()
+    return Aggregate(
+      name: name,
+      count: sorted.length,
+      sum: sum,
+      min: sorted[0],
+      max: sorted[sorted.length - 1],
+      p50: nearest_rank(sorted, p: 50),
+      p99: nearest_rank(sorted, p: 99)
+    )
+  }
+}
+
+fn post_metrics(req: http.Request, store: Shared<Store>) -> http.Response {
+  let items = try parse_body(req.text()) catch err {
+    return fail(400, err.message())
+  }
+  return http.json(200, ingest(store, items: items))
+}
+
+fn get_aggregate(req: http.Request, store: Shared<Store>) -> http.Response {
+  let name = req.query("name") ?? ""
+  if req.query("name") is none {
+    return fail(400, "name is required")
+  }
+  return http.json(200, aggregate(store, name: name))
+}
+
+fn get_stats(store: Shared<Store>) -> http.Response {
+  with s = store.read() {
+    return http.json(200, Stats(accepted: s.accepted, dropped: s.dropped, now: s.now))
+  }
+}
+
+fn allow_only(req: http.Request, method: String, handler: fn() -> http.Response) -> http.Response {
+  if req.method != method {
+    return fail(405, "method not allowed").with_header("allow", method)
+  }
+  return handler()
+}
+
+fn make_router(store: Shared<Store>) -> http.Router {
+  var router = http.Router()
+  router.any("/metrics", req => allow_only(req, method: "POST", handler: () => post_metrics(req, store)))
+  router.any("/aggregate", req => allow_only(req, method: "GET", handler: () => get_aggregate(req, store)))
+  router.any("/stats", req => allow_only(req, method: "GET", handler: () => get_stats(store)))
+  router.any("/*rest", req => fail(404, "not found"))
+  return router
+}
+
+fn main() throws {
+  let window_ms = match env.get("WINDOW_MS") {
+    some(text) => try text.trim().to_int()
+    none => 60000
+  }
+  let port = match env.get("PORT") {
+    some(text) => try text.trim().to_int()
+    none => 8080
+  }
+  let store = Shared<Store>(Store(window_ms: window_ms))
+  try http.serve_with(make_router(store), options: http.ServerOptions(port: port, host: "127.0.0.1"))
+}

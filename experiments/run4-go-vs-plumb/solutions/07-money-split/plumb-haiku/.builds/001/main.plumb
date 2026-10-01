@@ -1,0 +1,250 @@
+import files
+import io
+
+type Expense {
+  payer: String
+  amount_cents: Int
+  split: List<Participant>
+}
+
+type Participant {
+  name: String
+  shares: Int
+}
+
+type Transfer {
+  from: String
+  to: String
+  amount_cents: Int
+}
+
+fn main() throws {
+  let args = process.args()
+
+  // Validate arguments
+  if args.length > 1 {
+    eprint("usage: app [FILE]")
+    process.exit(64)
+  }
+
+  if args.length > 0 and args[0].starts_with("-") {
+    eprint("usage: app [FILE]")
+    process.exit(64)
+  }
+
+  // Read input
+  let input = if args.length == 0 {
+    try io.read_all().text()
+  } else {
+    let file = args[0]
+    try files.read(file) catch err {
+      eprint("error: cannot read ${file}")
+      process.exit(2)
+    }
+  }
+
+  // Parse expenses
+  let lines = input.lines()
+  var expenses: List<Expense> = []
+
+  for (i, line) in lines.indexed() {
+    let trimmed = line.trim()
+
+    // Skip empty lines and comments
+    if trimmed.is_empty() or trimmed.starts_with("#") {
+      continue
+    }
+
+    let expense = try parse_expense(trimmed) catch err {
+      eprint("error: line ${i + 1}: ${err.message()}")
+      process.exit(1)
+    }
+
+    expenses.append(expense)
+  }
+
+  // Calculate balances
+  var balances: Map<String, Int> = {}
+
+  for expense in expenses {
+    // Credit the payer
+    balances[expense.payer] = (balances[expense.payer] ?? 0) + expense.amount_cents
+
+    // Calculate shares and charges
+    var total_shares: Int = 0
+    for participant in expense.split {
+      total_shares += participant.shares
+    }
+
+    // Distribute amount among participants
+    var charges: Map<String, Int> = {}
+    var total_charged: Int = 0
+
+    for (idx, participant) in expense.split.indexed() {
+      let charge = (expense.amount_cents * participant.shares).div(total_shares)
+      charges[participant.name] = charge
+      total_charged += charge
+    }
+
+    // Distribute remainder to first R participants
+    let remainder = expense.amount_cents - total_charged
+    for i in 0..<remainder {
+      let participant = expense.split[i]
+      charges[participant.name] = (charges[participant.name] ?? 0) + 1
+    }
+
+    // Deduct charges from balances
+    for participant in expense.split {
+      balances[participant.name] = (balances[participant.name] ?? 0) - (charges[participant.name] ?? 0)
+    }
+  }
+
+  // Get all participant names and sort them
+  let all_names = balances.keys().sorted()
+
+  // Settle debts
+  var transfers: List<Transfer> = []
+  var working_balances = balances
+
+  while true {
+    // Find debtor with most negative balance and creditor with most positive balance
+    var debtor_name: String? = none
+    var debtor_balance: Int = 0
+    var creditor_name: String? = none
+    var creditor_balance: Int = 0
+
+    for name in all_names {
+      let balance = working_balances[name] ?? 0
+
+      if balance < 0 and (debtor_name is none or balance < debtor_balance or (balance == debtor_balance and (debtor_name is none or name < (debtor_name ?? "")))) {
+        debtor_name = name
+        debtor_balance = balance
+      }
+
+      if balance > 0 and (creditor_name is none or balance > creditor_balance or (balance == creditor_balance and (creditor_name is none or name < (creditor_name ?? "")))) {
+        creditor_name = name
+        creditor_balance = balance
+      }
+    }
+
+    // Check if we're done
+    if debtor_name is none or creditor_name is none {
+      break
+    }
+
+    let debtor = debtor_name ?? ""
+    let creditor = creditor_name ?? ""
+    let transfer_amount = if -debtor_balance < creditor_balance { -debtor_balance } else { creditor_balance }
+
+    transfers.append(Transfer(from: debtor, to: creditor, amount_cents: transfer_amount))
+
+    working_balances[debtor] = (working_balances[debtor] ?? 0) + transfer_amount
+    working_balances[creditor] = (working_balances[creditor] ?? 0) - transfer_amount
+  }
+
+  // Output results
+  print("balances:")
+  for name in all_names {
+    let balance_cents = balances[name] ?? 0
+    let sign = if balance_cents >= 0 { "+" } else { "" }
+    let dollars = balance_cents.to_float() / 100.0
+    print("  ${sign}${dollars.format(2)}")
+  }
+
+  print("transfers:")
+  for transfer in transfers {
+    let dollars = transfer.amount_cents.to_float() / 100.0
+    print("  ${transfer.from} -> ${transfer.to} ${dollars.format(2)}")
+  }
+}
+
+fn parse_expense(line: String) throws -> Expense {
+  let parts = line.words()
+
+  if parts.length < 3 {
+    throw Failure(message: "expected 3 fields")
+  }
+
+  let payer = parts[0]
+
+  // Validate payer name
+  if payer.contains(",") or payer.contains(":") or payer.contains("#") {
+    throw Failure(message: "invalid payer name")
+  }
+
+  let amount_str = parts[1]
+  let amount_decimal = try amount_str.to_decimal() catch {
+    throw Failure(message: "invalid amount")
+  }
+
+  // Validate amount
+  if amount_decimal <= 0 or amount_decimal > 1000000000 {
+    throw Failure(message: "amount out of range")
+  }
+
+  // Convert to cents
+  let amount_cents = (amount_decimal * 100).round(0).to_float().to_int()
+
+  let split_str = parts[2]
+  let split = try parse_split(split_str)
+
+  if split.is_empty() {
+    throw Failure(message: "split cannot be empty")
+  }
+
+  return Expense(payer: payer, amount_cents: amount_cents, split: split)
+}
+
+fn parse_split(split_str: String) throws -> List<Participant> {
+  let parts = split_str.split(",")
+  var participants: List<Participant> = []
+  var seen_names: Map<String, Bool> = {}
+
+  for part in parts {
+    if part.is_empty() {
+      throw Failure(message: "empty participant in split")
+    }
+
+    let subparts = part.split(":")
+
+    if subparts.length > 2 {
+      throw Failure(message: "invalid split format")
+    }
+
+    let name = subparts[0]
+
+    // Validate name
+    if name.contains(",") or name.contains(":") or name.contains("#") or name.contains(" ") or name.contains("\t") {
+      throw Failure(message: "invalid participant name")
+    }
+
+    if seen_names.contains_key(name) {
+      throw Failure(message: "duplicate name in split")
+    }
+
+    seen_names[name] = true
+
+    let shares = if subparts.length == 2 {
+      try subparts[1].to_int() catch {
+        throw Failure(message: "invalid shares")
+      }
+    } else {
+      1
+    }
+
+    if shares < 1 or shares > 1000 {
+      throw Failure(message: "shares out of range")
+    }
+
+    participants.append(Participant(name: name, shares: shares))
+  }
+
+  return participants
+}
+
+// Helper: format float with 2 decimals
+fn format_money(cents: Int) -> String {
+  let dollars = cents.to_float() / 100.0
+  let sign = if cents >= 0 { "+" } else { "" }
+  return "${sign}${dollars.format(2)}"
+}

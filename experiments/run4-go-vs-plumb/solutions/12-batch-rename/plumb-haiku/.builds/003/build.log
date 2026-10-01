@@ -1,0 +1,6 @@
+error: there are no tuples
+  --> main.plumb:16:35
+   |
+16 | fn parse_args() throws -> (Options, String) {
+   |                                   ^
+   = help: return a record with named fields
